@@ -132,8 +132,9 @@ export async function startApiServer(
     compression: { enabled: true, threshold: 1024 },
     health: { enabled: true },
     resources: {
+      // Read-only: all writes go through /api/* custom routes with business logic
       [S3DB_RUNTIME_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
-      [S3DB_ISSUE_RESOURCE]: { auth: false, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] },
+      [S3DB_ISSUE_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
       [S3DB_EVENT_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
       [S3DB_AGENT_SESSION_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
       [S3DB_AGENT_PIPELINE_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
