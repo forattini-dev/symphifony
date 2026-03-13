@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Symphony Local Dashboard</title>
+    <title>Symphony Local Orchestrator</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
-      <div>
+        <div>
           <p class="eyebrow">Symphony</p>
-          <h1>Symphony Local Runtime</h1>
-          <p id="subtitle" class="muted">Runtime TypeScript · Local memory mode</p>
+          <h1>Local Orchestra Runtime</h1>
+          <p id="subtitle" class="muted">TypeScript local mode · Memory tracker · Codex-only execution</p>
         </div>
         <div class="badges">
           <span id="health" class="badge">status: connecting</span>
@@ -28,7 +28,7 @@
 
         <section class="card">
           <div class="toolbar">
-            <h2>Local issues</h2>
+            <h2>Issues</h2>
             <div class="toolbar-right">
               <label for="state-filter">Filter:</label>
               <select id="state-filter">
@@ -43,6 +43,8 @@
 
               <label for="query">Search:</label>
               <input id="query" placeholder="e.g. LOCAL-1, title" />
+
+              <button id="rerun">Reload</button>
             </div>
           </div>
           <div id="issue-list" class="issue-list"></div>
@@ -51,6 +53,16 @@
         <section class="card">
           <h2>Runtime</h2>
           <div id="runtime-meta"></div>
+        </section>
+
+        <section class="card">
+          <div class="toolbar">
+            <h2>Live Events</h2>
+            <div class="toolbar-right">
+              <button id="clear-events">Clear</button>
+            </div>
+          </div>
+          <div id="events" class="events"></div>
         </section>
       </main>
     </div>

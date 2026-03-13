@@ -1,59 +1,61 @@
-# Symphony setup for AoZO / Black Citadel (Codex-only)
+# Symphony setup for AoZO / Black Citadel (Codex-only local fork)
 
-Este projeto agora roda Symphony com **runtime TypeScript local**, sem Linear e sem Elixir.
+This repository runs a local TypeScript runtime for Symphony orchestration without Linear and without the Elixir stack.
 
-## Estrutura
+## What this fork provides
 
-- Workflow de orquestração: [WORKFLOW.md](./WORKFLOW.md)
-- Bootstrap local: [scripts/run-symphony-local.ts](./scripts/run-symphony-local.ts)
-- Wrapper shell: [scripts/start-symphony.sh](./scripts/start-symphony.sh)
+- Memory tracker as the only tracker implementation.
+- Local issue source file in JSON (`scripts/symphony-local-issues.json`).
+- Local workspace snapshots for reproducible local execution.
+- Queue runner with worker concurrency, retries, retry backoff and stale-run recovery.
+- Local event log + dashboard with issue transitions, manual actions and health API.
+- Optional external Codex command via `SYMPHONY_AGENT_COMMAND`.
 
-## Regras do fork `symphifo`
+## Files to check
 
-- Modo padrão e único: `memory`.
-- Sem integração externa de tracker.
-- Sem runtime Elixir no bootstrap.
-- Ideal para execução local com Codex e issues em JSON local.
+- Workflow template: [WORKFLOW.md](./WORKFLOW.md)
+- Bootstrap runtime: [scripts/run-symphony-local.ts](./scripts/run-symphony-local.ts)
+- Start wrapper: [scripts/start-symphony.sh](./scripts/start-symphony.sh)
+- Dashboard: [scripts/symphony-dashboard/index.html](./scripts/symphony-dashboard/index.html)
 
-## Variáveis de ambiente
+## Environment variables
 
 ```bash
 export SYMPHONY_TRACKER_KIND=memory
 export SYMPHONY_BOOTSTRAP_ROOT=$HOME/.local/share/symphony-aozo
 export SYMPHONY_MEMORY_ISSUES_FILE=/path/to/issues.json
+export SYMPHONY_MEMORY_ISSUES_JSON='[{"id":"LOCAL-1","title":"...","description":"...","state":"Todo"}]'
+export SYMPHONY_AGENT_COMMAND='codex run --json "$SYMPHONY_ISSUE_JSON"'
+export SYMPHONY_WORKER_CONCURRENCY=2
+export SYMPHONY_MAX_ATTEMPTS=3
 ```
 
-Opcional (JSON inline para testes):
+> `SYMPHONY_AGENT_COMMAND` is optional. If not defined, the runner will execute a deterministic local simulator.
+
+## Start examples
 
 ```bash
-export SYMPHONY_MEMORY_ISSUES_JSON='[{"id":"LOCAL-1","title":"Validar fluxo","description":"...","state":"Todo"}]'
+pnpm exec tsx ./scripts/run-symphony-local.ts --once
+# or
+./scripts/start-symphony.sh --once
 ```
 
-## Start
+### With dashboard
 
 ```bash
-pnpm exec tsx ./scripts/run-symphony-local.ts
+./scripts/start-symphony.sh --port 4040 --concurrency 2 --attempts 3
 ```
 
-Ou via wrapper:
+## Runtime behavior
 
-```bash
-./scripts/start-symphony.sh
-```
+- Local bootstrap creates a source snapshot under `~/.local/share/symphony-aozo/aozo-source`.
+- Issues are loaded from the configured JSON source.
+- Workflow file is rendered to `~/.local/share/symphony-aozo/WORKFLOW.local.md`.
+- Runtime state is stored in `~/.local/share/symphony-aozo/symphony-memory-state.json`.
+- Event log is stored in `~/.local/share/symphony-aozo/symphony-local.log`.
+- Dashboard endpoint serves:
+  - `/api/state`
+  - `/api/issues`
+  - `/api/events`
+  - `/api/health`
 
-Observabilidade local:
-
-```bash
-pnpm exec tsx ./scripts/run-symphony-local.ts --port 4040
-# ou
-./scripts/start-symphony.sh --port 4040
-```
-
-## O que é feito no bootstrap
-
-- Cria snapshot local da workspace em `~/.local/share/symphony-aozo/aozo-source`.
-- Renderiza `WORKFLOW.md` para `WORKFLOW.local.md` em modo `memory`.
-- Carrega issues do arquivo definido em `SYMPHONY_MEMORY_ISSUES_FILE`.
-- Executa o ciclo local de processamento de issues com runtime TS.
-- Gera estado em `~/.local/share/symphony-aozo/symphony-memory-state.json`.
-- Opcionalmente sobe dashboard HTML/JSON em `--port`.

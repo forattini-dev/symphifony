@@ -3,26 +3,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT_TS="$SCRIPT_DIR/run-symphony-local.ts"
-RUN_SCRIPT_SH="$SCRIPT_DIR/run-symphony-local.sh"
 
 usage() {
   cat <<'USAGE'
-Uso:
-  ./scripts/start-symphony.sh [--port <n>] [--help]
+Usage:
+  ./scripts/start-symphony.sh [options]
 
-Este fork usa um executor local em TypeScript (Codex-only):
-  - Sem Linear
-  - Sem Elixir
-  - Apenas modo memory
+Local-first Symphony bootstrap (TypeScript-only, no Linear, no Elixir):
+  --port <n>              Start dashboard on HTTP port
+  --concurrency <n>       Maximum parallel local runners (default: SYMPHONY_WORKER_CONCURRENCY or 2)
+  --attempts <n>          Max attempts per issue (default: SYMPHONY_MAX_ATTEMPTS or 3)
+  --poll <ms>             Scheduler polling interval (default: SYMPHONY_POLL_INTERVAL_MS or 1200)
+  --once                   Run one batch locally and exit
+  --help                   Show this message
 
-Variáveis:
-  SYMPHONY_TRACKER_KIND           memory (padrão)
-  SYMPHONY_MEMORY_ISSUES_FILE      Arquivo JSON com issues locais
-  SYMPHONY_MEMORY_ISSUES_JSON      JSON inline com issues locais
+Environment:
+  SYMPHONY_TRACKER_KIND            memory (required)
+  SYMPHONY_MEMORY_ISSUES_FILE      JSON file with local issues
+  SYMPHONY_MEMORY_ISSUES_JSON       Inline JSON with local issues
+  SYMPHONY_AGENT_COMMAND            Optional local command for real Codex execution
 
-Exemplos:
-  ./scripts/start-symphony.sh
-  ./scripts/start-symphony.sh --port 4040
+Examples:
+  ./scripts/start-symphony.sh --once
+  ./scripts/start-symphony.sh --port 4040 --concurrency 2
 USAGE
 }
 
@@ -32,12 +35,12 @@ if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
 fi
 
 if [[ "${SYMPHONY_TRACKER_KIND:-memory}" != "memory" ]]; then
-  echo "SYMPHONY_TRACKER_KIND não pode ser diferente de memory." >&2
+  echo "SYMPHONY_TRACKER_KIND must be set to 'memory' for this fork." >&2
   exit 1
 fi
 
-if [[ ! -x "$RUN_SCRIPT_SH" ]]; then
-  echo "Run script não encontrado: $RUN_SCRIPT_SH" >&2
+if [[ ! -f "$RUN_SCRIPT_TS" ]]; then
+  echo "Runtime script missing: $RUN_SCRIPT_TS" >&2
   exit 1
 fi
 
@@ -51,4 +54,5 @@ if command -v tsx >/dev/null 2>&1; then
   exec tsx "$RUN_SCRIPT_TS" "$@"
 fi
 
-exec "$RUN_SCRIPT_SH" "$@"
+echo "tsx not found. Run pnpm install first." >&2
+exit 1
