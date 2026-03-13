@@ -37,6 +37,166 @@
   --glow-strong: 0 0 28px rgba(78, 248, 26, 0.40);
 }
 
+/* ── Theme: Midnight (deep indigo / electric blue) ────────────────────────── */
+
+[data-theme="midnight"] {
+  --void:    #020617;
+  --abyss:   #0a0e1f;
+  --crypt:   #0f1629;
+  --stone:   #151d33;
+  --cobble:  #1c2640;
+  --dungeon: #243050;
+  --ash:     #334166;
+  --iron:    #5a6b8a;
+  --silver:  #7b8db0;
+  --slate:   #a0b0cc;
+  --bone:    #c8d4e8;
+  --frost:   #eaf0ff;
+
+  --plague:  #3b82f6;
+  --blight:  #2563eb;
+  --toxin:   #1d4ed8;
+  --ooze:    #1e3a5f;
+  --mold:    #0c1a33;
+
+  --ok:      #34d399;
+  --warn:    #f59e0b;
+  --danger:  #fb7185;
+  --info:    #818cf8;
+
+  --glow-weak:   0 0 10px rgba(59, 130, 246, 0.14);
+  --glow-mid:    0 0 18px rgba(59, 130, 246, 0.24);
+  --glow-strong: 0 0 28px rgba(59, 130, 246, 0.40);
+}
+
+/* ── Theme: Ember (warm amber / fire orange) ──────────────────────────────── */
+
+[data-theme="ember"] {
+  --void:    #0a0400;
+  --abyss:   #120a04;
+  --crypt:   #1a0f06;
+  --stone:   #22160b;
+  --cobble:  #2c1e10;
+  --dungeon: #3a2818;
+  --ash:     #4d3824;
+  --iron:    #7a5a3e;
+  --silver:  #9e7a58;
+  --slate:   #bfa07a;
+  --bone:    #dcc4a0;
+  --frost:   #f5efe4;
+
+  --plague:  #f59e0b;
+  --blight:  #d97706;
+  --toxin:   #b45309;
+  --ooze:    #6b3a08;
+  --mold:    #331c04;
+
+  --ok:      #34d399;
+  --warn:    #fb923c;
+  --danger:  #f87171;
+  --info:    #60a5fa;
+
+  --glow-weak:   0 0 10px rgba(245, 158, 11, 0.14);
+  --glow-mid:    0 0 18px rgba(245, 158, 11, 0.24);
+  --glow-strong: 0 0 28px rgba(245, 158, 11, 0.40);
+}
+
+/* ── Theme: Arctic (cool cyan / frost) ────────────────────────────────────── */
+
+[data-theme="arctic"] {
+  --void:    #000608;
+  --abyss:   #040d12;
+  --crypt:   #081418;
+  --stone:   #0e1c22;
+  --cobble:  #15262e;
+  --dungeon: #1e333c;
+  --ash:     #2c4550;
+  --iron:    #4d7080;
+  --silver:  #6d9aaa;
+  --slate:   #92bcc8;
+  --bone:    #c0dde4;
+  --frost:   #eaf5f8;
+
+  --plague:  #22d3ee;
+  --blight:  #06b6d4;
+  --toxin:   #0891b2;
+  --ooze:    #155e75;
+  --mold:    #083344;
+
+  --ok:      #34d399;
+  --warn:    #fbbf24;
+  --danger:  #fb7185;
+  --info:    #38bdf8;
+
+  --glow-weak:   0 0 10px rgba(34, 211, 238, 0.14);
+  --glow-mid:    0 0 18px rgba(34, 211, 238, 0.24);
+  --glow-strong: 0 0 28px rgba(34, 211, 238, 0.40);
+}
+
+/* ── Theme: Crimson (blood red / dark) ────────────────────────────────────── */
+
+[data-theme="crimson"] {
+  --void:    #080000;
+  --abyss:   #120404;
+  --crypt:   #1a0808;
+  --stone:   #220e0e;
+  --cobble:  #2e1414;
+  --dungeon: #3c1c1c;
+  --ash:     #502828;
+  --iron:    #804848;
+  --silver:  #a06868;
+  --slate:   #c09090;
+  --bone:    #dcc0c0;
+  --frost:   #f5eaea;
+
+  --plague:  #ef4444;
+  --blight:  #dc2626;
+  --toxin:   #b91c1c;
+  --ooze:    #7f1d1d;
+  --mold:    #450a0a;
+
+  --ok:      #4ade80;
+  --warn:    #fbbf24;
+  --danger:  #fb923c;
+  --info:    #60a5fa;
+
+  --glow-weak:   0 0 10px rgba(239, 68, 68, 0.14);
+  --glow-mid:    0 0 18px rgba(239, 68, 68, 0.24);
+  --glow-strong: 0 0 28px rgba(239, 68, 68, 0.40);
+}
+
+/* ── Theme: Bone (light mode) ─────────────────────────────────────────────── */
+
+[data-theme="bone"] {
+  --void:    #f8f6f2;
+  --abyss:   #f0ece6;
+  --crypt:   #e8e4dc;
+  --stone:   #ddd8ce;
+  --cobble:  #d0cac0;
+  --dungeon: #c0b8ac;
+  --ash:     #a8a098;
+  --iron:    #807870;
+  --silver:  #686058;
+  --slate:   #504840;
+  --bone:    #383028;
+  --frost:   #1a1610;
+
+  --plague:  #16a34a;
+  --blight:  #15803d;
+  --toxin:   #166534;
+  --ooze:    #a7e8bd;
+  --mold:    #dcfce7;
+
+  --ok:      #16a34a;
+  --warn:    #d97706;
+  --danger:  #dc2626;
+  --info:    #2563eb;
+
+  --glow-weak:   0 0 10px rgba(22, 163, 74, 0.10);
+  --glow-mid:    0 0 18px rgba(22, 163, 74, 0.16);
+  --glow-strong: 0 0 28px rgba(22, 163, 74, 0.24);
+}
+
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 
 * {
@@ -44,7 +204,7 @@
 }
 
 ::selection {
-  background-color: rgba(70, 230, 20, 0.22);
+  background-color: color-mix(in srgb, var(--plague) 22%, transparent);
   color: var(--frost);
 }
 
@@ -52,6 +212,100 @@
 ::-webkit-scrollbar-track { background: var(--abyss); }
 ::-webkit-scrollbar-thumb { background: var(--ash); }
 ::-webkit-scrollbar-thumb:hover { background: var(--toxin); }
+
+/* ── Theme dropdown ───────────────────────────────────────────────────────── */
+
+.theme-dropdown {
+  position: relative;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.theme-toggle svg {
+  opacity: 0.5;
+  transition: transform 150ms;
+}
+
+.theme-dropdown.open .theme-toggle svg {
+  transform: rotate(180deg);
+}
+
+.theme-swatch {
+  width: 10px;
+  height: 10px;
+  background: var(--plague);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.theme-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--stone);
+  border: 1px solid var(--ash);
+  min-width: 160px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.theme-dropdown.open .theme-menu {
+  display: block;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  color: var(--slate);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+  user-select: none;
+}
+
+.theme-option:hover {
+  background: var(--cobble);
+  color: var(--frost);
+}
+
+.theme-option input {
+  display: none;
+}
+
+.theme-option input:checked ~ .theme-dot {
+  box-shadow: 0 0 0 2px var(--frost);
+}
+
+.theme-dot {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--ash);
+  flex-shrink: 0;
+}
+
+.theme-dot[data-color] {
+  background: attr(data-color);
+}
+
+/* Explicit colors since attr() for background is not widely supported */
+.theme-menu li:nth-child(1) .theme-dot { background: #3dff14; }
+.theme-menu li:nth-child(2) .theme-dot { background: #3b82f6; }
+.theme-menu li:nth-child(3) .theme-dot { background: #f59e0b; }
+.theme-menu li:nth-child(4) .theme-dot { background: #22d3ee; }
+.theme-menu li:nth-child(5) .theme-dot { background: #ef4444; }
+.theme-menu li:nth-child(6) .theme-dot { background: #d0cac0; }
 
 /* ── Body ─────────────────────────────────────────────────────────────────── */
 
@@ -108,7 +362,7 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-size: 0.7rem;
-  text-shadow: 0 0 12px rgba(61, 255, 20, 0.3);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--plague) 30%, transparent);
 }
 
 .muted {
@@ -263,7 +517,7 @@ h2 {
 }
 
 .kpi:hover {
-  border-color: rgba(61, 255, 20, 0.25);
+  border-color: color-mix(in srgb, var(--plague) 25%, transparent);
   box-shadow: var(--glow-weak);
 }
 
@@ -287,7 +541,7 @@ h2 {
 
 .kpi .value.accent {
   color: var(--plague);
-  text-shadow: 0 0 16px rgba(61, 255, 20, 0.2);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--plague) 20%, transparent);
 }
 
 .kpi .value.warn {
@@ -399,7 +653,7 @@ button:disabled {
 }
 
 .issue-card:hover {
-  border-color: rgba(61, 255, 20, 0.2);
+  border-color: color-mix(in srgb, var(--plague) 20%, transparent);
   box-shadow: var(--glow-weak);
 }
 
@@ -445,7 +699,7 @@ button:disabled {
 }
 
 .state-Todo         { color: var(--slate); }
-.state-In_Progress  { color: var(--plague); text-shadow: 0 0 8px rgba(61, 255, 20, 0.25); }
+.state-In_Progress  { color: var(--plague); text-shadow: 0 0 8px color-mix(in srgb, var(--plague) 25%, transparent); }
 .state-In_Review    { color: var(--info); }
 .state-Blocked      { color: var(--danger); }
 .state-Done         { color: var(--ok); }
@@ -562,7 +816,7 @@ button:disabled {
 
 .history li {
   padding: 2px 0;
-  border-bottom: 1px solid rgba(52, 64, 52, 0.4);
+  border-bottom: 1px solid color-mix(in srgb, var(--ash) 40%, transparent);
   word-break: break-word;
   overflow-wrap: break-word;
 }
@@ -864,7 +1118,7 @@ button:disabled {
   gap: 8px;
   align-items: center;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(52, 64, 52, 0.3);
+  border-bottom: 1px solid color-mix(in srgb, var(--ash) 30%, transparent);
   font-size: 0.72rem;
 }
 
@@ -1037,7 +1291,7 @@ button:disabled {
 
 @keyframes running-pulse {
   0%, 100% { border-left-color: var(--plague); box-shadow: none; }
-  50%      { border-left-color: var(--blight); box-shadow: inset 3px 0 8px -4px rgba(61, 255, 20, 0.15); }
+  50%      { border-left-color: var(--blight); box-shadow: inset 3px 0 8px -4px color-mix(in srgb, var(--plague) 15%, transparent); }
 }
 
 /* ── History collapsible ──────────────────────────────────────────────────── */

@@ -1,3 +1,57 @@
+// ── Theme switcher (runs immediately to avoid flash) ─────────────────────────
+
+const THEMES = ["citadel", "midnight", "ember", "arctic", "crimson", "bone"];
+const THEME_COLORS = { citadel: "#3dff14", midnight: "#3b82f6", ember: "#f59e0b", arctic: "#22d3ee", crimson: "#ef4444", bone: "#d0cac0" };
+const savedTheme = localStorage.getItem("symphifo-theme") || "citadel";
+if (savedTheme !== "citadel") document.documentElement.setAttribute("data-theme", savedTheme);
+
+function applyTheme(theme) {
+  if (theme === "citadel") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  localStorage.setItem("symphifo-theme", theme);
+
+  // Update radio checked state
+  document.querySelectorAll('#theme-menu input[name="theme"]').forEach((radio) => {
+    radio.checked = radio.value === theme;
+  });
+
+  // Update swatch color
+  const swatch = document.getElementById("theme-swatch");
+  if (swatch) swatch.style.background = THEME_COLORS[theme] || THEME_COLORS.citadel;
+}
+
+// Wire dropdown toggle
+const themeDropdown = document.getElementById("theme-dropdown");
+const themeToggle = document.getElementById("theme-toggle");
+
+themeToggle?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  themeDropdown.classList.toggle("open");
+});
+
+// Close dropdown when clicking outside
+document.addEventListener("click", (event) => {
+  if (themeDropdown && !themeDropdown.contains(event.target)) {
+    themeDropdown.classList.remove("open");
+  }
+});
+
+// Wire radio buttons
+document.getElementById("theme-menu")?.addEventListener("change", (event) => {
+  if (event.target.name === "theme") {
+    applyTheme(event.target.value);
+    themeDropdown.classList.remove("open");
+  }
+});
+
+// Apply saved theme on load
+applyTheme(savedTheme);
+
+// ── DOM references ───────────────────────────────────────────────────────────
+
 const subtitle = document.getElementById("subtitle");
 const healthBadge = document.getElementById("health");
 const refreshBadge = document.getElementById("lastRefresh");
