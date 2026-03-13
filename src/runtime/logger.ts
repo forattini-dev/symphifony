@@ -5,6 +5,15 @@ import { join } from "node:path";
 const level = env.SYMPHIFO_LOG_LEVEL ?? "info";
 const pretty = env.SYMPHIFO_LOG_PRETTY === "1" || (env.SYMPHIFO_LOG_PRETTY !== "0" && stdout.isTTY);
 
+// Propagate pretty preference to s3db.js internal logger
+// so its pino output matches ours (must be set before s3db loads)
+if (!env.S3DB_LOG_FORMAT && !env.S3DB_LOG_PRETTY) {
+  env.S3DB_LOG_PRETTY = pretty ? "true" : "false";
+}
+if (!env.S3DB_LOG_LEVEL) {
+  env.S3DB_LOG_LEVEL = level;
+}
+
 function createTransports(logPath?: string) {
   const targets: pino.TransportTargetOptions[] = [];
 
