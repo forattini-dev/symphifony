@@ -256,6 +256,10 @@ function renderOverview(metrics, issues = []) {
   const done = metrics.done || 0;
   const queued = metrics.queued || 0;
   const cancelled = metrics.cancelled || 0;
+  const avgCompletionMs = typeof metrics.avgCompletionMs === "number" ? metrics.avgCompletionMs : null;
+  const medianCompletionMs = typeof metrics.medianCompletionMs === "number" ? metrics.medianCompletionMs : null;
+  const fastestCompletionMs = typeof metrics.fastestCompletionMs === "number" ? metrics.fastestCompletionMs : null;
+  const slowestCompletionMs = typeof metrics.slowestCompletionMs === "number" ? metrics.slowestCompletionMs : null;
   const pctDone = total > 0 ? `${Math.round((done / total) * 100)}% complete` : "";
   const byCapability = issues.reduce((accumulator, issue) => {
     const key = issue.capabilityCategory || "default";
@@ -277,6 +281,18 @@ function renderOverview(metrics, issues = []) {
     kpiCard("Running", running, { accent: running > 0 ? "accent" : "", desc: running > 0 ? "in progress" : "", filterKey: "state", filterValue: "In Progress" }),
     kpiCard("Blocked", blocked, { accent: blocked > 0 ? "danger" : "", desc: blocked > 0 ? "needs attention" : "", filterKey: "state", filterValue: "Blocked" }),
     kpiCard("Done", done, { desc: pctDone, filterKey: "state", filterValue: "Done" }),
+    kpiCard("Avg Completion", avgCompletionMs !== null ? formatDuration(avgCompletionMs) : "--", {
+      desc: medianCompletionMs !== null ? `median ${formatDuration(medianCompletionMs)}` : "no completed issues",
+      filterKey: "state",
+      filterValue: "Done",
+    }),
+    kpiCard("Best/Worst", `${formatDuration(fastestCompletionMs ?? 0)} / ${formatDuration(slowestCompletionMs ?? 0)}`, {
+      desc: (fastestCompletionMs === null || slowestCompletionMs === null)
+        ? "no completed issues"
+        : "min / max",
+      filterKey: "state",
+      filterValue: "Done",
+    }),
     kpiCard("Cancelled", cancelled, { accent: cancelled > 0 ? "warn" : "", filterKey: "state", filterValue: "Cancelled" }),
     kpiCard("Critical", criticalQueue, { accent: criticalQueue > 0 ? "danger" : "", desc: "security + bugfix", filterKey: "capability", filterValue: "critical" }),
     ...topCapabilities.map(([category, count]) => kpiCard(category, count, { desc: "capability load", filterKey: "capability", filterValue: category })),
