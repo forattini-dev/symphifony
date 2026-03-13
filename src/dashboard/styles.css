@@ -182,7 +182,7 @@ h2 {
   border: 1px solid var(--ash);
   padding: 16px 14px;
   text-align: center;
-  transition: border-color 200ms, box-shadow 200ms;
+  transition: border-color 200ms, box-shadow 200ms, background 200ms;
 }
 
 .kpi:hover {
@@ -225,6 +225,23 @@ h2 {
   margin: 4px 0 0;
   font-size: 0.68rem;
   color: var(--silver);
+}
+
+/* ── Clickable KPIs ──────────────────────────────────────────────────────── */
+
+.kpi-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.kpi-clickable:active {
+  background: var(--cobble);
+}
+
+.kpi-active {
+  border-color: var(--toxin);
+  box-shadow: var(--glow-mid);
+  background: var(--cobble);
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────────────── */
@@ -283,6 +300,11 @@ button:hover {
 
 button:active {
   background: var(--stone);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── Issue list ───────────────────────────────────────────────────────────── */
@@ -383,6 +405,7 @@ button:active {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
 }
 
 .action-button {
@@ -406,6 +429,45 @@ button:active {
 
 .action-button:active {
   background: var(--dungeon);
+}
+
+.action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── More button (secondary actions toggle) ──────────────────────────────── */
+
+.btn-more {
+  background: var(--cobble);
+  color: var(--iron);
+  border: 1px solid var(--ash);
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  min-width: 28px;
+  text-align: center;
+}
+
+.btn-more:hover {
+  border-color: var(--toxin);
+  color: var(--frost);
+}
+
+/* ── Secondary actions (hidden by default) ───────────────────────────────── */
+
+.actions-secondary {
+  display: none;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.actions-secondary.actions-secondary-visible {
+  display: flex;
 }
 
 /* ── History list ─────────────────────────────────────────────────────────── */
@@ -810,6 +872,17 @@ button:active {
   gap: 4px;
 }
 
+.concurrency-input {
+  width: 48px;
+  padding: 2px 4px;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.concurrency-btn {
+  font-size: 0.7em;
+}
+
 /* ── Progress bar ─────────────────────────────────────────────────────────── */
 
 .progress-bar {
@@ -921,16 +994,88 @@ button:active {
   content: "▾ ";
 }
 
-/* ── Responsive ───────────────────────────────────────────────────────────── */
+/* ── Two-panel layout (desktop >= 900px) ─────────────────────────────────── */
 
-@media (max-width: 640px) {
+.issues-master-detail {
+  display: block;
+}
+
+.detail-panel {
+  display: none;
+}
+
+.detail-placeholder {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--iron);
+  font-size: 0.78rem;
+}
+
+.detail-panel .detail-issue-header {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--frost);
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ash);
+}
+
+.detail-panel .detail-issue-header .mono {
+  color: var(--plague);
+  font-size: 0.72rem;
+}
+
+.detail-panel .session-panel {
+  margin-top: 0;
+  max-height: none;
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+@media (min-width: 900px) {
   .shell {
-    padding: 14px;
+    max-width: 1400px;
   }
 
+  .issues-master-detail {
+    display: grid;
+    grid-template-columns: 60% 40%;
+    gap: 0;
+  }
+
+  .master-panel {
+    border-right: 1px solid var(--ash);
+    padding-right: 16px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .detail-panel {
+    display: block;
+    padding-left: 16px;
+    position: sticky;
+    top: 0;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  /* Hide inline session panels on desktop */
+  .issue-card .session-panel {
+    display: none;
+  }
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 899px) {
   .topbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .badges {
+    flex-wrap: wrap;
   }
 
   .toolbar {
@@ -940,6 +1085,72 @@ button:active {
 
   .toolbar-right {
     width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar-right label {
+    margin-top: 4px;
+  }
+
+  .toolbar-right select,
+  .toolbar-right input {
+    width: 100%;
+  }
+
+  .toolbar-right button {
+    width: 100%;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .issue-card {
+    padding: 10px;
+  }
+
+  .issue-title {
+    font-size: 0.84rem;
+  }
+
+  .issue-card > .muted {
+    font-size: 0.72rem;
+  }
+
+  .meta {
+    font-size: 0.7rem;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .actions .action-button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .actions .btn-more {
+    width: 100%;
+    text-align: center;
+  }
+
+  .actions-secondary {
+    width: 100%;
+  }
+
+  .actions-secondary .action-button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .session-panel {
+    max-height: 50vh;
+  }
+
+  .events {
+    max-height: 200px;
   }
 
   h1 {
@@ -970,5 +1181,9 @@ button:active {
 
   .kpi .value {
     font-size: 1.5rem;
+  }
+
+  .shell {
+    padding: 14px;
   }
 }
