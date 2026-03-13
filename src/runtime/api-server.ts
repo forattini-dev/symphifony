@@ -132,9 +132,8 @@ export async function startApiServer(
     compression: { enabled: true, threshold: 1024 },
     health: { enabled: true },
     resources: {
-      // Read-only: all writes go through /api/* custom routes with business logic
       [S3DB_RUNTIME_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
-      [S3DB_ISSUE_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
+      [S3DB_ISSUE_RESOURCE]: { auth: false, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] },
       [S3DB_EVENT_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
       [S3DB_AGENT_SESSION_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
       [S3DB_AGENT_PIPELINE_RESOURCE]: { auth: false, methods: ["GET", "HEAD", "OPTIONS"] },
@@ -156,58 +155,6 @@ export async function startApiServer(
       },
       "GET /api/parallelism": async () => {
         return analyzeParallelizability(state.issues);
-      },
-      "GET /api/issues": async (c: any) => {
-        const issueState = c.req.query("state");
-        const capabilityCategory = c.req.query("capabilityCategory") ?? c.req.query("category");
-        const issues = await listIssues({
-          state: typeof issueState === "string" && issueState ? issueState : undefined,
-          capabilityCategory: typeof capabilityCategory === "string" && capabilityCategory ? capabilityCategory : undefined,
-        });
-        return { issues };
-      },
-      "POST /api/issues": async (c: any) => {
-        const payload = await c.req.json() as JsonRecord;
-        const issue = createIssueFromPayload(payload, state.issues, workflowDefinition);
-        const duplicate = state.issues.find((candidate) => candidate.id === issue.id || candidate.identifier === issue.identifier);
-
-        if (duplicate) {
-          return c.json({ ok: false, error: "Issue id or identifier already exists", issue: duplicate }, 409);
-        }
-
-        state.issues.push(issue);
-        state.updatedAt = now();
-        addEvent(state, issue.id, "manual", `Issue ${issue.identifier} created via API.`);
-        await persistState(state);
-        return c.json({ ok: true, issue }, 201);
-      },
-      "PUT /api/issues/:id": async (c: any) => {
-        const issue = findIssue(c.req.param("id"));
-        if (!issue) return c.json({ ok: false, error: "Issue not found" }, 404);
-
-        const payload = await c.req.json() as JsonRecord;
-        if (typeof payload.title === "string") issue.title = payload.title;
-        if (typeof payload.description === "string") issue.description = payload.description;
-        if (typeof payload.priority === "number") issue.priority = clamp(payload.priority, 1, 10);
-        if (Array.isArray(payload.labels)) issue.labels = payload.labels.filter((l: unknown): l is string => typeof l === "string");
-        if (Array.isArray(payload.paths)) issue.paths = payload.paths.filter((p: unknown): p is string => typeof p === "string");
-        if (Array.isArray(payload.blockedBy)) issue.blockedBy = payload.blockedBy.filter((b: unknown): b is string => typeof b === "string");
-
-        issue.updatedAt = now();
-        addEvent(state, issue.id, "manual", `Issue ${issue.identifier} updated via API.`);
-        await persistState(state);
-        return { ok: true, issue };
-      },
-      "DELETE /api/issues/:id": async (c: any) => {
-        const issueId = c.req.param("id");
-        const index = state.issues.findIndex((i) => i.id === issueId || i.identifier === issueId);
-        if (index === -1) return c.json({ ok: false, error: "Issue not found" }, 404);
-
-        const removed = state.issues.splice(index, 1)[0];
-        state.updatedAt = now();
-        addEvent(state, removed.id, "manual", `Issue ${removed.identifier} deleted via API.`);
-        await persistState(state);
-        return { ok: true, deleted: removed.identifier };
       },
       "POST /api/config/concurrency": async (c: any) => {
         const payload = await c.req.json() as JsonRecord;

@@ -89,11 +89,11 @@ const STORAGE_BUCKET = env.SYMPHIFO_STORAGE_BUCKET ?? "symphifo";
 const STORAGE_KEY_PREFIX = env.SYMPHIFO_STORAGE_KEY_PREFIX ?? "state";
 const STORAGE_LIBRARY_PATH = "";
 const DEBUG_BOOT = env.SYMPHIFO_DEBUG_BOOT === "1";
-const RUNTIME_RESOURCE = "symphifo_runtime_state";
-const ISSUE_RESOURCE = "symphifo_issues";
-const EVENT_RESOURCE = "symphifo_events";
-const SESSION_RESOURCE = "symphifo_agent_sessions";
-const PIPELINE_RESOURCE = "symphifo_agent_pipelines";
+const RUNTIME_RESOURCE = "runtime_state";
+const ISSUE_RESOURCE = "issues";
+const EVENT_RESOURCE = "events";
+const SESSION_RESOURCE = "agent_sessions";
+const PIPELINE_RESOURCE = "agent_pipelines";
 const RUNTIME_RECORD_ID = "current";
 
 let incomingBuffer = Buffer.alloc(0);

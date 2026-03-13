@@ -68,11 +68,11 @@ export const S3DB_DATABASE_PATH = `${STATE_ROOT}/s3db`;
 export const S3DB_BUCKET = env.SYMPHIFO_STORAGE_BUCKET ?? "symphifo";
 export const S3DB_KEY_PREFIX = env.SYMPHIFO_STORAGE_KEY_PREFIX ?? "state";
 
-export const S3DB_RUNTIME_RESOURCE = "symphifo_runtime_state";
-export const S3DB_ISSUE_RESOURCE = "symphifo_issues";
-export const S3DB_EVENT_RESOURCE = "symphifo_events";
-export const S3DB_AGENT_SESSION_RESOURCE = "symphifo_agent_sessions";
-export const S3DB_AGENT_PIPELINE_RESOURCE = "symphifo_agent_pipelines";
+export const S3DB_RUNTIME_RESOURCE = "runtime_state";
+export const S3DB_ISSUE_RESOURCE = "issues";
+export const S3DB_EVENT_RESOURCE = "events";
+export const S3DB_AGENT_SESSION_RESOURCE = "agent_sessions";
+export const S3DB_AGENT_PIPELINE_RESOURCE = "agent_pipelines";
 export const S3DB_RUNTIME_RECORD_ID = "current";
 export const S3DB_RUNTIME_SCHEMA_VERSION = 1;
 

@@ -244,7 +244,7 @@ function renderOverview(metrics, issues = []) {
       <div class="kpi" style="grid-column: 1 / -1; padding: 24px;">
         <p class="label">No Issues</p>
         <p class="value" style="font-size: 1.2rem;">Create your first issue to get started</p>
-        <p class="desc">Use the "+ New" button above or POST to /api/issues</p>
+        <p class="desc">Use the "+ New" button above or POST to /issues</p>
       </div>
     `;
     const existing = document.getElementById("progress-bar");
@@ -762,7 +762,7 @@ async function submitSplit(issueId, target) {
     try {
       const created = [];
       for (const title of titles) {
-        const result = await post("/api/issues", {
+        const result = await post("/issues", {
           title,
           description: `Sub-task of ${issue.identifier}: ${issue.title}`,
           priority: issue.priority,
@@ -957,7 +957,7 @@ async function submitCreateForm(target) {
 
   await withLoading(target, async () => {
     try {
-      const result = await post("/api/issues", payload);
+      const result = await post("/issues", payload);
       showToast(`Created ${result.issue?.identifier || "issue"}`, "success");
       createForm.hidden = true;
       document.getElementById("cf-title").value = "";
@@ -1033,7 +1033,7 @@ async function submitEdit(issueId, target) {
 
   await withLoading(target, async () => {
     try {
-      const response = await fetch(`/api/issues/${encodeURIComponent(issueId)}`, {
+      const response = await fetch(`/issues/${encodeURIComponent(issueId)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1063,7 +1063,7 @@ function requestDelete(issueId) {
 async function confirmDelete(issueId, target) {
   await withLoading(target, async () => {
     try {
-      const response = await fetch(`/api/issues/${encodeURIComponent(issueId)}`, { method: "DELETE" });
+      const response = await fetch(`/issues/${encodeURIComponent(issueId)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`Failed: ${response.status}`);
       const issue = (appState.issues || []).find((i) => i.id === issueId);
       pendingDeleteId = null;

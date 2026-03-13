@@ -299,11 +299,11 @@ The live events panel also filters by `kind` and `issueId`, backed by the partit
 
 Native `ApiPlugin` resources:
 
-- `symphifo_runtime_state`
-- `symphifo_issues`
-- `symphifo_events`
-- `symphifo_agent_sessions`
-- `symphifo_agent_pipelines`
+- `runtime_state`
+- `issues`
+- `events`
+- `agent_sessions`
+- `agent_pipelines`
 
 These resources also define `s3db` partitions for the main operational access patterns:
 
