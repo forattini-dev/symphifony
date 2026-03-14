@@ -1485,10 +1485,133 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// ── WebSocket (realtime) with polling fallback ───────────────────────────────
+
+let ws = null;
+let wsConnected = false;
+let wsReconnectTimer = null;
+let pollingTimer = null;
+
+function applyWsStateUpdate(msg) {
+  if (!msg) return;
+
+  // Update app state from WS push
+  if (msg.issues) appState.issues = msg.issues;
+  if (msg.metrics) appState.metrics = msg.metrics;
+  if (msg.capabilities) appState.capabilities = msg.capabilities;
+  if (msg.updatedAt) appState.updatedAt = msg.updatedAt;
+
+  // Render
+  const issues = appState.issues || [];
+  renderOverview(appState.metrics || {}, issues);
+  renderIssues(issues);
+
+  // Events from push
+  if (msg.events && Array.isArray(msg.events)) {
+    renderEvents(msg.events);
+  }
+
+  // Update event issue filter
+  if (eventIssueFilter && issues.length) {
+    const previousValue = eventIssueFilter.value || "all";
+    const options = [
+      { value: "all", label: "All" },
+      ...issues
+        .map((issue) => ({ value: issue.id, label: issue.identifier || issue.id }))
+        .filter((entry) => entry.value)
+        .sort((a, b) => String(a.label).localeCompare(String(b.label))),
+    ];
+    eventIssueFilter.innerHTML = options
+      .map((entry) => `<option value="${escapeHtml(entry.value)}">${escapeHtml(entry.label)}</option>`)
+      .join("");
+    eventIssueFilter.value = options.some((entry) => entry.value === previousValue) ? previousValue : "all";
+  }
+
+  refreshBadge.textContent = `ws: ${new Date().toLocaleTimeString()}`;
+}
+
+function connectWebSocket() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${protocol}//${location.host}/ws`;
+
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    startPollingFallback();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsConnected = true;
+    stopPollingFallback();
+    healthBadge.textContent = "status: connected";
+    healthBadge.className = "badge badge-health-ok";
+    if (lastHealthStatus === "offline") {
+      showToast("Connected via WebSocket", "success", 2000);
+    }
+    lastHealthStatus = "ok";
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === "connected") {
+        // Initial state push on connect
+        applyWsStateUpdate(msg);
+        // Still load full state once for runtime meta etc.
+        loadState().then(() => renderRuntimeMeta(appState));
+      }
+
+      if (msg.type === "state:update") {
+        applyWsStateUpdate(msg);
+      }
+
+      if (msg.type === "pong") {
+        // heartbeat acknowledged
+      }
+    } catch {}
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    ws = null;
+    healthBadge.textContent = "status: reconnecting";
+    healthBadge.className = "badge badge-health-warn";
+
+    // Reconnect with backoff
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = setTimeout(() => {
+      connectWebSocket();
+    }, 3000);
+
+    // Start polling as fallback while disconnected
+    startPollingFallback();
+  };
+
+  ws.onerror = () => {
+    // onclose will fire after onerror
+  };
+}
+
+function startPollingFallback() {
+  if (pollingTimer) return;
+  pollingTimer = setInterval(() => {
+    refresh();
+    loadHealth();
+  }, 3000);
+}
+
+function stopPollingFallback() {
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 
-loadEvents();
 wireActions();
 loadHealth();
 refresh();
-setInterval(() => { refresh(); loadHealth(); }, 3000);
+connectWebSocket();

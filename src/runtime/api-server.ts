@@ -25,6 +25,19 @@ import {
 import { detectAvailableProviders } from "./providers.ts";
 import { analyzeParallelizability } from "./scheduler.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
+import { computeMetrics } from "./issues.ts";
+
+type WsClient = { send: (data: string) => void; readyState: number };
+let wsClients = new Set<WsClient>();
+
+export function broadcastToWebSocketClients(message: Record<string, unknown>): void {
+  const data = JSON.stringify(message);
+  for (const client of wsClients) {
+    if (client.readyState === 1) {
+      try { client.send(data); } catch {}
+    }
+  }
+}
 
 export async function startApiServer(
   state: RuntimeState,
@@ -93,6 +106,38 @@ export async function startApiServer(
     port,
     host: "0.0.0.0",
     versionPrefix: false,
+    listeners: [{
+      bind: { host: "0.0.0.0", port },
+      protocols: {
+        http: true,
+        websocket: {
+          enabled: true,
+          path: "/ws",
+          maxPayloadBytes: 512_000,
+          onConnection: (socket: WsClient) => {
+            wsClients.add(socket);
+            socket.send(JSON.stringify({
+              type: "connected",
+              timestamp: now(),
+              metrics: computeMetrics(state.issues),
+              capabilities: computeCapabilityCounts(state.issues),
+            }));
+          },
+          onMessage: (socket: WsClient, message: string | Buffer) => {
+            try {
+              const msg = JSON.parse(typeof message === "string" ? message : message.toString("utf8"));
+              if (msg.type === "ping") {
+                socket.send(JSON.stringify({ type: "pong", timestamp: now() }));
+              }
+            } catch {}
+          },
+          onClose: (socket: WsClient) => {
+            wsClients.delete(socket);
+          },
+          onError: () => {},
+        },
+      },
+    }],
     rootRoute: (c: any) => c.html(readTextOrNull(FRONTEND_INDEX) || fallbackHtml),
     static: [{
       driver: "filesystem",
@@ -102,7 +147,7 @@ export async function startApiServer(
     }],
     docs: { enabled: true, title: "Symphifo API", version: "1.0.0", description: "Local orchestration API for Symphifo" },
     cors: { enabled: true, origin: "*" },
-    logging: { enabled: true, excludePaths: ["/health", "/status", "/assets"] },
+    logging: { enabled: true, excludePaths: ["/health", "/status", "/assets", "/ws"] },
     compression: { enabled: true, threshold: 1024 },
     health: { enabled: true },
     resources: {
@@ -157,6 +202,7 @@ export async function startApiServer(
   const plugin = await stateDb.usePlugin(apiPlugin, "api") as { stop?: () => Promise<void> };
   setActiveApiPlugin(plugin);
   logger.info(`Local dashboard available at http://localhost:${port}`);
+  logger.info(`WebSocket available at ws://localhost:${port}/ws`);
   logger.info(`State API: http://localhost:${port}/state`);
   logger.info(`OpenAPI docs available at http://localhost:${port}/docs`);
 }

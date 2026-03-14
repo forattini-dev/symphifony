@@ -17,8 +17,9 @@ import {
 } from "./constants.ts";
 import { now, debugBoot, fail } from "./helpers.ts";
 import { logger } from "./logger.ts";
-import { computeMetrics } from "./issues.ts";
+import { computeMetrics, computeCapabilityCounts } from "./issues.ts";
 import { clearApiRuntimeContext } from "./api-runtime-context.ts";
+import { broadcastToWebSocketClients } from "./api-server.ts";
 import { NATIVE_RESOURCE_CONFIGS, NATIVE_RESOURCE_NAMES } from "./resources/index.ts";
 
 let loadedS3dbModule: S3dbModule | null = null;
@@ -163,6 +164,16 @@ export async function persistState(state: RuntimeState): Promise<void> {
       await eventStateResource.replace(event.id, event satisfies EventRecord);
     }
   }
+
+  // Push state to connected WebSocket clients
+  broadcastToWebSocketClients({
+    type: "state:update",
+    metrics: state.metrics,
+    capabilities: computeCapabilityCounts(state.issues),
+    issues: state.issues,
+    events: state.events.slice(0, 50),
+    updatedAt: state.updatedAt,
+  });
 }
 
 export async function closeStateStore(): Promise<void> {
