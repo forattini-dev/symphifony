@@ -193,7 +193,7 @@ function renderShortcutHelp() {
       <li><kbd>n</kbd> New issue</li>
       <li><kbd>r</kbd> Retry selected</li>
       <li><kbd>Esc</kbd> Close panels/forms</li>
-      <li><kbd>1</kbd>-<kbd>4</kbd> Switch tabs</li>
+      <li><kbd>1</kbd>-<kbd>5</kbd> Switch tabs</li>
     </ul>
   </div>`;
 
@@ -523,7 +523,7 @@ function updateTabBadges() {
       }
       lastEventCount = eventCount;
     }
-    // runtime: no counter
+    // insights, runtime: no counter
   });
 }
 
@@ -1704,6 +1704,219 @@ function renderEvents(events = []) {
   updateTabBadges();
 }
 
+// ── Insights ─────────────────────────────────────────────────────────────────
+
+const capabilityColorMap = {
+  security: "danger",
+  bugfix: "warn",
+  backend: "primary",
+  "frontend-ui": "secondary",
+  devops: "success",
+  architecture: "ghost",
+  documentation: "ghost",
+};
+
+function renderCapabilityChart(issues) {
+  const container = document.getElementById("capability-chart");
+  if (!container) return;
+
+  if (!issues.length) {
+    container.innerHTML = '<div class="insight-empty">No data yet</div>';
+    return;
+  }
+
+  const counts = {};
+  for (const issue of issues) {
+    const cat = issue.capabilityCategory || "default";
+    counts[cat] = (counts[cat] || 0) + 1;
+  }
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const max = sorted[0]?.[1] || 1;
+
+  container.innerHTML = sorted.map(([cat, count]) => {
+    const colorClass = capabilityColorMap[cat] || "ghost";
+    const pct = Math.max(4, Math.round((count / max) * 100));
+    return `<div class="bar-row">
+      <span class="bar-label">${escapeHtml(cat)}</span>
+      <div class="bar-track">
+        <div class="bar-fill bar-fill-${colorClass}" style="width:${pct}%">${count}</div>
+      </div>
+      <span class="bar-count">${count}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderStateDonut(issues) {
+  const donut = document.getElementById("state-donut");
+  const legend = document.getElementById("state-legend");
+  if (!donut || !legend) return;
+
+  if (!issues.length) {
+    donut.style.background = "var(--cobble)";
+    legend.innerHTML = '<div class="insight-empty">No data yet</div>';
+    return;
+  }
+
+  const stateColors = {
+    "Todo": "var(--slate)",
+    "In Progress": "var(--plague)",
+    "In Review": "var(--info)",
+    "Blocked": "var(--danger)",
+    "Done": "var(--ok)",
+    "Cancelled": "var(--warn)",
+  };
+
+  const counts = {};
+  for (const issue of issues) {
+    const st = issue.state || "Todo";
+    counts[st] = (counts[st] || 0) + 1;
+  }
+
+  const total = issues.length;
+  const segments = [];
+  let cumulative = 0;
+
+  for (const [state, color] of Object.entries(stateColors)) {
+    const count = counts[state] || 0;
+    if (count === 0) continue;
+    const pct = (count / total) * 100;
+    segments.push(`${color} ${cumulative}% ${cumulative + pct}%`);
+    cumulative += pct;
+  }
+
+  donut.style.background = segments.length
+    ? `conic-gradient(${segments.join(", ")})`
+    : "var(--cobble)";
+
+  legend.innerHTML = Object.entries(stateColors)
+    .filter(([state]) => (counts[state] || 0) > 0)
+    .map(([state, color]) => {
+      const count = counts[state] || 0;
+      const pct = Math.round((count / total) * 100);
+      return `<div class="legend-item">
+        <span class="legend-dot" style="background:${color}"></span>
+        <span>${escapeHtml(state)} ${count} (${pct}%)</span>
+      </div>`;
+    }).join("");
+}
+
+function renderCompletionTimeline(issues) {
+  const container = document.getElementById("completion-timeline");
+  if (!container) return;
+
+  const now = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    days.push(d);
+  }
+
+  const dayCounts = days.map(() => 0);
+  for (const issue of issues) {
+    if (issue.state !== "Done" || !issue.completedAt) continue;
+    const completed = new Date(issue.completedAt);
+    if (Number.isNaN(completed.getTime())) continue;
+    for (let i = 0; i < days.length; i++) {
+      const dayStart = days[i];
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      if (completed >= dayStart && completed < dayEnd) {
+        dayCounts[i]++;
+        break;
+      }
+    }
+  }
+
+  const maxCount = Math.max(1, ...dayCounts);
+  const hasAny = dayCounts.some((c) => c > 0);
+
+  if (!hasAny) {
+    container.innerHTML = '<div class="insight-empty">No completions in the last 7 days</div>';
+    return;
+  }
+
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  container.innerHTML = days.map((d, i) => {
+    const count = dayCounts[i];
+    const heightPct = Math.max(3, Math.round((count / maxCount) * 100));
+    const label = dayNames[d.getDay()];
+    return `<div class="timeline-bar-container">
+      ${count > 0 ? `<span class="timeline-count">${count}</span>` : ""}
+      <div class="timeline-bar" style="height:${heightPct}%"></div>
+      <span class="timeline-label">${label}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderCompletionTable(issues) {
+  const tbody = document.getElementById("completion-tbody");
+  if (!tbody) return;
+
+  const doneIssues = issues.filter((i) => i.state === "Done" && i.durationMs > 0);
+
+  if (!doneIssues.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="insight-empty">No completed issues with duration data</td></tr>';
+    return;
+  }
+
+  const byCap = {};
+  for (const issue of doneIssues) {
+    const cat = issue.capabilityCategory || "default";
+    if (!byCap[cat]) byCap[cat] = [];
+    byCap[cat].push(issue.durationMs);
+  }
+
+  const rows = Object.entries(byCap)
+    .map(([cat, durations]) => {
+      const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+      return { cat, avg, count: durations.length };
+    })
+    .sort((a, b) => a.avg - b.avg);
+
+  tbody.innerHTML = rows.map((r) =>
+    `<tr><td>${escapeHtml(r.cat)}</td><td>${formatDuration(r.avg)}</td><td>${r.count}</td></tr>`
+  ).join("");
+}
+
+function renderInsights(issues, metrics) {
+  const panel = document.querySelector('[data-panel="insights"]');
+  if (!panel) return;
+
+  panel.innerHTML = `<div class="insights-grid">
+    <div class="insight-section">
+      <h3 class="insight-title">Issues by Capability</h3>
+      <div class="bar-chart" id="capability-chart"></div>
+    </div>
+    <div class="insight-section">
+      <h3 class="insight-title">State Distribution</h3>
+      <div class="donut-chart-container">
+        <div class="donut-chart" id="state-donut"></div>
+        <div class="donut-legend" id="state-legend"></div>
+      </div>
+    </div>
+    <div class="insight-section">
+      <h3 class="insight-title">Completions (last 7 days)</h3>
+      <div class="timeline-chart" id="completion-timeline"></div>
+    </div>
+    <div class="insight-section">
+      <h3 class="insight-title">Avg Completion Time</h3>
+      <table class="insight-table" id="completion-table">
+        <thead><tr><th>Capability</th><th>Avg</th><th>Issues</th></tr></thead>
+        <tbody id="completion-tbody"></tbody>
+      </table>
+    </div>
+  </div>`;
+
+  renderCapabilityChart(issues);
+  renderStateDonut(issues);
+  renderCompletionTimeline(issues);
+  renderCompletionTable(issues);
+}
+
 // ── State Management ─────────────────────────────────────────────────────────
 
 // If WS connected, skip loadState — the push will bring the update.
@@ -2086,9 +2299,10 @@ async function loadState() {
   renderOverview(payload.metrics || {}, issues);
   if (viewMode === "board") {
     renderKanban(issues);
-  } else {
+  } else if (viewMode === "list") {
     renderIssues(issues);
   }
+  renderInsights(issues, payload.metrics || {});
   renderRuntimeMeta(payload);
 
   const sourceRepo = (payload.sourceRepoUrl || "local").toString().split("/").slice(-1)[0] || "local";
@@ -2243,7 +2457,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "1") { switchTab("board"); return; }
   if (event.key === "2") { switchTab("list"); return; }
   if (event.key === "3") { switchTab("events"); return; }
-  if (event.key === "4") { switchTab("runtime"); return; }
+  if (event.key === "4") { switchTab("insights"); return; }
+  if (event.key === "5") { switchTab("runtime"); return; }
 
   // r to retry selected
   if (event.key === "r" && selectedDetailId) {
@@ -2369,9 +2584,10 @@ function applyWsStateUpdate(msg) {
   renderOverview(appState.metrics || {}, issues);
   if (viewMode === "board") {
     renderKanban(issues);
-  } else {
+  } else if (viewMode === "list") {
     renderIssues(issues);
   }
+  renderInsights(issues, appState.metrics || {});
 
   // Events from push
   if (msg.events && Array.isArray(msg.events)) {

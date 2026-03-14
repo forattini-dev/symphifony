@@ -1954,6 +1954,197 @@ h2 {
   to { opacity: 1; }
 }
 
+/* ── Insights tab ──────────────────────────────────────────────────────────── */
+
+.insights-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.insight-section {
+  background: var(--stone);
+  border: 1px solid var(--ash);
+  padding: 14px;
+}
+
+.insight-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--frost);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.insight-empty {
+  font-size: 0.72rem;
+  color: var(--iron);
+  font-style: italic;
+}
+
+/* ── Bar chart ─────────────────────────────────────────────────────────────── */
+
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar-label {
+  font-size: 0.72rem;
+  color: var(--slate);
+  min-width: 100px;
+  text-align: right;
+}
+
+.bar-track {
+  flex: 1;
+  height: 20px;
+  background: var(--cobble);
+  position: relative;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  transition: width 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  font-size: 0.65rem;
+  color: var(--frost);
+  font-weight: 600;
+}
+
+.bar-fill-primary { background: var(--plague); }
+.bar-fill-secondary { background: var(--info); }
+.bar-fill-warn { background: var(--warn); }
+.bar-fill-danger { background: var(--danger); }
+.bar-fill-success { background: var(--ok); }
+.bar-fill-ghost { background: var(--ash); }
+
+.bar-count {
+  font-size: 0.65rem;
+  color: var(--silver);
+  min-width: 24px;
+  text-align: right;
+}
+
+/* ── Donut chart ───────────────────────────────────────────────────────────── */
+
+.donut-chart-container {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.donut-chart {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.donut-chart::after {
+  content: "";
+  position: absolute;
+  inset: 25%;
+  border-radius: 50%;
+  background: var(--crypt);
+}
+
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--silver);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Timeline chart ────────────────────────────────────────────────────────── */
+
+.timeline-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 80px;
+  padding-top: 8px;
+}
+
+.timeline-bar-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.timeline-bar {
+  width: 100%;
+  background: var(--ok);
+  min-height: 2px;
+  transition: height 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.timeline-label {
+  font-size: 0.58rem;
+  color: var(--iron);
+  text-align: center;
+}
+
+.timeline-count {
+  font-size: 0.58rem;
+  color: var(--silver);
+  text-align: center;
+}
+
+/* ── Insight table ─────────────────────────────────────────────────────────── */
+
+.insight-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.insight-table th {
+  text-align: left;
+  padding: 4px 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.65rem;
+  color: var(--iron);
+  border-bottom: 1px solid var(--ash);
+}
+
+.insight-table td {
+  padding: 4px 8px;
+  color: var(--bone);
+  border-bottom: 1px solid color-mix(in srgb, var(--ash) 30%, transparent);
+}
+
 @media (min-width: 900px) {
   .shell {
     max-width: 100%;
@@ -1990,6 +2181,10 @@ h2 {
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 
 @media (max-width: 899px) {
+
+  .insights-grid {
+    grid-template-columns: 1fr;
+  }
 
   /* ── Tabs on mobile (DaisyUI tabs) ─────────────────────────────────── */
 
