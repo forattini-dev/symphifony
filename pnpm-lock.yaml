@@ -24,8 +24,8 @@ importers:
         specifier: ^1.0.7
         version: 1.0.7(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6)
       s3db.js:
-        specifier: 21.2.3
-        version: 21.2.3(express@5.2.1)(jose@6.2.1)(node-cron@4.2.1)(raffel@1.0.7(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
+        specifier: 21.2.5
+        version: 21.2.5(express@5.2.1)(jose@6.2.1)(node-cron@4.2.1)(raffel@1.0.7(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -1282,8 +1282,8 @@ packages:
     resolution: {integrity: sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==}
     engines: {node: '>= 18'}
 
-  s3db.js@21.2.3:
-    resolution: {integrity: sha512-zL9ziN6Pi7cDjSR5pNGZ5dYtGLneK+5vSlXmwu793l7mj2OZLvnqRyndt/ehaF5nsevDtzC0YS8gEH6DbGFtIg==}
+  s3db.js@21.2.5:
+    resolution: {integrity: sha512-YG10Xn8+RL8dnBtFPscELSwchbCWsIQB8cZz33+rPMwvdAa1nwGazlj4rWs/mMPbr7+WhxOwGOFuvrMWDuiuWQ==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -3362,7 +3362,7 @@ snapshots:
       - supports-color
     optional: true
 
-  s3db.js@21.2.3(express@5.2.1)(jose@6.2.1)(node-cron@4.2.1)(raffel@1.0.7(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6))(ws@8.19.0)(zod@4.3.6):
+  s3db.js@21.2.5(express@5.2.1)(jose@6.2.1)(node-cron@4.2.1)(raffel@1.0.7(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6))(ws@8.19.0)(zod@4.3.6):
     dependencies:
       '@aws-sdk/client-s3': 3.1008.0
       '@aws-sdk/credential-providers': 3.1008.0
