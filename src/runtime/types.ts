@@ -266,6 +266,16 @@ export type S3dbModule = {
   ApiPlugin: new (options: Record<string, unknown>) => {
     stop?: () => Promise<void>;
   };
+  WebSocketPlugin?: new (options: Record<string, unknown>) => {
+    stop?: () => Promise<void>;
+    broadcast?: (message: unknown) => void;
+  };
+  loadWebSocketPlugin?: () => Promise<
+    new (options: Record<string, unknown>) => {
+      stop?: () => Promise<void>;
+      broadcast?: (message: unknown) => void;
+    }
+  >;
 };
 
 export type ParallelismAnalysis = {

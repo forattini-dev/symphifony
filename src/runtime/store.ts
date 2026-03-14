@@ -39,6 +39,9 @@ export function getAgentSessionResource(): S3dbResource | null { return agentSes
 export function getAgentPipelineResource(): S3dbResource | null { return agentPipelineResource; }
 export function getActiveApiPlugin(): { stop?: () => Promise<void> } | null { return activeApiPlugin; }
 export function setActiveApiPlugin(plugin: { stop?: () => Promise<void> } | null): void { activeApiPlugin = plugin; }
+let activeWebSocketPlugin: { stop?: () => Promise<void> } | null = null;
+export function getActiveWebSocketPlugin(): { stop?: () => Promise<void> } | null { return activeWebSocketPlugin; }
+export function setActiveWebSocketPlugin(plugin: { stop?: () => Promise<void> } | null): void { activeWebSocketPlugin = plugin; }
 
 export async function loadS3dbModule(): Promise<S3dbModule> {
   if (loadedS3dbModule) return loadedS3dbModule;
@@ -48,6 +51,8 @@ export async function loadS3dbModule(): Promise<S3dbModule> {
     const pluginModule = await import("s3db.js/plugins/index");
 
     let ApiPluginCtor: S3dbModule["ApiPlugin"] | undefined;
+    let WebSocketPluginCtor: S3dbModule["WebSocketPlugin"] | undefined;
+
     if (typeof (pluginModule as Record<string, unknown>).ApiPlugin === "function") {
       ApiPluginCtor = (pluginModule as { ApiPlugin: S3dbModule["ApiPlugin"] }).ApiPlugin;
     } else if (typeof (pluginModule as Record<string, unknown>).loadApiPlugin === "function") {
@@ -58,10 +63,17 @@ export async function loadS3dbModule(): Promise<S3dbModule> {
       throw new Error("ApiPlugin export not found.");
     }
 
+    if (typeof (pluginModule as Record<string, unknown>).WebSocketPlugin === "function") {
+      WebSocketPluginCtor = (pluginModule as { WebSocketPlugin: S3dbModule["WebSocketPlugin"] }).WebSocketPlugin;
+    } else if (typeof (pluginModule as Record<string, unknown>).loadWebSocketPlugin === "function") {
+      WebSocketPluginCtor = await (pluginModule as { loadWebSocketPlugin: () => Promise<S3dbModule["WebSocketPlugin"]> }).loadWebSocketPlugin();
+    }
+
     loadedS3dbModule = {
       S3db: imported.S3db as S3dbModule["S3db"],
       FileSystemClient: imported.FileSystemClient as S3dbModule["FileSystemClient"],
       ApiPlugin: ApiPluginCtor,
+      WebSocketPlugin: WebSocketPluginCtor,
     };
     return loadedS3dbModule;
   } catch (error) {
@@ -178,6 +190,15 @@ export async function persistState(state: RuntimeState): Promise<void> {
 
 export async function closeStateStore(): Promise<void> {
   clearApiRuntimeContext();
+  if (activeWebSocketPlugin?.stop) {
+    try {
+      await activeWebSocketPlugin.stop();
+    } catch (error) {
+      logger.warn(`Failed to stop WebSocket plugin: ${String(error)}`);
+    } finally {
+      activeWebSocketPlugin = null;
+    }
+  }
   if (activeApiPlugin?.stop) {
     try {
       await activeApiPlugin.stop();

@@ -49,30 +49,36 @@
       <!-- Tab: Board (Kanban) -->
       <section class="tab-panel active" data-panel="board">
         <div class="toolbar">
-          <div class="toolbar-right">
-            <label for="state-filter">Filter:</label>
-            <select id="state-filter" class="select select-bordered select-sm">
-              <option value="all">All</option>
-              <option value="Todo">Todo</option>
-              <option value="In Progress">In Progress</option>
-              <option value="In Review">In Review</option>
-              <option value="Blocked">Blocked</option>
-              <option value="Done">Done</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
-
-            <label for="category-filter">Capability:</label>
-            <select id="category-filter" class="select select-bordered select-sm">
-              <option value="all">All</option>
-            </select>
-
-            <label for="query">Search:</label>
-            <input id="query" class="input input-bordered input-sm" placeholder="Search issues..." />
-
+          <div class="toolbar-actions">
             <button id="rerun" class="btn btn-sm btn-ghost" title="Reload">↻</button>
             <button id="new-issue-btn" class="btn btn-sm btn-accent">+ New</button>
             <span id="issue-count" class="issue-count"></span>
           </div>
+          <details class="filter-accordion" id="board-filter-accordion">
+            <summary class="filter-accordion-summary">Filters</summary>
+            <div class="filter-accordion-content">
+              <div class="toolbar-right">
+                <label for="state-filter">Filter:</label>
+                <select id="state-filter" class="select select-bordered select-sm">
+                  <option value="all">All</option>
+                  <option value="Todo">Todo</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="In Review">In Review</option>
+                  <option value="Blocked">Blocked</option>
+                  <option value="Done">Done</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+
+                <label for="category-filter">Capability:</label>
+                <select id="category-filter" class="select select-bordered select-sm">
+                  <option value="all">All</option>
+                </select>
+
+                <label for="query">Search:</label>
+                <input id="query" class="input input-bordered input-sm" placeholder="Search issues..." />
+              </div>
+            </div>
+          </details>
         </div>
 
         <!-- Create issue form (shared, hidden by default) -->
@@ -130,23 +136,30 @@
       <!-- Tab: Events -->
       <section class="tab-panel" data-panel="events" hidden>
         <div class="toolbar">
-          <div class="toolbar-right">
-            <label for="event-kind-filter">Kind:</label>
-            <select id="event-kind-filter" class="select select-bordered select-sm">
-              <option value="all">All</option>
-              <option value="info">info</option>
-              <option value="state">state</option>
-              <option value="progress">progress</option>
-              <option value="error">error</option>
-              <option value="manual">manual</option>
-              <option value="runner">runner</option>
-            </select>
+          <details class="filter-accordion" id="events-filter-accordion">
+            <summary class="filter-accordion-summary">Filters</summary>
+            <div class="filter-accordion-content">
+              <div class="toolbar-right">
+                <label for="event-kind-filter">Kind:</label>
+                <select id="event-kind-filter" class="select select-bordered select-sm">
+                  <option value="all">All</option>
+                  <option value="info">info</option>
+                  <option value="state">state</option>
+                  <option value="progress">progress</option>
+                  <option value="error">error</option>
+                  <option value="manual">manual</option>
+                  <option value="runner">runner</option>
+                </select>
 
-            <label for="event-issue-filter">Issue:</label>
-            <select id="event-issue-filter" class="select select-bordered select-sm">
-              <option value="all">All</option>
-            </select>
+                <label for="event-issue-filter">Issue:</label>
+                <select id="event-issue-filter" class="select select-bordered select-sm">
+                  <option value="all">All</option>
+                </select>
+              </div>
+            </div>
+          </details>
 
+          <div class="toolbar-actions">
             <button id="clear-events" class="btn btn-sm btn-ghost">Clear</button>
           </div>
         </div>
