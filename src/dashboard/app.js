@@ -1,7 +1,7 @@
 // ── Theme switcher (runs immediately to avoid flash) ─────────────────────────
 
 const THEME_STORAGE_KEY = "symphifo-theme";
-const THEME_CHOICES = ["auto", "halloween", "cupcake"];
+const THEME_CHOICES = ["auto", "sunset", "cupcake"];
 const systemThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function normalizeThemeChoice(raw) {
@@ -11,7 +11,7 @@ function normalizeThemeChoice(raw) {
 }
 
 function getSystemTheme() {
-  return systemThemeQuery.matches ? "halloween" : "cupcake";
+  return systemThemeQuery.matches ? "sunset" : "cupcake";
 }
 
 function getSavedTheme() {
@@ -108,6 +108,8 @@ let selectedDetailId = null;
 let selectedIssues = new Set();
 let lastHealthStatus = null;
 let activeKpiFilter = null;
+let previousKpiValues = {};
+let previousIssueStates = new Map();
 
 // ── Toast notifications ─────────────────────────────────────────────────────
 
@@ -121,18 +123,34 @@ function getOrCreateToastContainer() {
   return container;
 }
 
+let toastQueue = 0;
+
 function showToast(message, kind = "error", durationMs = 4000) {
   const container = getOrCreateToastContainer();
   const item = document.createElement("div");
   const cls = kind === "success" ? "toast-success" : kind === "warn" ? "toast-warn" : "";
   item.className = `toast-item ${cls}`.trim();
   item.textContent = message;
+
+  // Countdown progress bar
+  const countdown = document.createElement("div");
+  countdown.className = "toast-countdown";
+  countdown.style.setProperty("--toast-duration", `${durationMs}ms`);
+  item.appendChild(countdown);
+
+  // Stagger entrance: delay each toast by 50ms
+  const delay = toastQueue * 50;
+  item.style.animationDelay = `${delay}ms`;
+  countdown.style.animationDelay = `${delay}ms`;
+  toastQueue++;
+  setTimeout(() => { toastQueue = Math.max(0, toastQueue - 1); }, delay + 300);
+
   container.appendChild(item);
 
   setTimeout(() => {
     item.classList.add("toast-out");
     item.addEventListener("animationend", () => item.remove());
-  }, durationMs);
+  }, durationMs + delay);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -189,6 +207,78 @@ function isDesktop() {
   return window.matchMedia("(min-width: 900px)").matches;
 }
 
+// ── KPI counter animation ───────────────────────────────────────────────────
+
+function animateCounter(element, from, to, durationMs = 400) {
+  if (from === to || typeof from !== "number" || typeof to !== "number") return;
+  const start = performance.now();
+  function tick(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / durationMs, 1);
+    // ease-out: 1 - (1 - t)^3
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(from + (to - from) * eased);
+    element.textContent = current;
+    if (progress < 1) requestAnimationFrame(tick);
+    else element.textContent = to;
+  }
+  requestAnimationFrame(tick);
+}
+
+function animateKpiValues() {
+  const kpis = overviewEl.querySelectorAll(".kpi");
+  kpis.forEach((kpi) => {
+    const label = kpi.querySelector(".label")?.textContent?.trim() || "";
+    const valueEl = kpi.querySelector(".value");
+    if (!valueEl) return;
+    const rawValue = parseInt(valueEl.textContent, 10);
+    if (isNaN(rawValue)) return;
+    const prevValue = previousKpiValues[label];
+    if (prevValue !== undefined && prevValue !== rawValue) {
+      animateCounter(valueEl, prevValue, rawValue);
+    }
+    previousKpiValues[label] = rawValue;
+  });
+}
+
+// ── Issue card state transition animations ──────────────────────────────────
+
+function applyIssueCardAnimations(issues) {
+  requestAnimationFrame(() => {
+    for (const issue of issues) {
+      const card = issueListEl.querySelector(`[data-issue-id="${issue.id}"]`);
+      if (!card) continue;
+      const prevState = previousIssueStates.get(issue.id);
+
+      if (prevState === undefined) {
+        // New issue: animate in
+        card.classList.add("animate-in");
+        card.addEventListener("animationend", () => card.classList.remove("animate-in"), { once: true });
+      } else if (prevState !== issue.state) {
+        // State changed
+        if (issue.state === "Done") {
+          card.classList.add("issue-done-pulse");
+          card.addEventListener("animationend", () => {
+            card.classList.remove("issue-done-pulse");
+            card.classList.add("issue-done-muted");
+          }, { once: true });
+        } else if (issue.state === "Blocked") {
+          card.classList.add("issue-blocked-shake");
+          card.addEventListener("animationend", () => card.classList.remove("issue-blocked-shake"), { once: true });
+        } else {
+          // Generic state change: border flash in state color
+          card.classList.add("issue-state-flash");
+          card.addEventListener("animationend", () => card.classList.remove("issue-state-flash"), { once: true });
+        }
+      }
+    }
+    // Update tracked states
+    for (const issue of issues) {
+      previousIssueStates.set(issue.id, issue.state);
+    }
+  });
+}
+
 // ── Loading state wrapper ───────────────────────────────────────────────────
 
 async function withLoading(target, asyncFn) {
@@ -198,11 +288,18 @@ async function withLoading(target, asyncFn) {
   const originalText = target.textContent;
   target.disabled = true;
   target.textContent = "\u00B7\u00B7\u00B7";
+  target.classList.add("is-loading");
   try {
-    return await asyncFn();
+    const result = await asyncFn();
+    // Brief success flash on the button
+    target.classList.remove("is-loading");
+    target.classList.add("btn-success-flash");
+    setTimeout(() => target.classList.remove("btn-success-flash"), 400);
+    return result;
   } finally {
     target.disabled = false;
     target.textContent = originalText;
+    target.classList.remove("is-loading");
   }
 }
 
@@ -270,7 +367,8 @@ function renderOverview(metrics, issues = []) {
   if (total === 0) {
     overviewEl.innerHTML = `
       <div class="kpi" style="grid-column: 1 / -1; padding: 24px;">
-        <p class="label">No Issues</p>
+        <p class="label empty-state-text">No Issues</p>
+        <p class="empty-state-plus">+</p>
         <p class="value" style="font-size: 1.2rem;">Create your first issue to get started</p>
         <p class="desc">Use the "+ New" button above or POST to /issues</p>
       </div>
@@ -325,6 +423,9 @@ function renderOverview(metrics, issues = []) {
     kpiCard("Critical", criticalQueue, { accent: criticalQueue > 0 ? "danger" : "", desc: "security + bugfix", filterKey: "capability", filterValue: "critical" }),
     ...topCapabilities.map(([category, count]) => kpiCard(category, count, { desc: "capability load", filterKey: "capability", filterValue: category })),
   ].join("");
+
+  // Animate KPI counters (must run after innerHTML is set)
+  animateKpiValues();
 
   // Progress bar
   if (total > 0) {
@@ -521,7 +622,7 @@ function renderIssues(issues = []) {
 
       // On mobile, show inline session panel; on desktop, sessions go to detail panel
       const sessionHtml = expandedSessions.has(issue.id)
-        ? `<div class="session-panel" id="session-${escapeHtml(issue.id)}"><div class="session-loading">Loading sessions...</div></div>`
+        ? `<div class="session-panel" id="session-${escapeHtml(issue.id)}">${sessionLoadingSkeleton()}</div>`
         : "";
 
       const noteHtml = (issue.state === "Blocked" || issue.state === "Todo")
@@ -589,6 +690,9 @@ function renderIssues(issues = []) {
     })
     .join("");
 
+  // Apply card entrance/transition animations
+  applyIssueCardAnimations(filtered);
+
   for (const issueId of expandedSessions) {
     loadSessionsForIssue(issueId);
   }
@@ -604,6 +708,15 @@ function renderIssues(issues = []) {
 
 // ── Detail panel (desktop right panel) ──────────────────────────────────────
 
+function sessionLoadingSkeleton() {
+  return `<div class="session-loading-skeleton">
+    <div class="skeleton-line"></div>
+    <div class="skeleton-line"></div>
+    <div class="skeleton-line"></div>
+    <div class="skeleton-line"></div>
+  </div>`;
+}
+
 function renderDetailPanel(issue) {
   if (!detailPanel) return;
   detailPanel.innerHTML = `
@@ -617,7 +730,7 @@ function renderDetailPanel(issue) {
       ${issue.durationMs ? `<span>Duration ${formatDuration(issue.durationMs)}</span>` : ""}
     </div>
     <div class="session-panel" id="detail-session-panel">
-      <div class="session-loading">Loading sessions...</div>
+      ${sessionLoadingSkeleton()}
     </div>
   `;
   document.getElementById("close-detail")?.addEventListener("click", () => {
@@ -694,9 +807,18 @@ async function loadSessionsForPanel(issueId, panelElementId) {
     }
 
     panel.innerHTML = html || '<div class="session-loading">No session data available yet.</div>';
+    staggerAnimateSteps(panel);
   } catch (error) {
     panel.innerHTML = `<div class="session-loading">Failed to load: ${escapeHtml(error.message)}</div>`;
   }
+}
+
+function staggerAnimateSteps(panel) {
+  const steps = panel.querySelectorAll(".pipeline-step");
+  steps.forEach((step, i) => {
+    step.classList.add("animate-step");
+    step.style.animationDelay = `${i * 30}ms`;
+  });
 }
 
 // ── Session/Pipeline Loading (inline, for mobile) ───────────────────────────
@@ -761,6 +883,7 @@ async function loadSessionsForIssue(issueId) {
     }
 
     panel.innerHTML = html || '<div class="session-loading">No session data available yet.</div>';
+    staggerAnimateSteps(panel);
   } catch (error) {
     panel.innerHTML = `<div class="session-loading">Failed to load: ${escapeHtml(error.message)}</div>`;
   }
@@ -942,10 +1065,11 @@ function renderEvents(events = []) {
   }
 
   const hadEvents = eventsEl.children.length > 0;
+  const isNewPush = events.length > 0;
   eventsEl.innerHTML = filtered
     .slice(0, 80)
-    .map((event) => `
-      <div class="event event-${event.kind || "info"}">
+    .map((event, idx) => `
+      <div class="event event-${event.kind || "info"}${isNewPush && idx < events.length ? " animate-in" : ""}"${isNewPush && idx < events.length ? ` style="animation-delay:${idx * 30}ms"` : ""}>
         <div class="mono" title="${escapeHtml(formatDate(event.at))}">${timeAgo(event.at)} ${escapeHtml(event.issueId || "system")}</div>
         <div>${escapeHtml(event.message || "")}</div>
       </div>
@@ -989,7 +1113,15 @@ async function cancelIssue(issueId, target) {
 
 function toggleCreateForm() {
   createForm.hidden = !createForm.hidden;
-  if (!createForm.hidden) document.getElementById("cf-title").focus();
+  if (!createForm.hidden) {
+    // Stagger-reveal form fields
+    const fields = createForm.querySelectorAll(".form-group");
+    fields.forEach((field, i) => {
+      field.classList.add("animate-field");
+      field.style.animationDelay = `${i * 40}ms`;
+    });
+    document.getElementById("cf-title").focus();
+  }
 }
 
 async function submitCreateForm(target) {
@@ -1009,7 +1141,12 @@ async function submitCreateForm(target) {
     try {
       const result = await post("/issues", payload);
       showToast(`Created ${result.issue?.identifier || "issue"}`, "success");
-      createForm.hidden = true;
+      // Collapse form with animation then hide
+      createForm.classList.add("form-collapsing");
+      createForm.addEventListener("animationend", () => {
+        createForm.classList.remove("form-collapsing");
+        createForm.hidden = true;
+      }, { once: true });
       document.getElementById("cf-title").value = "";
       document.getElementById("cf-desc").value = "";
       document.getElementById("cf-priority").value = "1";
@@ -1033,6 +1170,14 @@ function toggleEditForm(issueId) {
   renderIssues(appState.issues || []);
   if (activeEditId) {
     setTimeout(() => {
+      const editForm = document.querySelector(`[data-edit-title-for="${issueId}"]`)?.closest(".edit-form");
+      if (editForm) {
+        const fields = editForm.querySelectorAll(".form-group");
+        fields.forEach((field, i) => {
+          field.classList.add("animate-field");
+          field.style.animationDelay = `${i * 40}ms`;
+        });
+      }
       const el = document.querySelector(`[data-edit-title-for="${issueId}"]`);
       if (el) el.focus();
     }, 50);
@@ -1629,7 +1774,7 @@ function connectWebSocket() {
     wsConnected = false;
     ws = null;
     healthBadge.textContent = "reconnecting";
-    healthBadge.className = "badge badge-health-warn";
+    healthBadge.className = "badge badge-reconnecting";
     lastHealthStatus = "offline";
 
     // Reconnect with backoff
