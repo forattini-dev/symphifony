@@ -771,7 +771,6 @@ button:disabled {
   pointer-events: none;
 }
 
-/* Base toast-item styles — animations defined in micro-interactions section */
 .toast-item {
   background: var(--stone);
   border: 1px solid var(--danger);
@@ -780,6 +779,7 @@ button:disabled {
   color: var(--frost);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   pointer-events: auto;
+  animation: toast-in 200ms ease-out;
   max-width: 360px;
 }
 
@@ -789,6 +789,28 @@ button:disabled {
 
 .toast-item.toast-warn {
   border-color: var(--warn);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-item.toast-out {
+  animation: toast-out 150ms ease-in forwards;
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 /* ── Loading skeleton ─────────────────────────────────────────────────────── */
@@ -1097,7 +1119,7 @@ button:disabled {
   height: 4px;
   background: var(--stone);
   margin-top: 8px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .progress-segment {
@@ -1206,437 +1228,6 @@ button:disabled {
 
 .collapsed-section details[open] summary::before {
   content: "▾ ";
-}
-
-/* ── Micro-interaction keyframes ──────────────────────────────────────────── */
-
-/* Expo ease-out for natural deceleration */
-/* cubic-bezier(0.16, 1, 0.3, 1) used throughout */
-
-/* 1. Toast: slide-in from right with scale */
-@keyframes toast-slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(40px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes toast-slide-out {
-  to {
-    opacity: 0;
-    transform: translateX(40px) scale(0.95);
-  }
-}
-
-/* Toast: success left-border flash */
-@keyframes toast-success-flash {
-  0%   { border-left-color: var(--ok); box-shadow: inset 3px 0 12px -4px var(--ok); }
-  60%  { border-left-color: var(--ok); box-shadow: inset 3px 0 0 0 transparent; }
-  100% { border-left-color: var(--ok); box-shadow: none; }
-}
-
-/* Toast: error shake */
-@keyframes toast-error-shake {
-  0%, 100% { transform: translateX(0); }
-  15%      { transform: translateX(-6px); }
-  30%      { transform: translateX(5px); }
-  45%      { transform: translateX(-4px); }
-  60%      { transform: translateX(3px); }
-  75%      { transform: translateX(-2px); }
-}
-
-/* Toast: countdown progress bar */
-@keyframes toast-countdown {
-  from  { transform: scaleX(1); }
-  to    { transform: scaleX(0); }
-}
-
-/* 2. Issue card: fade-in with slide-up for new issues */
-@keyframes issue-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Issue card: state-change border flash */
-@keyframes issue-border-flash {
-  0%   { box-shadow: inset 0 0 0 2px var(--flash-color, var(--plague)); }
-  100% { box-shadow: inset 0 0 0 0 transparent; }
-}
-
-/* Issue card: done pulse */
-@keyframes issue-done-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4); }
-  50%  { box-shadow: 0 0 12px 2px rgba(52, 211, 153, 0.25); }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-/* Issue card: blocked shake */
-@keyframes issue-blocked-shake {
-  0%, 100% { transform: translateX(0); }
-  20%      { transform: translateX(-3px); }
-  40%      { transform: translateX(3px); }
-  60%      { transform: translateX(-2px); }
-  80%      { transform: translateX(2px); }
-}
-
-/* 3. KPI counter: no keyframe needed, JS handles count-up */
-
-/* 5. Progress bar: running glow */
-@keyframes progress-glow-pulse {
-  0%, 100% { opacity: 0.6; }
-  50%      { opacity: 1; }
-}
-
-/* 6. Connection: breathe animation */
-@keyframes badge-breathe {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.05); }
-}
-
-/* Connection: reconnecting spinner border */
-@keyframes badge-spinner {
-  to { transform: rotate(360deg); }
-}
-
-/* 7. Detail panel: fade-in */
-@keyframes detail-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 7. Skeleton shimmer for session loading */
-@keyframes skeleton-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* 7. Pipeline step stagger (applied via animation-delay in JS) */
-@keyframes step-stagger-in {
-  from {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-/* 8. Form field stagger reveal */
-@keyframes form-field-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 8. Input focus glow */
-@keyframes input-focus-glow {
-  0%   { box-shadow: 0 0 0 1px var(--ooze); }
-  50%  { box-shadow: 0 0 6px 1px color-mix(in srgb, var(--toxin) 40%, transparent); }
-  100% { box-shadow: 0 0 0 1px var(--ooze); }
-}
-
-/* 8. Form collapse */
-@keyframes form-collapse {
-  from {
-    opacity: 1;
-    transform: scaleY(1);
-    max-height: 500px;
-  }
-  to {
-    opacity: 0;
-    transform: scaleY(0.95);
-    max-height: 0;
-  }
-}
-
-/* 9. Event slide-in from top */
-@keyframes event-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 9. Event border color fade-in */
-@keyframes event-border-fade {
-  from { border-left-color: transparent; }
-  to   { border-left-color: var(--event-border-color, var(--iron)); }
-}
-
-/* 10. Empty state float */
-@keyframes empty-float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-4px); }
-}
-
-/* 10. Empty state plus pulse */
-@keyframes plus-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.6; }
-  50%      { transform: scale(1.15); opacity: 1; }
-}
-
-/* ── Toast animation overrides ───────────────────────────────────────────────── */
-
-.toast-item {
-  animation: toast-slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-  overflow: hidden;
-  border-left: 3px solid transparent;
-}
-
-.toast-item.toast-success {
-  border-left-color: var(--ok);
-  animation: toast-slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1),
-             toast-success-flash 600ms ease-out 250ms;
-}
-
-.toast-item:not(.toast-success):not(.toast-warn) {
-  animation: toast-slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1),
-             toast-error-shake 400ms ease-out 250ms;
-}
-
-.toast-item.toast-out {
-  animation: toast-slide-out 200ms ease-in forwards;
-}
-
-/* Toast countdown bar */
-.toast-countdown {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: color-mix(in srgb, var(--frost) 30%, transparent);
-  transform-origin: left;
-  animation: toast-countdown var(--toast-duration, 4s) linear forwards;
-}
-
-.toast-success .toast-countdown { background: var(--ok); }
-.toast-warn .toast-countdown { background: var(--warn); }
-.toast-item:not(.toast-success):not(.toast-warn) .toast-countdown { background: var(--danger); }
-
-/* ── Issue card animation classes ────────────────────────────────────────────── */
-
-.issue-card.animate-in {
-  animation: issue-fade-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.issue-card.issue-state-flash {
-  animation: issue-border-flash 500ms ease-out;
-}
-
-.issue-card.issue-done-pulse {
-  animation: issue-done-pulse 600ms ease-out;
-}
-
-.issue-card.issue-done-muted {
-  opacity: 0.7;
-  transition: opacity 400ms ease;
-}
-
-.issue-card.issue-blocked-shake {
-  animation: issue-blocked-shake 300ms ease-out;
-}
-
-/* Smoother running pulse */
-.issue-running {
-  border-left: 3px solid var(--plague);
-  animation: running-pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* 4. Button feedback: click scale */
-.action-button {
-  transition: border-color 150ms, color 150ms, box-shadow 150ms, transform 100ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.action-button:active:not(:disabled) {
-  transform: scale(0.95);
-}
-
-.action-button.btn-success-flash {
-  animation: issue-border-flash 400ms ease-out;
-  --flash-color: var(--ok);
-  border-color: var(--ok);
-}
-
-/* Button loading spinner */
-.action-button.is-loading::before {
-  content: "";
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid var(--iron);
-  border-top-color: var(--plague);
-  border-radius: 50%;
-  animation: badge-spinner 600ms linear infinite;
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-/* 5. Progress bar running glow */
-.progress-running {
-  position: relative;
-}
-
-.progress-running::after {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -2px;
-  width: 8px;
-  height: calc(100% + 2px);
-  background: var(--plague);
-  box-shadow: 0 0 8px var(--plague), 0 0 16px color-mix(in srgb, var(--plague) 50%, transparent);
-  animation: progress-glow-pulse 1.5s ease-in-out infinite;
-}
-
-.progress-bar {
-  position: relative;
-}
-
-/* 6. Connection badge animations */
-.badge-health-ok {
-  animation: badge-breathe 2s ease-in-out 1;
-}
-
-.badge-health-warn {
-  animation: offline-pulse 2s ease-in-out infinite;
-}
-
-.badge-reconnecting {
-  border-color: var(--warn);
-  color: var(--warn);
-  position: relative;
-}
-
-.badge-reconnecting::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border: 2px solid transparent;
-  border-top-color: var(--warn);
-  animation: badge-spinner 800ms linear infinite;
-}
-
-/* 7. Detail panel content fade-in */
-.detail-panel .detail-issue-header,
-.detail-panel .meta,
-.detail-panel .session-panel {
-  animation: detail-fade-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* Session loading skeleton shimmer */
-.session-loading-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-}
-
-.session-loading-skeleton .skeleton-line {
-  height: 12px;
-  background: linear-gradient(
-    90deg,
-    var(--stone) 25%,
-    var(--cobble) 50%,
-    var(--stone) 75%
-  );
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.5s infinite;
-}
-
-.session-loading-skeleton .skeleton-line:nth-child(1) { width: 60%; }
-.session-loading-skeleton .skeleton-line:nth-child(2) { width: 85%; }
-.session-loading-skeleton .skeleton-line:nth-child(3) { width: 45%; }
-.session-loading-skeleton .skeleton-line:nth-child(4) { width: 70%; }
-
-/* Pipeline step stagger animation */
-.pipeline-step.animate-step {
-  animation: step-stagger-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* 8. Form stagger reveal */
-.form-group.animate-field {
-  animation: form-field-reveal 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* Input focus glow animation */
-.form-group input:focus,
-.form-group textarea:focus {
-  outline: none;
-  border-color: var(--toxin);
-  animation: input-focus-glow 1.5s ease-in-out infinite;
-}
-
-/* Form collapse animation */
-.create-form.form-collapsing {
-  animation: form-collapse 250ms ease-in forwards;
-  transform-origin: top;
-  overflow: hidden;
-}
-
-/* 9. Event entrance animation */
-.event.animate-in {
-  animation: event-slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both,
-             event-border-fade 300ms ease-out both;
-}
-
-.event-runner.animate-in   { --event-border-color: var(--plague); }
-.event-error.animate-in    { --event-border-color: var(--danger); }
-.event-manual.animate-in   { --event-border-color: var(--info); }
-.event-progress.animate-in { --event-border-color: var(--warn); }
-.event-info.animate-in     { --event-border-color: var(--iron); }
-
-/* 10. Empty state animations */
-.empty-state-text {
-  animation: empty-float 3s ease-in-out infinite;
-}
-
-.empty-state-plus {
-  display: inline-block;
-  animation: plus-pulse 2s ease-in-out infinite;
-  color: var(--plague);
-  font-size: 1.4rem;
-  font-weight: 800;
-  margin-bottom: 4px;
-}
-
-/* ── Reduced motion: disable all animations ──────────────────────────────────── */
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 
 /* ── Two-panel layout (desktop >= 900px) ─────────────────────────────────── */
