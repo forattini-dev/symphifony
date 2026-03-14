@@ -2359,7 +2359,10 @@ async function refresh() {
   refreshBadge.classList.add("opacity-50");
   try {
     await loadState();
-    await loadEvents();
+    // Only fetch events when Events tab is active (reduce polling overhead)
+    if (viewMode === "events") {
+      await loadEvents();
+    }
     await refreshSessions();
   } catch (error) {
     issueListEl.innerHTML = `<p class="muted">Error loading runtime state: ${escapeHtml(error.message || error)}</p>`;
@@ -2541,7 +2544,7 @@ let pollingTimer = null;
 let pollingInFlight = false;
 
 const WS_MAX_RETRY_COUNT = 6;
-const POLLING_INTERVAL_MS = 3000;
+const POLLING_INTERVAL_MS = 10000;
 
 function detectStateTransitions(oldIssues, newIssues) {
   if (!oldIssues?.length || !newIssues?.length) return;
