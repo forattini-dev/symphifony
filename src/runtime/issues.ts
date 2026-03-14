@@ -284,6 +284,20 @@ export function applyWorkflowConfig(
   };
 }
 
+export function validateConfig(config: RuntimeConfig): string[] {
+  const errors: string[] = [];
+  if (config.pollIntervalMs < 200) errors.push(`pollIntervalMs too low: ${config.pollIntervalMs} (min 200)`);
+  if (config.workerConcurrency < 1 || config.workerConcurrency > 16) errors.push(`workerConcurrency out of range: ${config.workerConcurrency} (1-16)`);
+  if (config.maxAttemptsDefault < 1 || config.maxAttemptsDefault > 10) errors.push(`maxAttemptsDefault out of range: ${config.maxAttemptsDefault} (1-10)`);
+  if (config.maxTurns < 1 || config.maxTurns > 16) errors.push(`maxTurns out of range: ${config.maxTurns} (1-16)`);
+  if (config.commandTimeoutMs < 1000) errors.push(`commandTimeoutMs too low: ${config.commandTimeoutMs} (min 1000)`);
+  if (config.retryDelayMs < 0) errors.push(`retryDelayMs negative: ${config.retryDelayMs}`);
+  for (const [stateKey, limit] of Object.entries(config.maxConcurrentByState)) {
+    if (limit < 1) errors.push(`maxConcurrentByState[${stateKey}] must be >= 1, got ${limit}`);
+  }
+  return errors;
+}
+
 export function dedupHistoryEntries(issues: IssueEntry[]): void {
   for (const issue of issues) {
     const seen = new Set<string>();

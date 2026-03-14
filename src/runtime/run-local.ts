@@ -11,7 +11,7 @@ import {
   getProviderDefaultCommand,
 } from "./providers.ts";
 import { bootstrapSource, loadWorkflowDefinition, parsePort, watchWorkflowFile } from "./workflow.ts";
-import { deriveConfig, applyWorkflowConfig, loadSeedIssues, mergeStateWithSeed, computeMetrics, addEvent } from "./issues.ts";
+import { deriveConfig, applyWorkflowConfig, loadSeedIssues, mergeStateWithSeed, computeMetrics, addEvent, validateConfig } from "./issues.ts";
 import { startApiServer } from "./api-server.ts";
 import { scheduler, installGracefulShutdown } from "./scheduler.ts";
 import { cleanWorkspace } from "./agent.ts";
@@ -105,6 +105,12 @@ async function main() {
         ? "No agent command configured and no providers (claude, codex) found in PATH.\nInstall claude or codex, or set SYMPHIFO_AGENT_COMMAND / configure codex.command or claude.command in WORKFLOW.md."
         : "No agent command configured. Set SYMPHIFO_AGENT_COMMAND or configure codex.command / claude.command in WORKFLOW.md.",
     );
+  }
+
+  // Validate config at startup (spec §6.3)
+  const configErrors = validateConfig(config);
+  if (configErrors.length > 0) {
+    for (const err of configErrors) logger.warn(`Config validation: ${err}`);
   }
 
   // Startup: clean workspaces and prune sessions for terminal issues

@@ -1052,6 +1052,8 @@ export async function runIssueOnce(
       issue.commandExitCode = runResult.code;
       issue.commandOutputTail = runResult.output;
       issue.lastError = undefined;
+      // Short continuation retry (1s) — spec §7.1, §8.4
+      issue.nextRetryAt = new Date(Date.now() + 1000).toISOString();
       issue.history.push(`[${issue.updatedAt}] Agent requested another turn (${runResult.turns}/${state.config.maxTurns}).`);
       addEvent(state, issue.id, "runner", `Issue ${issue.identifier} queued for next turn.`);
     } else {

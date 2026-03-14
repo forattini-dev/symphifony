@@ -12,8 +12,37 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function resolveEnvVar(value: string): string {
+  if (!value.startsWith("$")) return value;
+  const varName = value.slice(1);
+  const resolved = env[varName];
+  return resolved && resolved.trim().length > 0 ? resolved.trim() : "";
+}
+
+export function expandPath(value: string): string {
+  let result = value;
+  // ~ home expansion
+  if (result.startsWith("~")) {
+    result = result.replace(/^~/, env.HOME || env.USERPROFILE || "~");
+  }
+  // $VAR expansion for path values
+  if (result.includes("$")) {
+    result = result.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, varName: string) => {
+      return env[varName] || "";
+    });
+  }
+  return result;
+}
+
 export function toStringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+  if (typeof value !== "string" || value.trim().length === 0) return fallback;
+  const trimmed = value.trim();
+  // Resolve $VAR_NAME indirection (full value is a single env var reference)
+  if (trimmed.startsWith("$") && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+    const resolved = resolveEnvVar(trimmed);
+    return resolved.length > 0 ? resolved : fallback;
+  }
+  return trimmed;
 }
 
 export function toNumberValue(value: unknown, fallback = 1): number {

@@ -172,6 +172,19 @@ export function pickNextIssues(
     });
 }
 
+function validateDispatchConfig(state: RuntimeState): string | null {
+  if (!state.config.agentCommand?.trim()) {
+    return "No agent command configured.";
+  }
+  if (state.config.workerConcurrency < 1) {
+    return "Worker concurrency must be >= 1.";
+  }
+  if (state.config.maxTurns < 1) {
+    return "Max turns must be >= 1.";
+  }
+  return null; // valid
+}
+
 export function hasTerminalQueue(state: RuntimeState): boolean {
   return state.issues.every((issue) => TERMINAL_STATES.has(issue.state) || issue.attempts >= issue.maxAttempts);
 }
@@ -185,11 +198,18 @@ export async function scheduler(
   if (runForever) {
     while (!shuttingDown) {
       ensureNotStale(state, state.config.staleInProgressTimeoutMs);
-      const ready = pickNextIssues(state, running, workflowDefinition);
-      const slots = state.config.workerConcurrency - running.size;
-      if (slots > 0) {
-        const next = ready.slice(0, Math.max(0, slots));
-        await Promise.all(next.map((issue) => runIssueOnce(state, issue, running, workflowDefinition)));
+
+      // Per-tick dispatch validation (spec §6.3)
+      const validationError = validateDispatchConfig(state);
+      if (validationError) {
+        logger.warn(`Dispatch skipped: ${validationError}`);
+      } else {
+        const ready = pickNextIssues(state, running, workflowDefinition);
+        const slots = state.config.workerConcurrency - running.size;
+        if (slots > 0) {
+          const next = ready.slice(0, Math.max(0, slots));
+          await Promise.all(next.map((issue) => runIssueOnce(state, issue, running, workflowDefinition)));
+        }
       }
       state.updatedAt = now();
       await persistState(state);
@@ -201,6 +221,14 @@ export async function scheduler(
 
   while (!hasTerminalQueue(state) && !shuttingDown) {
     ensureNotStale(state, state.config.staleInProgressTimeoutMs);
+
+    const batchValidationError = validateDispatchConfig(state);
+    if (batchValidationError) {
+      logger.warn(`Dispatch skipped: ${batchValidationError}`);
+      await sleep(state.config.pollIntervalMs);
+      continue;
+    }
+
     const ready = pickNextIssues(state, running, workflowDefinition);
     const slots = state.config.workerConcurrency - running.size;
     const next = ready.slice(0, Math.max(0, slots));
