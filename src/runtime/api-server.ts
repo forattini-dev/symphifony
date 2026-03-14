@@ -147,6 +147,7 @@ export async function startApiServer(
     }],
     docs: { enabled: true, title: "Symphifo API", version: "1.0.0", description: "Local orchestration API for Symphifo" },
     cors: { enabled: true, origin: "*" },
+    security: { contentSecurityPolicy: false },
     logging: { enabled: true, excludePaths: ["/health", "/status", "/assets", "/ws"] },
     compression: { enabled: true, threshold: 1024 },
     health: { enabled: true },
