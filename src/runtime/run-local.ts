@@ -14,6 +14,7 @@ import { bootstrapSource, loadWorkflowDefinition, parsePort, watchWorkflowFile }
 import { deriveConfig, applyWorkflowConfig, loadSeedIssues, mergeStateWithSeed, computeMetrics, addEvent } from "./issues.ts";
 import { startApiServer } from "./api-server.ts";
 import { scheduler, installGracefulShutdown } from "./scheduler.ts";
+import { cleanWorkspace } from "./agent.ts";
 
 function usage() {
   console.log(
@@ -104,6 +105,15 @@ async function main() {
         ? "No agent command configured and no providers (claude, codex) found in PATH.\nInstall claude or codex, or set SYMPHIFO_AGENT_COMMAND / configure codex.command or claude.command in WORKFLOW.md."
         : "No agent command configured. Set SYMPHIFO_AGENT_COMMAND or configure codex.command / claude.command in WORKFLOW.md.",
     );
+  }
+
+  // Startup: clean workspaces and prune sessions for terminal issues
+  const terminalIssues = state.issues.filter((i) => i.state === "Done" || i.state === "Cancelled");
+  if (terminalIssues.length > 0) {
+    logger.info(`Cleaning ${terminalIssues.length} terminal issue workspace(s)...`);
+    for (const issue of terminalIssues) {
+      await cleanWorkspace(issue.id, workflowDefinition);
+    }
   }
 
   state.metrics = computeMetrics(state.issues);

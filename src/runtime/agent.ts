@@ -497,11 +497,27 @@ function buildPrompt(issue: IssueEntry, workflowDefinition: WorkflowDefinition |
     "{{ issue.description }}",
   ].join("\n");
 
-  return template.replace(/{{\s*issue\.([a-zA-Z0-9_]+)\s*}}/g, (_match, key: string) => {
+  const knownKeys = new Set(Object.keys(issue));
+  const errors: string[] = [];
+
+  const rendered = template.replace(/{{\s*issue\.([a-zA-Z0-9_]+)\s*}}/g, (_match, key: string) => {
+    if (!knownKeys.has(key)) {
+      errors.push(`Unknown template variable: issue.${key}`);
+      return `{{ issue.${key} }}`;
+    }
     const value = issue[key as keyof IssueEntry];
     if (Array.isArray(value)) return value.join(", ");
     return value == null ? "" : String(value);
   });
+
+  // Also check for {{ attempt }} variable
+  const withAttempt = rendered.replace(/{{\s*attempt\s*}}/g, String(issue.attempts || 0));
+
+  if (errors.length > 0) {
+    throw new Error(`Prompt rendering failed: ${errors.join("; ")}`);
+  }
+
+  return withAttempt;
 }
 
 function buildTurnPrompt(
@@ -700,6 +716,32 @@ async function runHook(
 
   if (!result.success) {
     throw new Error(`${hookName} hook failed: ${result.output}`);
+  }
+}
+
+export async function cleanWorkspace(
+  issueId: string,
+  workflowDefinition: WorkflowDefinition | null,
+): Promise<void> {
+  const safeId = idToSafePath(issueId);
+  const workspacePath = join(WORKSPACE_ROOT, safeId);
+  if (!existsSync(workspacePath)) return;
+
+  // Run before_remove hook (failure is logged but ignored)
+  if (workflowDefinition?.beforeRemoveHook) {
+    try {
+      const dummyIssue = { id: issueId, identifier: issueId } as IssueEntry;
+      await runHook(workflowDefinition.beforeRemoveHook, workspacePath, dummyIssue, "before_remove");
+    } catch (error) {
+      logger.warn(`before_remove hook failed for ${issueId}: ${String(error)}`);
+    }
+  }
+
+  try {
+    rmSync(workspacePath, { recursive: true, force: true });
+    logger.info(`Cleaned workspace for ${issueId}: ${workspacePath}`);
+  } catch (error) {
+    logger.warn(`Failed to clean workspace for ${issueId}: ${String(error)}`);
   }
 }
 

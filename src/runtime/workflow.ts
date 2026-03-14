@@ -149,6 +149,7 @@ export function loadWorkflowDefinition(): WorkflowDefinition {
     afterCreateHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "after_create"),
     beforeRunHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "before_run"),
     afterRunHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "after_run"),
+    beforeRemoveHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "before_remove"),
   };
 }
 

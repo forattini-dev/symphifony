@@ -222,6 +222,7 @@ export type WorkflowDefinition = {
   afterCreateHook: string;
   beforeRunHook: string;
   afterRunHook: string;
+  beforeRemoveHook: string;
 };
 
 export type FileSystemClientOptions = {
