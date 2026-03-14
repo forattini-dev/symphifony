@@ -159,7 +159,7 @@ export async function startApiServer(
         });
         return c.json({ events: events.slice(0, 200) });
       },
-      "GET /index.html": async (c: any) => c.redirect("/"),
+      "GET /index.html": async (c: any) => c.html(dashboardHtml),
       "GET /assets/app.js": async (c: any) => c.body(appJs || "console.log('Dashboard script not found.');", 200, {
         "content-type": "application/javascript; charset=utf-8",
       }),
