@@ -117,22 +117,24 @@ export async function startApiServer(
       ...resourceConfigs,
     },
     routes: {
-      "GET /state": async () => ({
-        ...state,
-        capabilities: computeCapabilityCounts(state.issues),
-      }),
-      "GET /status": async () => ({
-        status: "ok",
-        updatedAt: state.updatedAt,
-        config: state.config,
-        trackerKind: state.trackerKind,
-      }),
-      "GET /providers": async () => {
+      "GET /state": async (c: any) =>
+        c.json({
+          ...state,
+          capabilities: computeCapabilityCounts(state.issues),
+        }),
+      "GET /status": async (c: any) =>
+        c.json({
+          status: "ok",
+          updatedAt: state.updatedAt,
+          config: state.config,
+          trackerKind: state.trackerKind,
+        }),
+      "GET /providers": async (c: any) => {
         const providers = detectAvailableProviders();
-        return { providers };
+        return c.json({ providers });
       },
-      "GET /parallelism": async () => {
-        return analyzeParallelizability(state.issues);
+      "GET /parallelism": async (c: any) => {
+        return c.json(analyzeParallelizability(state.issues));
       },
       "POST /config/concurrency": async (c: any) => {
         const payload = await c.req.json() as JsonRecord;
@@ -144,7 +146,7 @@ export async function startApiServer(
         state.updatedAt = now();
         addEvent(state, undefined, "manual", `Worker concurrency updated to ${state.config.workerConcurrency}.`);
         await persistState(state);
-        return { ok: true, workerConcurrency: state.config.workerConcurrency };
+        return c.json({ ok: true, workerConcurrency: state.config.workerConcurrency });
       },
       "GET /events/feed": async (c: any) => {
         const since = c.req.query("since");
@@ -155,9 +157,9 @@ export async function startApiServer(
           issueId: typeof issueId === "string" && issueId ? issueId : undefined,
           kind: typeof kind === "string" && kind ? kind : undefined,
         });
-        return { events: events.slice(0, 200) };
+        return c.json({ events: events.slice(0, 200) });
       },
-      "GET /index.html": async (c: any) => c.html(dashboardHtml),
+      "GET /index.html": async (c: any) => c.redirect("/"),
       "GET /assets/app.js": async (c: any) => c.body(appJs || "console.log('Dashboard script not found.');", 200, {
         "content-type": "application/javascript; charset=utf-8",
       }),
