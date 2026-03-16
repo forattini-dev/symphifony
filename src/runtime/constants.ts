@@ -76,11 +76,6 @@ export const S3DB_AGENT_PIPELINE_RESOURCE = "agent_pipelines";
 export const S3DB_RUNTIME_RECORD_ID = "current";
 export const S3DB_RUNTIME_SCHEMA_VERSION = 1;
 
-export const DEFAULT_ISSUES_TEMPLATE = `${PACKAGE_ROOT}/src/fixtures/local-issues.json`;
-export const LOCAL_ISSUES_FILE = resolveInputPath(
-  env.SYMPHIFONY_ISSUES_FILE ?? join(STATE_ROOT, "issues.json"),
-);
-
 export const FRONTEND_DIR = `${PACKAGE_ROOT}/src/dashboard`;
 export const FRONTEND_INDEX = `${FRONTEND_DIR}/index.html`;
 export const FRONTEND_MANIFEST_JSON = `${FRONTEND_DIR}/manifest.webmanifest`;

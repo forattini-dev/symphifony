@@ -173,15 +173,55 @@ export async function loadPersistedState(): Promise<RuntimeState | null> {
   try {
     const record = await runtimeStateResource.get(S3DB_RUNTIME_RECORD_ID);
     if (record?.state && typeof record.state === "object") {
-      return record.state as RuntimeState;
+      const state = record.state as RuntimeState;
+      if (Array.isArray(state.issues) && state.issues.length > 0) {
+        return state;
+      }
+      // State blob has no issues — try recovering from individual issue records
+      logger.warn("Runtime state blob has no issues, attempting recovery from issue resource...");
     }
   } catch (error) {
     if (!isStateNotFoundError(error)) {
-      logger.warn(`Could not load persisted state from s3db: ${String(error)}`);
+      logger.warn(`Could not load persisted state from s3db (will attempt issue recovery): ${String(error)}`);
     }
   }
 
-  return null;
+  // Fallback: recover issues from individual s3db issue records
+  return recoverStateFromIssueResource();
+}
+
+async function recoverStateFromIssueResource(): Promise<RuntimeState | null> {
+  if (!issueStateResource) return null;
+
+  try {
+    const records = await (issueStateResource as any).list({ limit: 500 });
+    if (!Array.isArray(records) || records.length === 0) return null;
+
+    const issues = records
+      .filter((r: any) => r?.id && r?.identifier && r?.state)
+      .map((r: any) => r as RuntimeState["issues"][number]);
+
+    if (issues.length === 0) return null;
+
+    logger.info(`Recovered ${issues.length} issue(s) from s3db issue resource.`);
+
+    return {
+      startedAt: now(),
+      updatedAt: now(),
+      trackerKind: "filesystem",
+      sourceRepoUrl: "",
+      sourceRef: "workspace",
+      workflowPath: "",
+      config: {} as any,
+      issues,
+      events: [],
+      metrics: computeMetrics(issues),
+      notes: ["State recovered from individual issue records after corruption."],
+    };
+  } catch (error) {
+    logger.warn(`Failed to recover issues from s3db: ${String(error)}`);
+    return null;
+  }
 }
 
 export async function persistState(state: RuntimeState): Promise<void> {

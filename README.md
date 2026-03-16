@@ -31,7 +31,7 @@ Default behavior:
 
 - the current directory is treated as the workspace root
 - state is stored under `./.symphifony/`
-- the runtime can start with zero seed issues
+- runtime starts with zero issues when no persisted state exists
 
 ## Why Symphifony
 
@@ -152,7 +152,6 @@ curl 'http://localhost:4040/events/feed?kind=info&issueId=LOCAL-1'
 - `src/runtime/issue-state-machine.ts` — issue lifecycle state machine helpers
 - `src/integrations/catalog.ts` — agent and integration discovery
 - `src/dashboard/` — browser app sources and generated assets
-- `src/fixtures/local-issues.json` — optional seed issue catalog
 
 ## Workflow contract
 

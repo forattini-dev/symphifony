@@ -1,5 +1,3 @@
-import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { env } from "node:process";
 import type {
   IssueEntry,
@@ -104,37 +102,6 @@ export function normalizeIssue(
   }
 
   return issue;
-}
-
-export function loadSeedIssues(
-  path: string,
-  workflowDefinition: WorkflowDefinition | null,
-): IssueEntry[] {
-  const sourcePath = env.SYMPHIFONY_ISSUES_JSON ?? path;
-
-  if (sourcePath !== path && sourcePath) {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${sourcePath}\n`, "utf8");
-  }
-
-  if (!existsSync(path)) return [];
-
-  const raw = readFileSync(path, "utf8");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    fail(`Invalid local issues JSON: ${String(error)}`);
-  }
-
-  if (!Array.isArray(parsed)) {
-    fail("Local issues payload must be an array.");
-  }
-
-  return parsed
-    .filter((candidate): candidate is JsonRecord => typeof candidate === "object" && candidate !== null)
-    .map((candidate) => normalizeIssue(candidate, workflowDefinition))
-    .filter((issue): issue is IssueEntry => issue !== null);
 }
 
 export function nextLocalIssueId(issues: IssueEntry[]): string {
@@ -324,38 +291,41 @@ export function dedupHistoryEntries(issues: IssueEntry[]): void {
   }
 }
 
-export function mergeStateWithSeed(
-  seedIssues: IssueEntry[],
+export function buildRuntimeState(
   previous: RuntimeState | null,
   config: RuntimeConfig,
   definition: WorkflowDefinition,
 ): RuntimeState {
-  const previousMap = new Map((previous?.issues ?? []).map((issue) => [issue.id, issue]));
+  const mergedIssues = (previous?.issues ?? [])
+    .map((rawIssue) => {
+      if (!rawIssue || typeof rawIssue !== "object") return null;
 
-  const seedIds = new Set(seedIssues.map((s) => s.id));
-
-  const mergedIssues = seedIssues.map((seed) => {
-    const saved = previousMap.get(seed.id);
-    if (!saved) return seed;
-
-    // Persisted state takes precedence; seed only provides defaults for new fields
-    return {
-      ...seed,
-      ...saved,
-      // Re-normalize state to ensure it's valid
-      state: normalizeState(saved.state),
-      // Clamp attempts within config bounds
-      attempts: clamp(saved.attempts, 0, config.maxAttemptsDefault),
-      maxAttempts: clamp(saved.maxAttempts, 1, config.maxAttemptsDefault),
-    };
-  });
-
-  // Preserve issues created via API that are not in the seed file
-  for (const saved of previous?.issues ?? []) {
-    if (!seedIds.has(saved.id)) {
-      mergedIssues.push(saved);
-    }
-  }
+      const existing = rawIssue as IssueEntry & { blocked_by?: unknown };
+      return {
+        ...existing,
+        id: toStringValue(existing.id, ""),
+        identifier: toStringValue(existing.identifier, existing.id),
+        title: toStringValue(existing.title, `Issue ${toStringValue(existing.identifier, existing.id)}`),
+        description: toStringValue(existing.description, ""),
+        state: normalizeState(existing.state),
+        paths: toStringArray(existing.paths),
+        inferredPaths: toStringArray(existing.inferredPaths),
+        labels: toStringArray(existing.labels),
+        capabilityOverlays: toStringArray(existing.capabilityOverlays),
+        capabilityRationale: toStringArray(existing.capabilityRationale),
+        blockedBy: toStringArray(existing.blockedBy).length > 0
+          ? toStringArray(existing.blockedBy)
+          : toStringArray(existing.blocked_by),
+        history: Array.isArray(existing.history) ? existing.history : [],
+        attempts: clamp(toNumberValue(existing.attempts, 0), 0, config.maxAttemptsDefault),
+        maxAttempts: clamp(toNumberValue(existing.maxAttempts, config.maxAttemptsDefault), 1, config.maxAttemptsDefault),
+        nextRetryAt: toStringValue(existing.nextRetryAt),
+        updatedAt: toStringValue(existing.updatedAt, now()),
+        createdAt: toStringValue(existing.createdAt, now()),
+      };
+    })
+    .filter((issue): issue is IssueEntry => issue !== null)
+    .filter((issue) => issue.id);
 
   dedupHistoryEntries(mergedIssues);
 

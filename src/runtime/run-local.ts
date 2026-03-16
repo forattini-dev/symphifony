@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdirSync } from "node:fs";
 import { env, exit, argv } from "node:process";
-import { CLI_ARGS, LOCAL_ISSUES_FILE, STATE_ROOT, TRACKER_KIND, WORKFLOW_RENDERED } from "./constants.ts";
+import { CLI_ARGS, STATE_ROOT, TRACKER_KIND, WORKFLOW_RENDERED } from "./constants.ts";
 import { debugBoot, fail, now } from "./helpers.ts";
 import { initLogger, logger } from "./logger.ts";
 import { initStateStore, loadPersistedState, persistState, closeStateStore } from "./store.ts";
@@ -11,7 +11,7 @@ import {
   getProviderDefaultCommand,
 } from "./providers.ts";
 import { bootstrapSource, loadWorkflowDefinition, parsePort, watchWorkflowFile } from "./workflow.ts";
-import { deriveConfig, applyWorkflowConfig, loadSeedIssues, mergeStateWithSeed, computeMetrics, addEvent, validateConfig } from "./issues.ts";
+import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./issues.ts";
 import { startApiServer } from "./api-server.ts";
 import { scheduler, installGracefulShutdown } from "./scheduler.ts";
 import { cleanWorkspace } from "./agent.ts";
@@ -81,11 +81,9 @@ async function main() {
   await initStateStore();
   debugBoot("main:store-initialized");
 
-  const seedIssues = loadSeedIssues(LOCAL_ISSUES_FILE, workflowDefinition);
-  debugBoot("main:seed-loaded");
   const previous = await loadPersistedState();
   debugBoot("main:state-loaded");
-  const state = mergeStateWithSeed(seedIssues, previous, config, workflowDefinition);
+  const state = buildRuntimeState(previous, config, workflowDefinition);
   debugBoot("main:state-merged");
 
   state.config.dashboardPort = dashboardPort ? String(dashboardPort) : undefined;

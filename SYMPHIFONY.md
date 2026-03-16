@@ -5,7 +5,6 @@ This repository runs Symphifony as a pure TypeScript local orchestrator with no 
 ## What this package provides
 
 - Filesystem-backed orchestration through the local persistence runtime.
-- Optional seed issues from `src/fixtures/local-issues.json`.
 - Durable tracker state that can also start empty and accept work over HTTP.
 - Local workspace snapshots for reproducible execution.
 - Queue runner with concurrency, retries, retry backoff, and stale-run recovery.
@@ -26,8 +25,6 @@ This repository runs Symphifony as a pure TypeScript local orchestrator with no 
 export SYMPHIFONY_TRACKER_KIND=filesystem
 export SYMPHIFONY_WORKSPACE_ROOT=$PWD
 export SYMPHIFONY_PERSISTENCE=$PWD
-export SYMPHIFONY_ISSUES_FILE=/path/to/issues.json
-export SYMPHIFONY_ISSUES_JSON='[{"id":"LOCAL-1","title":"...","description":"...","state":"Todo"}]'
 export SYMPHIFONY_AGENT_COMMAND='codex run --json "$SYMPHIFONY_ISSUE_JSON"'
 export SYMPHIFONY_AGENT_PROVIDER=codex
 export SYMPHIFONY_WORKER_CONCURRENCY=2
@@ -80,7 +77,6 @@ npx symphifony --port 4040 --concurrency 2 --attempts 3
 ## Runtime behavior
 
 - Local bootstrap creates a source snapshot under `./.symphifony/source`.
-- Issues are loaded from the configured JSON source when available.
 - Workflow is rendered to `./.symphifony/WORKFLOW.local.md`.
 - Runtime state is stored under `./.symphifony/s3db/` by the `s3db.js` `FileSystemClient`.
 - Event log is stored in `./.symphifony/symphifony-local.log`.
