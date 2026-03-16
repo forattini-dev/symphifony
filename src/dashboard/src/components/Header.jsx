@@ -1,4 +1,4 @@
-import { Wifi, WifiOff, Sun, Moon, CircleDot, LayoutGrid, Activity, Settings } from "lucide-react";
+import { Wifi, WifiOff, Sun, Moon, CircleDot, LayoutGrid, Activity, Settings, Cpu } from "lucide-react";
 import { timeAgo } from "../utils.js";
 
 const PINNED_THEMES = ["auto", "light", "dark"];
@@ -7,6 +7,7 @@ const THEME_OPTIONS = [...PINNED_THEMES, ...OTHER_THEMES];
 
 const NAV_ITEMS = [
   { id: "issues", label: "Issues", icon: LayoutGrid },
+  { id: "providers", label: "Providers", icon: Cpu },
   { id: "runtime", label: "Runtime", icon: Settings },
 ];
 

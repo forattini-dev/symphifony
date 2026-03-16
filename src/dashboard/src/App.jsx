@@ -269,6 +269,8 @@ export default function App() {
                 onSelect={setSelectedIssue}
               />
             )
+          ) : view === "providers" ? (
+            <ProvidersView providersUsage={providersUsage} />
           ) : (
             <RuntimeView
               state={data}
