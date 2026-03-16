@@ -2,6 +2,7 @@ import React from "react";
 import { timeAgo } from "../utils.js";
 
 const STATE_BADGE = {
+  Planning: "badge-info",
   Todo: "badge-warning",
   Queued: "badge-info",
   Running: "badge-primary",
@@ -13,6 +14,7 @@ const STATE_BADGE = {
 };
 
 const STATE_BORDER_LEFT = {
+  Planning: "border-l-info",
   Todo: "border-l-warning",
   Queued: "border-l-info",
   Running: "border-l-primary",

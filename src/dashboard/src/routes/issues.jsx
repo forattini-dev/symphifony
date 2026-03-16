@@ -4,10 +4,10 @@ import ListView from "../components/ListView";
 import { Search, X, Filter, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 
-const STATES = ["Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
+const STATES = ["Planning", "Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
 
 const STATE_COLOR = {
-  Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
+  Planning: "badge-info", Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
   "In Review": "badge-secondary", Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
 };
 

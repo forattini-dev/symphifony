@@ -1,0 +1,1 @@
+- [project_symphifony_architecture.md](project_symphifony_architecture.md) — Symphifony project architecture overview: state machine, persistence, API, build, planning flow

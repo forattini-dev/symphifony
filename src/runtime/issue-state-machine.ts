@@ -18,22 +18,30 @@ type IssueStateMachineDefinition = {
 };
 
 export const ISSUE_STATE_TRANSITIONS: Record<string, readonly string[]> = {
-  Todo: ["Queued", "Cancelled"],
+  Planning: ["Todo", "Cancelled"],
+  Todo: ["Queued", "Planning", "Cancelled"],
   Queued: ["Running", "Todo", "Cancelled"],
   Running: ["In Review", "Interrupted", "Blocked", "Cancelled"],
   Interrupted: ["Queued", "Running", "Blocked", "Cancelled"],
   "In Review": ["Running", "Done", "Blocked", "Cancelled"],
   Blocked: ["Queued", "Cancelled"],
-  Done: ["Todo", "Cancelled"],
-  Cancelled: ["Todo", "Queued"],
+  Done: ["Planning", "Todo", "Cancelled"],
+  Cancelled: ["Planning", "Todo", "Queued"],
 };
 
 export const ISSUE_STATE_MACHINE_DEFINITION = {
-  initialState: "Todo",
+  initialState: "Planning",
   states: {
+    Planning: {
+      on: {
+        Todo: "Todo",
+        Cancelled: "Cancelled",
+      },
+    },
     Todo: {
       on: {
         Queued: "Queued",
+        Planning: "Planning",
         Cancelled: "Cancelled",
       },
     },
@@ -76,12 +84,14 @@ export const ISSUE_STATE_MACHINE_DEFINITION = {
     },
     Done: {
       on: {
+        Planning: "Planning",
         Todo: "Todo",
         Cancelled: "Cancelled",
       },
     },
     Cancelled: {
       on: {
+        Planning: "Planning",
         Todo: "Todo",
         Queued: "Queued",
       },

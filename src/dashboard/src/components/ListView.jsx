@@ -8,12 +8,12 @@ import {
 import { timeAgo, formatDuration } from "../utils.js";
 
 const STATE_BADGE = {
-  Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
+  Planning: "badge-info", Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
   "In Review": "badge-secondary", Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
 };
 
 const STATE_BG = {
-  Todo: "border-l-warning", Queued: "border-l-info", Running: "border-l-primary", Interrupted: "border-l-accent",
+  Planning: "border-l-info", Todo: "border-l-warning", Queued: "border-l-info", Running: "border-l-primary", Interrupted: "border-l-accent",
   "In Review": "border-l-secondary", Blocked: "border-l-error", Done: "border-l-success", Cancelled: "border-l-neutral",
 };
 

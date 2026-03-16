@@ -164,7 +164,7 @@ export function createIssueFromPayload(
     title: toStringValue(payload.title, `Issue ${identifier}`),
     description: toStringValue(payload.description, ""),
     priority: clamp(toNumberValue(payload.priority, 1), 1, 10),
-    state: "Todo",
+    state: payload.plan ? "Todo" : "Planning",
     branchName: toStringValue(payload.branchName) || toStringValue(payload.branch_name),
     url: toStringValue(payload.url),
     assigneeId: toStringValue(payload.assigneeId) || toStringValue(payload.assignee_id),

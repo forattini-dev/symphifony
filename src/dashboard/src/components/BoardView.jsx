@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useRef, useEffect, useState } from "react";
 import { IssueCard } from "./IssueCard.jsx";
 import { EmptyState } from "./EmptyState.jsx";
-import { Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
+import { Lightbulb, Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import { useDragAndDrop } from "../hooks/useDragAndDrop.js";
 
 function ColumnBadge({ count, className }) {
@@ -23,11 +23,11 @@ function ColumnBadge({ count, className }) {
 }
 
 // Kanban columns — Queued/Running/Interrupted are grouped as "In Progress"
-const COLUMNS = ["Todo", "In Progress", "In Review", "Blocked", "Done", "Cancelled"];
-const IN_PROGRESS_STATES = new Set(["Queued", "Running", "Interrupted"]);
+const COLUMNS = ["Planning", "In Progress", "In Review", "Blocked", "Done", "Cancelled"];
+const IN_PROGRESS_STATES = new Set(["Todo", "Queued", "Running", "Interrupted"]);
 
 const COLUMN_BADGE = {
-  Todo: "badge-warning",
+  Planning: "badge-info",
   "In Progress": "badge-primary",
   "In Review": "badge-secondary",
   Blocked: "badge-error",
@@ -36,7 +36,7 @@ const COLUMN_BADGE = {
 };
 
 const EMPTY_CONFIG = {
-  Todo: { icon: Plus, desc: "Create an issue to get started" },
+  Planning: { icon: Lightbulb, desc: "Create an issue to start planning" },
   "In Progress": { icon: Play, desc: "Issues move here when agents start" },
   "In Review": { icon: Eye, desc: "Awaiting review" },
   Blocked: { icon: AlertTriangle, desc: "Needs attention" },

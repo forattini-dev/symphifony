@@ -4,7 +4,7 @@ import {
   Folder, Layers, Gauge, History, Terminal, ArrowRight, Circle, CheckCircle2,
   PlayCircle, Eye, Ban, XCircle, Diff, Wrench, Copy, Check,
   Info, Code, Route, ClipboardCheck, ThumbsUp, ThumbsDown, MessageSquare,
-  Loader, Pause, ListOrdered,
+  Loader, Pause, ListOrdered, Lightbulb,
 } from "lucide-react";
 import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate, formatDuration } from "../utils.js";
 import { api } from "../api.js";
@@ -12,23 +12,23 @@ import { api } from "../api.js";
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const STATE_ICON = {
-  Todo: Circle, Queued: ListOrdered, Running: PlayCircle, Interrupted: Pause,
+  Planning: Lightbulb, Todo: Circle, Queued: ListOrdered, Running: PlayCircle, Interrupted: Pause,
   "In Review": Eye, Blocked: AlertTriangle, Done: CheckCircle2, Cancelled: XCircle,
 };
 const STATE_COLOR = {
-  Todo: "text-warning", Queued: "text-info", Running: "text-primary", Interrupted: "text-accent",
+  Planning: "text-info", Todo: "text-warning", Queued: "text-info", Running: "text-primary", Interrupted: "text-accent",
   "In Review": "text-secondary", Blocked: "text-error", Done: "text-success", Cancelled: "text-neutral",
 };
 const STATE_BTN = {
-  Todo: "btn-warning", Queued: "btn-info", Running: "btn-primary", Interrupted: "btn-accent",
+  Planning: "btn-info", Todo: "btn-warning", Queued: "btn-info", Running: "btn-primary", Interrupted: "btn-accent",
   "In Review": "btn-secondary", Blocked: "btn-error", Done: "btn-success", Cancelled: "btn-neutral",
 };
 const STATE_BADGE = {
-  Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
+  Planning: "badge-info", Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
   "In Review": "badge-secondary", Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
 };
 const STATE_BG = {
-  Todo: "bg-warning/10 border-warning/30", Queued: "bg-info/10 border-info/30",
+  Planning: "bg-info/10 border-info/30", Todo: "bg-warning/10 border-warning/30", Queued: "bg-info/10 border-info/30",
   Running: "bg-primary/10 border-primary/30", Interrupted: "bg-accent/10 border-accent/30",
   "In Review": "bg-secondary/10 border-secondary/30", Blocked: "bg-error/10 border-error/30",
   Done: "bg-success/10 border-success/30", Cancelled: "bg-neutral/10 border-neutral/30",
@@ -42,14 +42,18 @@ const BASE_TABS = [
   { id: "history", label: "History", icon: History },
 ];
 
+const PLANNING_TAB = { id: "planning", label: "Plan", icon: Lightbulb };
 const REVIEW_TAB = { id: "review", label: "Review", icon: ClipboardCheck };
 
 function getTabs(issueState) {
-  // Show Review tab for In Review, Done (to see verdict), and Blocked (review may have failed)
+  if (issueState === "Planning") {
+    return [PLANNING_TAB, BASE_TABS[0], ...BASE_TABS.slice(4)]; // Plan + Overview + History
+  }
   if (issueState === "In Review" || issueState === "Done" || issueState === "Blocked") {
     return [BASE_TABS[0], REVIEW_TAB, ...BASE_TABS.slice(1)];
   }
-  return BASE_TABS;
+  // For Todo and beyond, show Plan tab so user can see the plan
+  return [BASE_TABS[0], PLANNING_TAB, ...BASE_TABS.slice(1)];
 }
 
 // ── Shared components ───────────────────────────────────────────────────────
@@ -529,6 +533,145 @@ function RoutingTab({ issue }) {
 
 // ── Tab: History ────────────────────────────────────────────────────────────
 
+// ── Tab: Planning ───────────────────────────────────────────────────────────
+
+const COMPLEXITY_COLOR = { trivial: "badge-ghost", low: "badge-success", medium: "badge-warning", high: "badge-error" };
+
+function PlanningTab({ issue, onStateChange }) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const plan = issue.plan;
+  const isPlanning = issue.state === "Planning";
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await api.post(`/issues/${encodeURIComponent(issue.id)}/plan`);
+      if (!res.ok) throw new Error(res.error || "Plan generation failed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    try {
+      await api.post(`/issues/${encodeURIComponent(issue.id)}/approve`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // No plan yet — show generate button
+  if (!plan && !generating) {
+    return (
+      <div className="space-y-4">
+        <div className="text-center py-8 space-y-3">
+          <Lightbulb className="size-10 mx-auto opacity-20" />
+          <div className="text-sm opacity-60">No plan generated yet.</div>
+          <p className="text-xs opacity-40 max-w-sm mx-auto">
+            Generate an AI plan to break this issue into actionable steps with suggested paths, labels, and effort.
+          </p>
+          {isPlanning && (
+            <button className="btn btn-primary gap-1.5" onClick={handleGenerate}>
+              <Lightbulb className="size-4" /> Generate Plan
+            </button>
+          )}
+        </div>
+        {error && <div className="alert alert-error text-sm">{error}</div>}
+      </div>
+    );
+  }
+
+  // Generating
+  if (generating) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-12">
+        <Loader className="size-8 animate-spin text-primary" />
+        <div className="text-sm opacity-60">Generating execution plan...</div>
+        <div className="text-xs opacity-30">This may take a few minutes</div>
+      </div>
+    );
+  }
+
+  // Plan exists — show it
+  return (
+    <div className="space-y-5">
+      {/* Badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`badge badge-sm ${COMPLEXITY_COLOR[plan.estimatedComplexity] || "badge-ghost"}`}>
+          {plan.estimatedComplexity} complexity
+        </span>
+        {plan.provider && <span className="badge badge-sm badge-ghost">via {plan.provider}</span>}
+        {plan.suggestedEffort?.default && <span className="badge badge-sm badge-outline">effort: {plan.suggestedEffort.default}</span>}
+      </div>
+
+      {/* Summary */}
+      <Section title="Summary" icon={Info}>
+        <p className="text-sm leading-relaxed">{plan.summary}</p>
+      </Section>
+
+      {/* Steps */}
+      <Section title={`Steps (${plan.steps.length})`} icon={ListOrdered}>
+        <div className="space-y-2">
+          {plan.steps.map((s, i) => (
+            <div key={i} className="flex gap-3 p-3 bg-base-200 rounded-box">
+              <div className="flex items-center justify-center size-6 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">
+                {s.step}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{s.action}</div>
+                {s.details && <div className="text-xs opacity-50 mt-0.5">{s.details}</div>}
+                {s.files?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {s.files.map((f) => (
+                      <span key={f} className="badge badge-xs badge-ghost font-mono">{f}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Suggested paths */}
+      {plan.suggestedPaths?.length > 0 && (
+        <Section title="Suggested Paths" icon={Folder}>
+          <div className="flex flex-wrap gap-1">
+            {plan.suggestedPaths.map((p) => <span key={p} className="badge badge-sm badge-ghost font-mono">{p}</span>)}
+          </div>
+        </Section>
+      )}
+
+      {/* Suggested labels */}
+      {plan.suggestedLabels?.length > 0 && (
+        <Section title="Suggested Labels" icon={Tag}>
+          <div className="flex flex-wrap gap-1">
+            {plan.suggestedLabels.map((l) => <span key={l} className="badge badge-sm badge-outline">{l}</span>)}
+          </div>
+        </Section>
+      )}
+
+      {error && <div className="alert alert-error text-sm">{error}</div>}
+
+      {/* Actions */}
+      {isPlanning && (
+        <div className="flex items-center gap-2 pt-3 border-t border-base-300">
+          <button className="btn btn-primary gap-1.5" onClick={handleApprove}>
+            <CheckCircle2 className="size-4" /> Approve & Start
+          </button>
+          <button className="btn btn-ghost btn-sm gap-1" onClick={handleGenerate}>
+            <RotateCcw className="size-3" /> Re-plan
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistoryTab({ issue }) {
   const history = Array.isArray(issue.history) ? issue.history : [];
 
@@ -723,7 +866,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
 
   // Reset tab when issue changes — auto-open Review tab when In Review
   useEffect(() => {
-    setTab(issue?.state === "In Review" ? "review" : "overview");
+    setTab(issue?.state === "Planning" ? "planning" : issue?.state === "In Review" ? "review" : "overview");
     if (issue) { setVisible(true); setClosing(false); }
   }, [issue?.id, issue?.state]);
 
@@ -783,6 +926,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
         <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
           <div key={tab} className="animate-fade-in">
             {tab === "overview" && <OverviewTab issue={issue} onStateChange={onStateChange} onRetry={onRetry} onCancel={onCancel} />}
+            {tab === "planning" && <PlanningTab issue={issue} onStateChange={onStateChange} />}
             {tab === "review" && <ReviewTab issue={issue} issueId={issue.id} onStateChange={onStateChange} />}
             {tab === "execution" && <ExecutionTab issue={issue} />}
             {tab === "diff" && <DiffTab issueId={issue.id} />}

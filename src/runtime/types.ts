@@ -1,6 +1,7 @@
 export type JsonRecord = Record<string, unknown>;
 
 export type IssueState =
+  | "Planning"
   | "Todo"
   | "Queued"
   | "Running"
@@ -74,15 +75,61 @@ export type IssuePlanStep = {
   action: string;
   files?: string[];
   details?: string;
+  ownerType?: "human" | "agent" | "skill" | "subagent" | "tool";
+  doneWhen?: string;
+};
+
+export type IssuePlanPhase = {
+  phaseName: string;
+  goal: string;
+  tasks: IssuePlanStep[];
+  dependencies?: string[];
+  outputs?: string[];
+};
+
+export type IssuePlanRisk = {
+  risk: string;
+  impact: string;
+  mitigation: string;
+};
+
+export type IssuePlanToolingDecision = {
+  shouldUseSkills: boolean;
+  skillsToUse: { name: string; why: string }[];
+  shouldUseSubagents: boolean;
+  subagentsToUse: { name: string; role: string; why: string }[];
+  decisionSummary: string;
 };
 
 export type IssuePlan = {
+  // Core
   summary: string;
+  estimatedComplexity: "trivial" | "low" | "medium" | "high";
+
+  // Structured plan (new format with phases)
+  phases?: IssuePlanPhase[];
+  // Simple steps (legacy/simple format)
   steps: IssuePlanStep[];
+
+  // Context
+  assumptions?: string[];
+  constraints?: string[];
+  unknowns?: { question: string; whyItMatters: string; howToResolve: string }[];
+  successCriteria?: string[];
+  risks?: IssuePlanRisk[];
+  validation?: string[];
+  deliverables?: string[];
+
+  // Tooling
+  executionStrategy?: { approach: string; whyThisApproach: string; alternativesConsidered?: string[] };
+  toolingDecision?: IssuePlanToolingDecision;
+
+  // Suggestions
   suggestedPaths: string[];
   suggestedLabels: string[];
   suggestedEffort: EffortConfig;
-  estimatedComplexity: "trivial" | "low" | "medium" | "high";
+
+  // Meta
   provider: string;
   createdAt: string;
 };

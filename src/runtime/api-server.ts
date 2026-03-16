@@ -52,7 +52,7 @@ import { analyzeParallelizability } from "./scheduler.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
 import { TERMINAL_STATES } from "./constants.ts";
 import { enhanceIssueField } from "./issue-enhancer.ts";
-import { generatePlan } from "./issue-planner.ts";
+import { generatePlan, loadPlanningSession, savePlanningInput, clearPlanningSession } from "./issue-planner.ts";
 import {
   applyPersistedSettings,
   inferSettingScope,
@@ -462,7 +462,40 @@ export async function startApiServer(
         await persistState(state);
         return c.json({ ok: true, workerConcurrency: state.config.workerConcurrency });
       },
+      "GET /api/planning/session": async (c: any) => {
+        const session = await loadPlanningSession();
+        return c.json({ ok: true, session });
+      },
+      "POST /api/planning/save": async (c: any) => {
+        try {
+          const payload = await c.req.json() as JsonRecord;
+          const title = toStringValue(payload.title);
+          const description = toStringValue(payload.description);
+          const session = await savePlanningInput(title, description);
+          return c.json({ ok: true, session });
+        } catch (error) {
+          return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      },
+      "POST /api/planning/generate": async (c: any) => {
+        try {
+          const payload = await c.req.json() as JsonRecord;
+          const title = toStringValue(payload.title);
+          const description = toStringValue(payload.description);
+          if (!title) return c.json({ ok: false, error: "Title is required." }, 400);
+          const plan = await generatePlan(title, description, state.config, workflowDefinition);
+          return c.json({ ok: true, plan });
+        } catch (error) {
+          logger.error({ err: error }, `Plan generation failed: ${String(error)}`);
+          return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      },
+      "POST /api/planning/clear": async (c: any) => {
+        await clearPlanningSession();
+        return c.json({ ok: true });
+      },
       "POST /api/issues/plan": async (c: any) => {
+        // Legacy alias
         try {
           const payload = await c.req.json() as JsonRecord;
           const title = toStringValue(payload.title);
@@ -554,6 +587,29 @@ export async function startApiServer(
         return mutateIssueState(c, async (issue) => {
           await transitionIssueState(issue, "Cancelled", "Manual cancel requested.");
           addEvent(state, issue.id, "manual", `Manual cancel requested for ${issue.id}.`);
+        });
+      },
+      "POST /api/issues/:id/plan": async (c: any) => {
+        return mutateIssueState(c, async (issue) => {
+          if (issue.state !== "Planning") {
+            throw new Error(`Cannot plan issue in state ${issue.state}. Must be in Planning.`);
+          }
+          const plan = await generatePlan(issue.title, issue.description, state.config, workflowDefinition);
+          issue.plan = plan;
+          addEvent(state, issue.id, "info", `Plan generated: ${plan.steps.length} steps, complexity: ${plan.estimatedComplexity}.`);
+          // Apply plan suggestions
+          if (plan.suggestedPaths?.length && !(issue.paths?.length)) issue.paths = plan.suggestedPaths;
+          if (plan.suggestedLabels?.length && !issue.labels?.length) issue.labels = plan.suggestedLabels;
+          if (plan.suggestedEffort && !issue.effort) issue.effort = plan.suggestedEffort;
+        });
+      },
+      "POST /api/issues/:id/approve": async (c: any) => {
+        return mutateIssueState(c, async (issue) => {
+          if (issue.state !== "Planning") {
+            throw new Error(`Cannot approve issue in state ${issue.state}. Must be in Planning.`);
+          }
+          await transitionIssueState(issue, "Todo", `Plan approved for ${issue.identifier}. Ready for execution.`);
+          addEvent(state, issue.id, "manual", `Plan approved — issue ${issue.identifier} moved to Todo.`);
         });
       },
       "POST /api/refresh": async (c: any) => {

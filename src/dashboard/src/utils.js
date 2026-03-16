@@ -95,16 +95,17 @@ export function isoWeek(date) {
   return `${tmp.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-export const STATES = ["Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
+export const STATES = ["Planning", "Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
 export const ISSUE_STATE_MACHINE = {
-  Todo: ["Queued", "Cancelled"],
+  Planning: ["Todo", "Cancelled"],
+  Todo: ["Queued", "Planning", "Cancelled"],
   Queued: ["Running", "Todo", "Cancelled"],
   Running: ["In Review", "Interrupted", "Blocked", "Cancelled"],
   Interrupted: ["Queued", "Running", "Blocked", "Cancelled"],
   "In Review": ["Running", "Done", "Blocked", "Cancelled"],
   Blocked: ["Queued", "Cancelled"],
-  Done: ["Todo", "Cancelled"],
-  Cancelled: ["Todo", "Queued"],
+  Done: ["Planning", "Todo", "Cancelled"],
+  Cancelled: ["Planning", "Todo", "Queued"],
 };
 
 export function getIssueTransitions(state) {

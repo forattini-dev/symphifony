@@ -133,10 +133,10 @@ function StepIndicator({ current }) {
 
 // ── Step wrapper with slide animation ───────────────────────────────────────
 
-function StepContent({ direction, stepKey, children }) {
+function StepContent({ direction, stepKey, center, children }) {
   const animClass = direction === "forward" ? "animate-slide-in-right" : "animate-slide-in-left";
   return (
-    <div key={stepKey} className={`${animClass} w-full max-w-2xl mx-auto`}>
+    <div key={stepKey} className={`${animClass} w-full max-w-2xl mx-auto ${center ? "my-auto" : ""}`}>
       {children}
     </div>
   );
@@ -255,7 +255,7 @@ function ScanProjectStep({
       .then((data) => {
         setScanResult(data);
         if (!projectDescription) {
-          const desc = data?.packageInfo?.description || data?.readmeExcerpt || "";
+          const desc = data?.packageDescription || data?.packageInfo?.description || data?.readmeExcerpt || "";
           if (desc) setProjectDescription(desc);
         }
       })
@@ -277,9 +277,20 @@ function ScanProjectStep({
     }
   }, [selectedProvider, setAnalyzing, setAnalysisResult, setProjectDescription]);
 
-  const foundFiles = scanResult?.foundFiles || [];
-  const existingAgents = scanResult?.existingAgents || [];
-  const existingSkills = scanResult?.existingSkills || [];
+  // Convert backend files object → array for display
+  const FILE_LABELS = {
+    claudeMd: "CLAUDE.md", claudeDir: ".claude/", codexDir: ".codex/",
+    readmeMd: "README.md", packageJson: "package.json", workflowMd: "WORKFLOW.md",
+    agentsMd: "AGENTS.md", claudeAgentsDir: ".claude/agents/", claudeSkillsDir: ".claude/skills/",
+    codexAgentsDir: ".codex/agents/", codexSkillsDir: ".codex/skills/",
+  };
+  const scanFiles = scanResult?.files || {};
+  const foundFiles = Object.entries(scanFiles).map(([key, exists]) => ({
+    path: FILE_LABELS[key] || key,
+    exists: Boolean(exists),
+  }));
+  const existingAgents = (scanResult?.existingAgents || []).map((a) => typeof a === "string" ? { name: a } : a);
+  const existingSkills = (scanResult?.existingSkills || []).map((s) => typeof s === "string" ? { name: s } : s);
   const detectedStack = analysisResult?.stack || [];
 
   return (
@@ -1042,8 +1053,8 @@ export default function OnboardingWizard({ onComplete }) {
     step === 6 ||                                                // Workers & Theme
     step === 7;                                                  // Launch
 
-  const existingAgents = scanResult?.existingAgents || [];
-  const existingSkills = scanResult?.existingSkills || [];
+  const existingAgents = (scanResult?.existingAgents || []).map((a) => typeof a === "string" ? { name: a } : a);
+  const existingSkills = (scanResult?.existingSkills || []).map((s) => typeof s === "string" ? { name: s } : s);
 
   const config = {
     provider: selectedProvider,
@@ -1071,8 +1082,8 @@ export default function OnboardingWizard({ onComplete }) {
       )}
 
       {/* Step content area */}
-      <div className="relative z-10 flex-1 flex items-center justify-center px-4 overflow-y-auto">
-        <StepContent direction={direction} stepKey={step}>
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-start px-4 py-6 overflow-y-auto">
+        <StepContent direction={direction} stepKey={step} center={step === 0 || step === 1 || step === 7}>
           {step === 0 && <WelcomeStep workspacePath={workspacePath} />}
           {step === 1 && (
             <ProvidersStep

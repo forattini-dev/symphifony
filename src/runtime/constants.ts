@@ -89,6 +89,7 @@ export const FRONTEND_OFFLINE_HTML = `${FRONTEND_DIR}/offline.html`;
 export const DEBUG_BOOT = env.SYMPHIFONY_DEBUG_BOOT === "1";
 
 export const ALLOWED_STATES: IssueState[] = [
+  "Planning",
   "Todo",
   "Queued",
   "Running",

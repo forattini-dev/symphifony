@@ -22,6 +22,7 @@ import { startApiServer } from "./api-server.ts";
 import { scheduler, installGracefulShutdown } from "./scheduler.ts";
 import { cleanWorkspace, isAgentStillRunning, cleanStalePidFile } from "./agent.ts";
 import { startDevFrontend } from "./dev-server.ts";
+import { recoverPlanningSession } from "./issue-planner.ts";
 
 function usage() {
   console.log(
@@ -90,6 +91,7 @@ async function main() {
   await initStateStore();
   debugBoot("main:store-initialized");
   await persistDetectedProvidersSetting(detectedProviders);
+  await recoverPlanningSession();
 
   const previous = await loadPersistedState();
   let persistedSettings = await loadRuntimeSettings();

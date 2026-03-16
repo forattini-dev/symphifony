@@ -95,57 +95,70 @@ export async function recoverPlanningSession(): Promise<void> {
 
 const PLAN_JSON_SCHEMA = JSON.stringify({
   type: "object",
+  required: ["summary", "steps", "estimatedComplexity", "suggestedPaths", "suggestedLabels"],
   properties: {
-    summary: { type: "string", description: "One-paragraph summary of the plan" },
-    steps: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          step: { type: "number" },
-          action: { type: "string" },
-          files: { type: "array", items: { type: "string" } },
-          details: { type: "string" },
-        },
-        required: ["step", "action"],
-      },
-    },
+    summary: { type: "string" },
+    estimatedComplexity: { type: "string", enum: ["trivial", "low", "medium", "high"] },
+    assumptions: { type: "array", items: { type: "string" } },
+    constraints: { type: "array", items: { type: "string" } },
+    unknowns: { type: "array", items: { type: "object", properties: { question: { type: "string" }, whyItMatters: { type: "string" }, howToResolve: { type: "string" } }, required: ["question"] } },
+    successCriteria: { type: "array", items: { type: "string" } },
+    executionStrategy: { type: "object", properties: { approach: { type: "string" }, whyThisApproach: { type: "string" }, alternativesConsidered: { type: "array", items: { type: "string" } } } },
+    toolingDecision: { type: "object", properties: {
+      shouldUseSkills: { type: "boolean" },
+      skillsToUse: { type: "array", items: { type: "object", properties: { name: { type: "string" }, why: { type: "string" } }, required: ["name", "why"] } },
+      shouldUseSubagents: { type: "boolean" },
+      subagentsToUse: { type: "array", items: { type: "object", properties: { name: { type: "string" }, role: { type: "string" }, why: { type: "string" } }, required: ["name", "role", "why"] } },
+      decisionSummary: { type: "string" },
+    } },
+    steps: { type: "array", items: { type: "object", properties: { step: { type: "number" }, action: { type: "string" }, files: { type: "array", items: { type: "string" } }, details: { type: "string" }, ownerType: { type: "string", enum: ["human", "agent", "skill", "subagent", "tool"] }, doneWhen: { type: "string" } }, required: ["step", "action"] } },
+    risks: { type: "array", items: { type: "object", properties: { risk: { type: "string" }, impact: { type: "string" }, mitigation: { type: "string" } }, required: ["risk"] } },
+    validation: { type: "array", items: { type: "string" } },
+    deliverables: { type: "array", items: { type: "string" } },
     suggestedPaths: { type: "array", items: { type: "string" } },
     suggestedLabels: { type: "array", items: { type: "string" } },
-    suggestedEffort: {
-      type: "object",
-      properties: {
-        default: { type: "string", enum: ["low", "medium", "high"] },
-        planner: { type: "string", enum: ["low", "medium", "high"] },
-        executor: { type: "string", enum: ["low", "medium", "high", "extra-high"] },
-        reviewer: { type: "string", enum: ["low", "medium", "high"] },
-      },
-    },
-    estimatedComplexity: { type: "string", enum: ["trivial", "low", "medium", "high"] },
+    suggestedEffort: { type: "object", properties: { default: { type: "string" }, planner: { type: "string" }, executor: { type: "string" }, reviewer: { type: "string" } } },
   },
-  required: ["summary", "steps", "estimatedComplexity"],
 });
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
 function buildPlanPrompt(title: string, description: string): string {
   return [
-    "You are a technical planner for a software project.",
-    "Given the following issue, create a structured execution plan.",
-    "",
-    "Return strict JSON matching the provided schema.",
+    "You are a senior technical execution planner.",
+    "Produce the best possible plan for the issue below, filling the JSON schema precisely.",
     "",
     `Issue title: ${title}`,
     `Issue description: ${description || "(none provided)"}`,
     "",
-    "Guidelines:",
-    "- Break the work into concrete, actionable steps (usually 2-6 steps).",
-    "- Each step should describe WHAT to do, not HOW (the executor agent will figure that out).",
-    "- Suggest file paths that are likely relevant.",
-    "- Suggest labels that categorize this work (bug, feature, frontend, backend, docs, refactor, etc).",
-    "- Estimate complexity: trivial (< 5 min), low (5-15 min), medium (15-60 min), high (> 1 hour).",
-    "- Suggest reasoning effort: low for simple fixes, medium for standard work, high for complex architecture.",
-    "- Keep the summary concise — one paragraph max.",
+    "Quality rules:",
+    "- Be concrete, not generic. No vague phrases like 'implement' or 'improve' without detail.",
+    "- Break work into actionable steps (2-8 steps). Each step describes WHAT, not HOW.",
+    "- Each step must have a clear 'doneWhen' acceptance criterion.",
+    "- Identify assumptions, constraints, unknowns, and risks.",
+    "- For unknowns, specify what question needs answering and how to resolve it.",
+    "- Suggest file paths that are likely relevant to the changes.",
+    "- Suggest labels: bug, feature, frontend, backend, docs, refactor, security, performance, etc.",
+    "",
+    "Complexity estimation:",
+    "- trivial: < 5 min, single-file cosmetic change",
+    "- low: 5-15 min, small focused change",
+    "- medium: 15-60 min, multi-file change with testing",
+    "- high: > 1 hour, architectural change or new feature",
+    "",
+    "Tooling reflection (REQUIRED):",
+    "- Evaluate whether the task benefits from using skills (specialized instructions for quality/consistency).",
+    "- Evaluate whether subtasks should use subagents (parallel work, isolated context, specialization).",
+    "- Only recommend skills/agents when there is a concrete justification.",
+    "- For each step, set ownerType: 'agent' for automated work, 'human' for manual review, 'skill' for specialized skills, 'subagent' for delegated work.",
+    "",
+    "Effort suggestion:",
+    "- low: simple fixes, no deep reasoning needed",
+    "- medium: standard development work",
+    "- high: complex architecture, security, or cross-cutting changes",
+    "- Set per-role if different: planner, executor, reviewer",
+    "",
+    "Return strict JSON. No text outside JSON.",
   ].join("\n");
 }
 
@@ -171,27 +184,53 @@ function getPlanCommand(provider: string): string {
 
 // ── Parser ───────────────────────────────────────────────────────────────────
 
+function toStringArray(val: unknown): string[] {
+  return Array.isArray(val) ? val.filter((v): v is string => typeof v === "string") : [];
+}
+
 function tryBuildPlan(parsed: any): IssuePlan | null {
   if (!parsed || typeof parsed !== "object") return null;
   if (!parsed.summary || !Array.isArray(parsed.steps)) return null;
 
+  const complexities = ["trivial", "low", "medium", "high"];
+
   return {
     summary: String(parsed.summary),
+    estimatedComplexity: complexities.includes(parsed.estimatedComplexity) ? parsed.estimatedComplexity
+      : complexities.includes(parsed.complexity) ? parsed.complexity : "medium",
+
     steps: parsed.steps.map((s: any, i: number) => ({
       step: s.step ?? i + 1,
-      action: String(s.action || s.description || s.title || ""),
-      files: Array.isArray(s.files) ? s.files.map(String) : undefined,
+      action: String(s.action || s.description || s.title || s.task_name || ""),
+      files: toStringArray(s.files),
       details: s.details ? String(s.details) : undefined,
+      ownerType: s.ownerType || s.owner_type || undefined,
+      doneWhen: s.doneWhen || s.done_when || undefined,
     })),
-    suggestedPaths: Array.isArray(parsed.suggestedPaths) ? parsed.suggestedPaths.map(String)
-      : Array.isArray(parsed.paths) ? parsed.paths.map(String) : [],
-    suggestedLabels: Array.isArray(parsed.suggestedLabels) ? parsed.suggestedLabels.map(String)
-      : Array.isArray(parsed.labels) ? parsed.labels.map(String) : [],
-    suggestedEffort: parsed.suggestedEffort || parsed.effort || { default: "medium" },
-    estimatedComplexity: ["trivial", "low", "medium", "high"].includes(parsed.estimatedComplexity)
-      ? parsed.estimatedComplexity
-      : ["trivial", "low", "medium", "high"].includes(parsed.complexity)
-        ? parsed.complexity : "medium",
+
+    assumptions: toStringArray(parsed.assumptions),
+    constraints: toStringArray(parsed.constraints),
+    unknowns: Array.isArray(parsed.unknowns) ? parsed.unknowns.map((u: any) => ({
+      question: String(u.question || ""),
+      whyItMatters: String(u.whyItMatters || u.why_it_matters || ""),
+      howToResolve: String(u.howToResolve || u.how_to_resolve || ""),
+    })) : undefined,
+    successCriteria: toStringArray(parsed.successCriteria || parsed.success_criteria),
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map((r: any) => ({
+      risk: String(r.risk || ""),
+      impact: String(r.impact || ""),
+      mitigation: String(r.mitigation || ""),
+    })) : undefined,
+    validation: toStringArray(parsed.validation),
+    deliverables: toStringArray(parsed.deliverables),
+
+    executionStrategy: parsed.executionStrategy || parsed.execution_strategy || undefined,
+    toolingDecision: parsed.toolingDecision || parsed.tooling_decision || undefined,
+
+    suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.paths),
+    suggestedLabels: toStringArray(parsed.suggestedLabels || parsed.suggested_labels || parsed.labels),
+    suggestedEffort: parsed.suggestedEffort || parsed.suggested_effort || parsed.effort || { default: "medium" },
+
     provider: "",
     createdAt: now(),
   };

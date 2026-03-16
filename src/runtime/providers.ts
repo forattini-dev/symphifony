@@ -115,8 +115,8 @@ export function getProviderDefaultCommand(provider: string, reasoningEffort?: st
   const effortFlag = reasoningEffort ? `--reasoning-effort ${reasoningEffort}` : "";
 
   if (provider === "codex") {
-    // Codex supports: low, medium, high, extra-high
-    return `codex exec --skip-git-repo-check ${effortFlag} < "$SYMPHIFONY_PROMPT_FILE"`.replace(/  +/g, " ").trim();
+    // Codex does not support --reasoning-effort flag; effort is controlled via model choice
+    return `codex exec --skip-git-repo-check < "$SYMPHIFONY_PROMPT_FILE"`;
   }
   if (provider === "claude") {
     // Claude supports: low, medium, high (extra-high maps to high)
