@@ -13,7 +13,7 @@ function SlotLiveInfo({ issueId }) {
 
   const fetchLive = useCallback(async () => {
     try {
-      const res = await api.get(`/issues/${encodeURIComponent(issueId)}/live`);
+      const res = await api.get(`/live/${encodeURIComponent(issueId)}`);
       setLive(res);
     } catch { /* ignore */ }
   }, [issueId]);

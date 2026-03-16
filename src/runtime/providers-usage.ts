@@ -45,27 +45,27 @@ interface ProvidersUsageResult {
 
 function computeNextMonday(): Date {
   const now = new Date();
-  const dayOfWeek = now.getDay();
-  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  const utcDay = now.getUTCDay();
+  const daysUntilMonday = utcDay === 0 ? 1 : utcDay === 1 ? 7 : 8 - utcDay;
   const next = new Date(now);
-  next.setDate(next.getDate() + daysUntilMonday);
-  next.setHours(0, 0, 0, 0);
+  next.setUTCDate(next.getUTCDate() + daysUntilMonday);
+  next.setUTCHours(0, 0, 0, 0);
   return next;
 }
 
 function computeWeekStart(): Date {
-  const weekStart = new Date();
-  const dayOfWeek = weekStart.getDay();
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  weekStart.setDate(weekStart.getDate() - daysFromMonday);
-  weekStart.setHours(0, 0, 0, 0);
-  return weekStart;
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  const utcDay = d.getUTCDay();
+  const daysFromMonday = utcDay === 0 ? 6 : utcDay - 1;
+  d.setUTCDate(d.getUTCDate() - daysFromMonday);
+  return d;
 }
 
 function computeTodayStart(): Date {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  return todayStart;
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
 }
 
 function makePeriod(input: number, output: number, sessions: number, since: string): UsagePeriod {

@@ -22,6 +22,8 @@ export default defineConfig({
       "/config": "http://localhost:4000",
       "/refresh": "http://localhost:4000",
       "/health": "http://localhost:4000",
+      "/live": "http://localhost:4000",
+      "/diff": "http://localhost:4000",
       "/docs": "http://localhost:4000",
       "/ws": { target: "ws://localhost:4000", ws: true },
     },

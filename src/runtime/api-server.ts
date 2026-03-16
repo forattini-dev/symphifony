@@ -397,7 +397,7 @@ export async function startApiServer(
         await persistState(state);
         return c.json({ queued: true, requestedAt: now() }, 202);
       },
-      "GET /issues/:id/live": async (c: any) => {
+      "GET /live/:id": async (c: any) => {
         const issueId = parseIssue(c);
         if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
         const issue = findIssue(issueId);
@@ -444,7 +444,7 @@ export async function startApiServer(
           outputTail: issue.commandOutputTail || "",
         });
       },
-      "GET /issues/:id/diff": async (c: any) => {
+      "GET /diff/:id": async (c: any) => {
         const issueId = parseIssue(c);
         if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
         const issue = findIssue(issueId);

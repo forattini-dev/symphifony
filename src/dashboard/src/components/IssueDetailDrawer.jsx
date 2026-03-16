@@ -5,7 +5,7 @@ import {
   PlayCircle, Eye, Ban, XCircle, Diff, Wrench, Copy, Check,
   Info, Code, Route, ClipboardCheck, ThumbsUp, ThumbsDown, MessageSquare,
 } from "lucide-react";
-import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate } from "../utils.js";
+import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate, formatDuration } from "../utils.js";
 import { api } from "../api.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -91,13 +91,7 @@ function CopyButton({ text }) {
   );
 }
 
-function formatDuration(ms) {
-  if (!ms && ms !== 0) return "-";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
-  return `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`;
-}
+// formatDuration imported from utils.js
 
 function getStateMachineOrder(state) {
   return { Todo: 0, "In Progress": 1, "In Review": 2, Blocked: 2, Done: 3, Cancelled: 3 }[state] ?? 0;
@@ -201,7 +195,7 @@ function LiveMonitor({ issueId, running, startedAt }) {
 
   const fetchLive = useCallback(async () => {
     try {
-      const res = await api.get(`/issues/${encodeURIComponent(issueId)}/live`);
+      const res = await api.get(`/live/${encodeURIComponent(issueId)}`);
       setLive(res);
     } catch { /* ignore */ }
   }, [issueId]);
@@ -302,7 +296,7 @@ function DiffTab({ issueId }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get(`/issues/${encodeURIComponent(issueId)}/diff`);
+      const res = await api.get(`/diff/${encodeURIComponent(issueId)}`);
       setDiff(res.diff || res.message || "(no changes)");
     } catch (err) {
       setError(err.message);
@@ -506,7 +500,7 @@ function ReviewTab({ issue, issueId, onStateChange }) {
   const fetchDiff = useCallback(async () => {
     setDiffLoading(true);
     try {
-      const res = await api.get(`/issues/${encodeURIComponent(issueId)}/diff`);
+      const res = await api.get(`/diff/${encodeURIComponent(issueId)}`);
       setDiff(res.diff || res.message || "(no changes)");
     } catch { setDiff(null); }
     finally { setDiffLoading(false); }

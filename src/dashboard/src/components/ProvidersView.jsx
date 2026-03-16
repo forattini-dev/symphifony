@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Cpu, Zap, Clock, Hash, ChevronDown, ChevronUp, CircleDot, RefreshCw } from "lucide-react";
+import { Cpu, Zap, Clock, Hash, ChevronDown, ChevronUp, CircleDot, RefreshCw, ArrowDown, ArrowUp, CalendarClock } from "lucide-react";
 
 function formatTokens(count) {
   if (!count || count === 0) return "0";
@@ -8,7 +8,22 @@ function formatTokens(count) {
   return String(count);
 }
 
-function UsageMeter({ label, tokens, sessions, icon: Icon }) {
+function formatRelativeTime(isoDate) {
+  if (!isoDate) return "";
+  const target = new Date(isoDate);
+  const now = new Date();
+  const diffMs = target.getTime() - now.getTime();
+  if (diffMs <= 0) return "now";
+  const diffH = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffD = Math.floor(diffH / 24);
+  if (diffD > 0) return `${diffD}d ${diffH % 24}h`;
+  const diffM = Math.floor((diffMs / (1000 * 60)) % 60);
+  if (diffH > 0) return `${diffH}h ${diffM}m`;
+  return `${diffM}m`;
+}
+
+function UsageMeter({ label, period, icon: Icon }) {
+  const hasBreakdown = period.inputTokens > 0 && period.outputTokens > 0;
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-base-100">
       <div className="p-2 rounded-lg bg-base-300">
@@ -16,11 +31,77 @@ function UsageMeter({ label, tokens, sessions, icon: Icon }) {
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-xs opacity-60">{label}</div>
-        <div className="font-mono font-semibold text-sm">{formatTokens(tokens)} tokens</div>
+        <div className="font-mono font-semibold text-sm">{formatTokens(period.tokensUsed)} tokens</div>
+        {hasBreakdown && (
+          <div className="flex gap-3 mt-0.5">
+            <span className="text-[10px] opacity-50 flex items-center gap-0.5">
+              <ArrowDown className="size-2.5" /> {formatTokens(period.inputTokens)}
+            </span>
+            <span className="text-[10px] opacity-50 flex items-center gap-0.5">
+              <ArrowUp className="size-2.5" /> {formatTokens(period.outputTokens)}
+            </span>
+          </div>
+        )}
       </div>
       <div className="text-right">
         <div className="text-xs opacity-60">sessions</div>
-        <div className="font-mono text-sm">{sessions}</div>
+        <div className="font-mono text-sm">{period.sessions}</div>
+      </div>
+    </div>
+  );
+}
+
+function WeeklyProgressBar({ percentUsed, weeklyLimit, weeklyUsed }) {
+  if (percentUsed == null) return null;
+
+  const progressClass =
+    percentUsed >= 90 ? "progress-error" :
+    percentUsed >= 70 ? "progress-warning" :
+    "progress-primary";
+
+  const available = Math.max(0, 100 - percentUsed);
+
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="opacity-60">Weekly quota</span>
+        <span className="font-mono">
+          {formatTokens(weeklyUsed)} / {formatTokens(weeklyLimit)}
+        </span>
+      </div>
+      <progress
+        className={`progress ${progressClass} w-full`}
+        value={percentUsed}
+        max={100}
+      />
+      <div className="flex justify-between text-[10px] mt-1">
+        <span className="opacity-50">{percentUsed}% used</span>
+        <span className={`font-semibold ${available <= 10 ? "text-error" : available <= 30 ? "text-warning" : "text-success"}`}>
+          {available}% available
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ResetCountdown({ nextResetAt, resetInfo }) {
+  const relative = formatRelativeTime(nextResetAt);
+  const resetDate = nextResetAt ? new Date(nextResetAt) : null;
+  const formatted = resetDate
+    ? resetDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })
+    : "";
+
+  return (
+    <div className="flex items-center gap-2 text-xs bg-base-100 rounded-lg px-3 py-2">
+      <CalendarClock className="size-3.5 opacity-50 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="opacity-50">{resetInfo}</div>
+        {nextResetAt && (
+          <div className="font-mono font-medium mt-0.5">
+            Resets in <span className="text-primary">{relative}</span>
+            <span className="opacity-40"> — {formatted}</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -62,7 +143,7 @@ function ModelsList({ models, currentModel }) {
 }
 
 function ProviderCard({ provider }) {
-  const { name, available, models, currentModel, usage, resetInfo } = provider;
+  const { name, available, models, currentModel, usage, resetInfo, nextResetAt, weeklyLimitEstimate, percentUsed } = provider;
 
   const displayName = name === "claude" ? "Claude Code" : name === "codex" ? "Codex CLI" : name;
   const brandColor = name === "claude" ? "text-warning" : "text-info";
@@ -88,34 +169,23 @@ function ProviderCard({ provider }) {
           </div>
         )}
 
+        {/* Weekly quota progress */}
+        <WeeklyProgressBar
+          percentUsed={percentUsed}
+          weeklyLimit={weeklyLimitEstimate}
+          weeklyUsed={usage.thisWeek.tokensUsed}
+        />
+
         {/* Usage stats */}
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide opacity-50">Usage</h4>
-          <UsageMeter label="Today" tokens={usage.today.tokensUsed} sessions={usage.today.sessions} icon={Zap} />
-          <UsageMeter label="This week" tokens={usage.thisWeek.tokensUsed} sessions={usage.thisWeek.sessions} icon={Hash} />
-          <UsageMeter label="All time" tokens={usage.allTime.tokensUsed} sessions={usage.allTime.sessions} icon={Clock} />
+          <h4 className="text-xs font-semibold uppercase tracking-wide opacity-50">Token usage</h4>
+          <UsageMeter label="Today" period={usage.today} icon={Zap} />
+          <UsageMeter label="This week" period={usage.thisWeek} icon={Hash} />
+          <UsageMeter label="All time" period={usage.allTime} icon={Clock} />
         </div>
 
-        {/* Weekly consumption bar */}
-        {usage.thisWeek.tokensUsed > 0 && (
-          <div>
-            <div className="flex justify-between text-xs opacity-60 mb-1">
-              <span>Weekly consumption</span>
-              <span>{formatTokens(usage.thisWeek.tokensUsed)}</span>
-            </div>
-            <progress
-              className="progress progress-primary w-full"
-              value={Math.min(usage.thisWeek.tokensUsed, usage.thisWeek.tokensUsed)}
-              max={usage.thisWeek.tokensUsed}
-            />
-          </div>
-        )}
-
-        {/* Reset info */}
-        <div className="flex items-center gap-2 text-xs opacity-50 bg-base-100 rounded-lg px-3 py-2">
-          <RefreshCw className="size-3" />
-          {resetInfo}
-        </div>
+        {/* Reset countdown */}
+        <ResetCountdown nextResetAt={nextResetAt} resetInfo={resetInfo} />
 
         {/* Models */}
         {models.length > 0 && (
