@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 
 export default defineConfig(({ command }) => ({
@@ -7,6 +8,7 @@ export default defineConfig(({ command }) => ({
   // In dev mode, base must be / for the router to work
   base: command === "build" ? "/assets/" : "/",
   plugins: [
+    tailwindcss(),
     TanStackRouterVite({
       routesDirectory: "./src/routes",
       generatedRouteTree: "./src/routeTree.gen.ts",

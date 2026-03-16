@@ -470,8 +470,9 @@ export async function startApiServer(
         const settings = await loadRuntimeSettings();
         const saved = getWorkflowConfig(settings);
         const providers = detectAvailableProviders();
-        const defaultConfig = buildDefaultWorkflowConfig(providers);
-        return c.json({ ok: true, workflow: saved || defaultConfig, isDefault: !saved, providers });
+        const models = await discoverModels(providers);
+        const defaultConfig = buildDefaultWorkflowConfig(providers, models);
+        return c.json({ ok: true, workflow: saved || defaultConfig, isDefault: !saved, providers, models });
       },
       "GET /api/config/models": async (c: any) => {
         const providers = detectAvailableProviders();

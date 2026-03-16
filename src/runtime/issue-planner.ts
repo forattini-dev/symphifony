@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { IssuePlan, RuntimeConfig, WorkflowConfig, WorkflowDefinition } from "./types.ts";
-import { appendFileTail, now } from "./helpers.ts";
+import { appendFileTail, now, toStringArray, extractJsonObjects } from "./helpers.ts";
 import { detectAvailableProviders } from "./providers.ts";
 import { replacePersistedSetting, getSettingStateResource } from "./store.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
@@ -161,10 +161,6 @@ function getPlanCommand(provider: string, model?: string, effort?: string): stri
 
 // ── Parser ───────────────────────────────────────────────────────────────────
 
-function toStringArray(val: unknown): string[] {
-  return Array.isArray(val) ? val.filter((v): v is string => typeof v === "string") : [];
-}
-
 function tryBuildPlan(parsed: any): IssuePlan | null {
   if (!parsed || typeof parsed !== "object") return null;
   if (!parsed.summary || !Array.isArray(parsed.steps)) return null;
@@ -211,36 +207,6 @@ function tryBuildPlan(parsed: any): IssuePlan | null {
     provider: "",
     createdAt: now(),
   };
-}
-
-function extractJsonObjects(text: string): string[] {
-  const results: string[] = [];
-  let depth = 0;
-  let start = -1;
-  let inStr = false;
-  let esc = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inStr) {
-      if (esc) { esc = false; continue; }
-      if (ch === "\\") { esc = true; continue; }
-      if (ch === "\"") { inStr = false; }
-      continue;
-    }
-    if (ch === "\"") { inStr = true; continue; }
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth = Math.max(0, depth - 1);
-      if (depth === 0 && start >= 0) {
-        results.push(text.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-  return results;
 }
 
 function parsePlanOutput(raw: string): IssuePlan | null {

@@ -1,10 +1,7 @@
-/* Fifony Dashboard — layout helpers + micro-interactions */
+@import "tailwindcss";
+@plugin "daisyui";
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+/* Fifony Dashboard — layout helpers + micro-interactions */
 
 html, body, #root {
   min-height: 100vh;
@@ -33,13 +30,8 @@ html.theme-transitioning * {
 
 /* ── Typography — Fifony identity ─────────────────────────────────────── */
 
-h1, h2, h3, .stat-value, .fifony-wordmark {
+h1, h2, h3, .stat-value {
   font-family: 'Space Grotesk', system-ui, sans-serif;
-}
-
-.fifony-wordmark {
-  letter-spacing: -0.02em;
-  font-weight: 800;
 }
 
 /* ── Keyframe animations ───────────────────────────────────────────────── */
@@ -120,11 +112,6 @@ h1, h2, h3, .stat-value, .fifony-wordmark {
 @keyframes toast-out {
   from { opacity: 1; transform: translateX(0) scale(1); }
   to   { opacity: 0; transform: translateX(100%) scale(0.95); }
-}
-
-@keyframes confetti-burst {
-  0%   { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-40px) scale(0); opacity: 0; }
 }
 
 @keyframes confetti-fly {
@@ -438,47 +425,6 @@ h1, h2, h3, .stat-value, .fifony-wordmark {
 
 .kanban-column:hover {
   border-color: oklch(var(--bc) / 0.12);
-}
-
-/* ── Kanban column semantic accents ──────────────────────────────────── */
-
-.kanban-col-planning {
-  border-top-color: oklch(var(--in) / 0.4);
-}
-.kanban-col-planning .kanban-column-header {
-  color: oklch(var(--in));
-}
-
-.kanban-col-in-progress {
-  border-top-color: oklch(var(--p) / 0.5);
-}
-.kanban-col-in-progress .kanban-column-header {
-  color: oklch(var(--p));
-}
-
-.kanban-col-in-review {
-  border-top-color: oklch(var(--s) / 0.4);
-}
-.kanban-col-in-review .kanban-column-header {
-  color: oklch(var(--s));
-}
-
-.kanban-col-blocked {
-  border-top-color: oklch(var(--er) / 0.4);
-}
-.kanban-col-blocked .kanban-column-header {
-  color: oklch(var(--er));
-}
-
-.kanban-col-done {
-  border-top-color: oklch(var(--su) / 0.4);
-}
-.kanban-col-done .kanban-column-header {
-  color: oklch(var(--su));
-}
-
-.kanban-col-cancelled {
-  border-top-color: oklch(var(--bc) / 0.15);
 }
 
 /* Collapsed empty column — shrinks to header-only height in grid */

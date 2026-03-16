@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { env } from "node:process";
 import { parse as parseYaml } from "yaml";
 import type { IssueState, JsonRecord } from "./types.ts";
@@ -108,14 +107,6 @@ export function appendFileTail(target: string, text: string, maxLength: number):
   return `…${merged.slice(-(maxLength - 1))}`;
 }
 
-export function readTextOrNull(path: string): string | null {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 export function parseFrontMatter(source: string): { config: JsonRecord; body: string } {
   const match = source.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   if (!match) {
@@ -156,4 +147,35 @@ export function debugBoot(message: string): void {
 export function fail(message: string): never {
   console.error(message);
   process.exit(1);
+}
+
+/** Extract top-level JSON object candidates from a text that may contain prose around them. */
+export function extractJsonObjects(text: string): string[] {
+  const results: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === "\"") { inStr = false; }
+      continue;
+    }
+    if (ch === "\"") { inStr = true; continue; }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0 && start >= 0) {
+        results.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return results;
 }

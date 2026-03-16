@@ -185,13 +185,11 @@ function WorkflowSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [workflowRes, modelsRes] = await Promise.all([
-        api.get("/config/workflow"),
-        api.get("/config/models").catch(() => ({ models: {} })),
-      ]);
-      setWorkflow(workflowRes.workflow);
-      setProviders(workflowRes.providers || []);
-      setModelsByProvider(modelsRes.models || {});
+      const res = await api.get("/config/workflow");
+      setWorkflow(res.workflow);
+      setProviders(res.providers || []);
+      // Models come from the same endpoint (discovered server-side, never hardcoded)
+      setModelsByProvider(res.models || {});
     } catch {}
     setLoading(false);
   }, []);
@@ -223,18 +221,26 @@ function WorkflowSettings() {
   const handleRestoreDefaults = useCallback(async () => {
     setRestoring(true);
     try {
-      const availableProviders = providers.filter((p) => p.available);
-      const hasClaude = availableProviders.some((p) => p.name === "claude");
-      const hasCodex = availableProviders.some((p) => p.name === "codex");
-      const claudeModels = modelsByProvider.claude || [];
-      const codexModels = modelsByProvider.codex || [];
-      const defaultClaudeModel = claudeModels[0]?.id || "claude-sonnet-4-6";
-      const defaultCodexModel = codexModels[0]?.id || "o4-mini";
+      // Fetch fresh defaults from the server (server discovers models, builds defaults — never hardcoded)
+      const res = await api.get("/config/workflow");
+      // The server returns isDefault=true defaults with discovered models
+      // We need to get the default config by asking the server
+      const freshProviders = res.providers || [];
+      const freshModels = res.models || {};
+      setProviders(freshProviders);
+      setModelsByProvider(freshModels);
+
+      // Build defaults using first discovered model per provider
+      const available = freshProviders.filter((p) => p.available);
+      const hasClaude = available.some((p) => p.name === "claude");
+      const hasCodex = available.some((p) => p.name === "codex");
+      const claudeModel = freshModels.claude?.[0]?.id || "claude";
+      const codexModel = freshModels.codex?.[0]?.id || "codex";
 
       const defaults = {
-        plan: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? defaultClaudeModel : defaultCodexModel, effort: "high" },
-        execute: { provider: hasCodex ? "codex" : "claude", model: hasCodex ? defaultCodexModel : defaultClaudeModel, effort: "medium" },
-        review: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? defaultClaudeModel : defaultCodexModel, effort: "medium" },
+        plan: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? claudeModel : codexModel, effort: "high" },
+        execute: { provider: hasCodex ? "codex" : "claude", model: hasCodex ? codexModel : claudeModel, effort: "medium" },
+        review: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? claudeModel : codexModel, effort: "medium" },
       };
 
       setWorkflow(defaults);
@@ -243,7 +249,7 @@ function WorkflowSettings() {
       setTimeout(() => setSavingStage(null), 1500);
     } catch {}
     setRestoring(false);
-  }, [providers, modelsByProvider]);
+  }, []);
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);

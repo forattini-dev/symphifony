@@ -2,22 +2,22 @@ import type { IssueState } from "./types.ts";
 
 export const ISSUE_STATE_MACHINE_ID = "issue-lifecycle";
 
-export type IssueStateTransitionMap = Record<string, string[]>;
+type IssueStateTransitionMap = Record<string, string[]>;
 
-export type IssueStateMachineSnapshot = {
+type IssueStateMachineSnapshot = {
   machineId: string;
   states: string[];
   transitionsByState: IssueStateTransitionMap;
 };
 
-export type IssueStateMachinePathResult = string[];
+type IssueStateMachinePathResult = string[];
 
 type IssueStateMachineDefinition = {
   initialState: string;
   states?: Record<string, { on?: Record<string, string> } | undefined>;
 };
 
-export const ISSUE_STATE_TRANSITIONS: Record<string, readonly string[]> = {
+const ISSUE_STATE_TRANSITIONS: Record<string, readonly string[]> = {
   Planning: ["Todo", "Cancelled"],
   Todo: ["Queued", "Planning", "Cancelled"],
   Queued: ["Running", "Todo", "Cancelled"],
@@ -145,7 +145,7 @@ export function getIssueStateMachineInitialState(machineDefinition: unknown = ge
   return normalizeMachineDefinition(machineDefinition).initialState;
 }
 
-export function getIssueStateMachineSnapshot(
+function getIssueStateMachineSnapshot(
   machineDefinition: unknown = getIssueStateMachineDefinition(),
 ): IssueStateMachineSnapshot {
   const definition = normalizeMachineDefinition(machineDefinition);
@@ -156,7 +156,7 @@ export function getIssueStateMachineSnapshot(
   };
 }
 
-export function getIssueTransitionsFromStateDefinition(
+function getIssueTransitionsFromStateDefinition(
   machineDefinition: unknown,
   state: string,
 ): string[] {
@@ -168,7 +168,7 @@ export function getIssueTransitionsFromStateDefinition(
   return next.length > 0 ? next : [state];
 }
 
-export function getIssueTransitionsByState(machineDefinition: unknown): Record<string, string[]> {
+function getIssueTransitionsByState(machineDefinition: unknown): Record<string, string[]> {
   const definition = normalizeMachineDefinition(machineDefinition);
   const fallback = Object.entries(ISSUE_STATE_TRANSITIONS).reduce<Record<string, string[]>>(
     (acc, [state, states]) => {
@@ -242,7 +242,7 @@ export function findIssueStateMachineTransitionPath(
   return null;
 }
 
-export function getIssueStateMachineEventFromPath(machineDefinition: unknown, from: string, to: string): string | null {
+function getIssueStateMachineEventFromPath(machineDefinition: unknown, from: string, to: string): string | null {
   const transitions = getIssueTransitionsFromStateDefinition(machineDefinition, from);
   const direct = findIssueStateMachineTransitionPath(machineDefinition, from, to);
   if (direct && direct.length === 1) {

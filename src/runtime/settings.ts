@@ -10,6 +10,7 @@ import type {
   RuntimeSettingSource,
   WorkflowConfig,
 } from "./types.ts";
+import type { DiscoveredModel } from "./providers.ts";
 import { clamp, now } from "./helpers.ts";
 import { loadPersistedSettings, replacePersistedSetting } from "./store.ts";
 import { getProviderDefaultCommand, normalizeAgentProvider } from "./providers.ts";
@@ -277,17 +278,6 @@ export async function persistDetectedProvidersSetting(providers: DetectedProvide
   );
 }
 
-export async function persistRuntimeConfigSettings(
-  config: RuntimeConfig,
-  source: RuntimeSettingSource = "system",
-): Promise<void> {
-  await Promise.all(
-    buildRuntimeConfigSettings(config, source).map((setting) =>
-      replacePersistedSetting(setting),
-    ),
-  );
-}
-
 export async function syncRuntimeConfigSettings(
   config: RuntimeConfig,
   settings: RuntimeSettingRecord[],
@@ -315,21 +305,32 @@ function isValidStage(v: unknown): v is PipelineStageConfig {
   return typeof s.provider === "string" && typeof s.model === "string" && typeof s.effort === "string";
 }
 
-/** Build a default workflow config from detected providers */
-export function buildDefaultWorkflowConfig(detectedProviders: DetectedProvider[]): WorkflowConfig {
+/**
+ * Build a default workflow config using discovered models.
+ * Never hardcodes model IDs — always uses the first model from each provider's discovery.
+ * Falls back to provider name as model if discovery returned nothing.
+ */
+export function buildDefaultWorkflowConfig(
+  detectedProviders: DetectedProvider[],
+  discoveredModels?: Record<string, DiscoveredModel[]>,
+): WorkflowConfig {
   const available = detectedProviders.filter((p) => p.available);
   const hasClaude = available.some((p) => p.name === "claude");
   const hasCodex = available.some((p) => p.name === "codex");
 
-  const claudeDefault: PipelineStageConfig = { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" };
-  const codexDefault: PipelineStageConfig = { provider: "codex", model: "o4-mini", effort: "medium" };
+  // Pick the first discovered model for each provider, or fall back to provider name
+  const claudeModel = discoveredModels?.claude?.[0]?.id || "claude";
+  const codexModel = discoveredModels?.codex?.[0]?.id || "codex";
+
+  const claudeDefault: PipelineStageConfig = { provider: "claude", model: claudeModel, effort: "medium" };
+  const codexDefault: PipelineStageConfig = { provider: "codex", model: codexModel, effort: "medium" };
 
   // Default: claude for plan+review (better reasoning), codex for execute (better code)
   if (hasClaude && hasCodex) {
     return {
-      plan: { provider: "claude", model: "claude-sonnet-4-6", effort: "high" },
-      execute: { provider: "codex", model: "o4-mini", effort: "medium" },
-      review: { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" },
+      plan: { ...claudeDefault, effort: "high" },
+      execute: { ...codexDefault },
+      review: { ...claudeDefault },
     };
   }
   if (hasClaude) {

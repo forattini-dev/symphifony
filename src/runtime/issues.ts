@@ -53,7 +53,7 @@ import {
   getCapabilityRoutingOptions,
   applyCapabilityMetadata,
 } from "./providers.ts";
-import { resolveTaskCapabilities, type CapabilityResolverOptions } from "../routing/capability-resolver.ts";
+import { resolveTaskCapabilities } from "../routing/capability-resolver.ts";
 
 export function normalizeIssue(
   raw: JsonRecord,
@@ -431,7 +431,6 @@ export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
         cancelled += 1;
         break;
     }
-    if (issue.state === "Blocked") blocked += 1;
   }
 
   if (completionTimes.length === 0) {

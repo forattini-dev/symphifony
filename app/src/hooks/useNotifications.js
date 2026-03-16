@@ -98,7 +98,7 @@ function playNotificationSound(enabled) {
 
 let _notifId = 0;
 
-export function useNotificationCenter(issues) {
+function useNotificationCenter(issues) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 

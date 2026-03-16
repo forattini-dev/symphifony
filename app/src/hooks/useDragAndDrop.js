@@ -5,17 +5,18 @@ import { ISSUE_STATE_MACHINE } from "../utils.js";
  * Column name → actual state to transition to when dropping.
  * "In Progress" maps to "Queued" (the entry state for that group).
  */
-const COLUMN_TO_STATE = {
-  Todo: "Todo",
-  "In Progress": "Queued",
-  "In Review": "In Review",
-  Blocked: "Blocked",
-  Done: "Done",
-  Cancelled: "Cancelled",
+/** States that belong to each column (for resolving drop target). */
+const COLUMN_STATES = {
+  Planning: ["Planning"],
+  "In Progress": ["Todo", "Queued"],
+  "In Review": ["In Review"],
+  Blocked: ["Blocked"],
+  Done: ["Done"],
+  Cancelled: ["Cancelled"],
 };
 
-/** Reverse: actual states → column name. */
-const IN_PROGRESS_STATES = new Set(["Queued", "Running", "Interrupted"]);
+/** Reverse: actual states → column name. Must match BoardView's IN_PROGRESS_STATES. */
+const IN_PROGRESS_STATES = new Set(["Todo", "Queued", "Running", "Interrupted"]);
 function stateToColumn(state) {
   return IN_PROGRESS_STATES.has(state) ? "In Progress" : state;
 }
@@ -127,9 +128,14 @@ export function useDragAndDrop({ onStateChange }) {
   const completeDrop = useCallback(
     (column) => {
       if (!dragState) return;
-      const targetState = COLUMN_TO_STATE[column];
-      if (targetState && dragState.validColumns.has(column)) {
-        onStateChange(dragState.issueId, targetState);
+      if (dragState.validColumns.has(column)) {
+        // Pick the first valid transition that belongs to the target column
+        const transitions = ISSUE_STATE_MACHINE[dragState.issue.state] || [];
+        const colStates = new Set(COLUMN_STATES[column] || []);
+        const targetState = transitions.find((s) => colStates.has(s));
+        if (targetState) {
+          onStateChange(dragState.issueId, targetState);
+        }
       }
       cancelDrag();
     },

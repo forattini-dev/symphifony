@@ -36,13 +36,22 @@ const COLUMN_BADGE = {
   Cancelled: "badge-neutral",
 };
 
-const COLUMN_ACCENT = {
-  Planning: "kanban-col-planning",
-  "In Progress": "kanban-col-in-progress",
-  "In Review": "kanban-col-in-review",
-  Blocked: "kanban-col-blocked",
-  Done: "kanban-col-done",
-  Cancelled: "kanban-col-cancelled",
+const COLUMN_ACCENT_STYLE = {
+  Planning: { borderTopColor: 'oklch(var(--in) / 0.4)' },
+  "In Progress": { borderTopColor: 'oklch(var(--p) / 0.5)' },
+  "In Review": { borderTopColor: 'oklch(var(--s) / 0.4)' },
+  Blocked: { borderTopColor: 'oklch(var(--er) / 0.4)' },
+  Done: { borderTopColor: 'oklch(var(--su) / 0.4)' },
+  Cancelled: { borderTopColor: 'oklch(var(--bc) / 0.15)' },
+};
+
+const COLUMN_HEADER_COLOR = {
+  Planning: 'oklch(var(--in))',
+  "In Progress": 'oklch(var(--p))',
+  "In Review": 'oklch(var(--s))',
+  Blocked: 'oklch(var(--er))',
+  Done: 'oklch(var(--su))',
+  Cancelled: undefined,
 };
 
 const EMPTY_CONFIG = {
@@ -111,7 +120,7 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
   const isEmpty = issues.length === 0;
   const isCollapsedEmpty = isEmpty && col !== "Planning" && totalIssues === 0;
 
-  let columnClass = `kanban-column ${COLUMN_ACCENT[col] || ""} bg-base-200 rounded-box p-3 flex flex-col min-h-0 overflow-hidden`;
+  let columnClass = `kanban-column bg-base-200 rounded-box p-3 flex flex-col min-h-0 overflow-hidden`;
   if (isCollapsedEmpty) {
     columnClass += " kanban-column-collapsed";
   }
@@ -125,10 +134,16 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
     }
   }
 
+  const colStyle = {
+    borderTop: '3px solid transparent',
+    ...(COLUMN_ACCENT_STYLE[col] || {}),
+    ...(isCollapsedEmpty ? { alignSelf: 'start' } : {}),
+  };
+
   return (
-    <div key={col} ref={colRef} className={columnClass}>
-      <div className="flex items-center justify-between mb-3 kanban-column-header">
-        <h3 className="text-xs font-semibold tracking-wide opacity-70 flex items-center gap-1.5">
+    <div key={col} ref={colRef} className={columnClass} style={colStyle}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold tracking-wide flex items-center gap-1.5" style={{ color: COLUMN_HEADER_COLOR[col], fontFamily: "'Space Grotesk', system-ui, sans-serif" }}>
           {col}
           {col === "In Progress" && hasRunningAgents && (
             <span className="issue-phase-dot" title="Agents working" />

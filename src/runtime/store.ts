@@ -42,20 +42,20 @@ let activeStateMachinePlugin: { stop?: () => Promise<void> } | null = null;
 let activeEcPlugin: S3dbModule["EventualConsistencyPlugin"] extends new (...a: never[]) => infer R ? R | null : null = null;
 
 export function getStateDb(): S3dbDatabase | null { return stateDb; }
-export function getRuntimeStateResource(): S3dbResource | null { return runtimeStateResource; }
-export function getIssueStateResource(): S3dbResource | null { return issueStateResource; }
+function getRuntimeStateResource(): S3dbResource | null { return runtimeStateResource; }
+function getIssueStateResource(): S3dbResource | null { return issueStateResource; }
 export function getEventStateResource(): S3dbResource | null { return eventStateResource; }
 export function getSettingStateResource(): S3dbResource | null { return settingStateResource; }
 export function getAgentSessionResource(): S3dbResource | null { return agentSessionResource; }
 export function getAgentPipelineResource(): S3dbResource | null { return agentPipelineResource; }
-export function getActiveApiPlugin(): { stop?: () => Promise<void> } | null { return activeApiPlugin; }
+function getActiveApiPlugin(): { stop?: () => Promise<void> } | null { return activeApiPlugin; }
 export function setActiveApiPlugin(plugin: { stop?: () => Promise<void> } | null): void { activeApiPlugin = plugin; }
 let activeWebSocketPlugin: { stop?: () => Promise<void> } | null = null;
-export function getActiveWebSocketPlugin(): { stop?: () => Promise<void> } | null { return activeWebSocketPlugin; }
-export function setActiveWebSocketPlugin(plugin: { stop?: () => Promise<void> } | null): void { activeWebSocketPlugin = plugin; }
-export function getActiveStateMachinePlugin(): { stop?: () => Promise<void> } | null { return activeStateMachinePlugin; }
-export function getActiveEcPlugin() { return activeEcPlugin; }
-export function setActiveStateMachinePlugin(plugin: { stop?: () => Promise<void> } | null): void { activeStateMachinePlugin = plugin; }
+function getActiveWebSocketPlugin(): { stop?: () => Promise<void> } | null { return activeWebSocketPlugin; }
+function setActiveWebSocketPlugin(plugin: { stop?: () => Promise<void> } | null): void { activeWebSocketPlugin = plugin; }
+function getActiveStateMachinePlugin(): { stop?: () => Promise<void> } | null { return activeStateMachinePlugin; }
+function getActiveEcPlugin() { return activeEcPlugin; }
+function setActiveStateMachinePlugin(plugin: { stop?: () => Promise<void> } | null): void { activeStateMachinePlugin = plugin; }
 
 export async function loadS3dbModule(): Promise<S3dbModule> {
   if (loadedS3dbModule) return loadedS3dbModule;

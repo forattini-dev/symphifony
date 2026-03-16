@@ -89,27 +89,31 @@ export function Header({ issueCount, sourceRepo, updatedAt, onToggleEvents, even
   return (
     <div className="navbar bg-base-100 shadow-sm px-4">
       <div className="flex-1 gap-2">
-        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight fifony-wordmark">Fifony</Link>
+        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", letterSpacing: '-0.02em', fontWeight: 800 }}>Fifony</Link>
         {repoDisplay && <span className="text-xs opacity-40 hidden lg:inline">{repoDisplay}</span>}
       </div>
 
       <div className="flex-none hidden md:flex">
         <div className="relative" ref={navRef}>
           <ul className="menu menu-horizontal px-1 gap-1">
-            {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-              <li key={to}>
-                <Link
-                  to={to}
-                  className={`nav-link ${currentPath.startsWith(to) ? "active nav-link-active" : ""}`}
-                >
-                  <Icon className="size-4" />
-                  {label}
-                  {to === "/issues" && issueCount > 0 && (
-                    <AnimatedBadge count={issueCount} />
-                  )}
-                </Link>
-              </li>
-            ))}
+            {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+              const isActive = currentPath.startsWith(to);
+              return (
+                <li key={to}>
+                  <Link
+                    to={to}
+                    className={isActive ? "active" : ""}
+                    style={isActive ? { color: 'oklch(var(--p))', fontWeight: 600, backgroundColor: 'oklch(var(--p) / 0.08)' } : undefined}
+                  >
+                    <Icon className="size-4" />
+                    {label}
+                    {to === "/issues" && issueCount > 0 && (
+                      <AnimatedBadge count={issueCount} />
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
           <NavIndicator navRef={navRef} currentPath={currentPath} />
         </div>

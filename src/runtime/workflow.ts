@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, watchFile, unwatchFile } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { env, argv, exit } from "node:process";
 import { stringify as stringifyYaml } from "yaml";
@@ -144,20 +144,3 @@ export function parsePort(args: string[]): number | undefined {
   return undefined;
 }
 
-// ── Dynamic WORKFLOW.md reload ───────────────────────────────────────────────
-
-let workflowWatcher: (() => void) | null = null;
-
-/**
- * No-op — WORKFLOW.md watching is deprecated.
- * Configuration is now managed via s3db settings.
- */
-export function watchWorkflowFile(
-  _onReload: (definition: WorkflowDefinition) => void,
-): void {
-  // No-op: WORKFLOW.md is no longer used
-}
-
-export function unwatchWorkflowFile(): void {
-  if (workflowWatcher) workflowWatcher();
-}

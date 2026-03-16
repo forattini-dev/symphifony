@@ -5,7 +5,6 @@ export type IssueState =
   | "Todo"
   | "Queued"
   | "Running"
-  | "In Progress"  // legacy alias for Running — normalized on load
   | "Interrupted"
   | "In Review"
   | "Blocked"

@@ -1,4 +1,4 @@
-import { appendFileTail, getNestedRecord, getNestedString } from "./helpers.ts";
+import { appendFileTail, getNestedRecord, getNestedString, extractJsonObjects } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { detectAvailableProviders, normalizeAgentProvider, resolveAgentCommand } from "./providers.ts";
 import type { RuntimeConfig, WorkflowDefinition } from "./types.ts";
@@ -55,7 +55,7 @@ function parseEnhancerOutput(raw: string, expectedField: EnhancementField): stri
     throw new Error("AI provider returned an empty response.");
   }
 
-  const candidates = extractJsonCandidates(
+  const candidates = extractJsonObjects(
     text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1]?.trim() ?? text,
   );
   for (const candidate of candidates) {
@@ -66,7 +66,7 @@ function parseEnhancerOutput(raw: string, expectedField: EnhancementField): stri
   const cleanedRaw = text.trim();
   const trimmed = cleanedRaw.replace(/^\"|\"$/g, "").trim();
   if (trimmed) {
-    const candidatesFromRaw = extractJsonCandidates(trimmed);
+    const candidatesFromRaw = extractJsonObjects(trimmed);
     for (const candidate of candidatesFromRaw) {
       const value = parseCandidate(candidate, expectedField);
       if (value) return value;
@@ -104,7 +104,7 @@ function parseCandidate(raw: string, expectedField: EnhancementField): string {
       const nested = parsed.result.trim();
       if (nested) {
         const nestedClean = nested.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
-        for (const nestedCandidate of extractJsonCandidates(nestedClean)) {
+        for (const nestedCandidate of extractJsonObjects(nestedClean)) {
           const parsedNested = parseCandidate(nestedCandidate, expectedField);
           if (parsedNested) return parsedNested;
         }
@@ -114,51 +114,6 @@ function parseCandidate(raw: string, expectedField: EnhancementField): string {
     // ignore parse errors for heuristic parsing
   }
   return "";
-}
-
-function extractJsonCandidates(raw: string): string[] {
-  const candidates: string[] = [];
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-    if (char === "{") {
-      if (depth === 0) {
-        start = i;
-      }
-      depth++;
-      continue;
-    }
-    if (char === "}") {
-      depth = Math.max(0, depth - 1);
-      if (depth === 0 && start >= 0) {
-        candidates.push(raw.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-
-  return candidates;
 }
 
 function readProviderOutput(resultFile: string, fallback: string): string {

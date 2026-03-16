@@ -16,7 +16,7 @@ import {
   resolveDefaultProvider,
   getProviderDefaultCommand,
 } from "./providers.ts";
-import { bootstrapSource, loadWorkflowDefinition, parsePort, watchWorkflowFile } from "./workflow.ts";
+import { bootstrapSource, loadWorkflowDefinition, parsePort } from "./workflow.ts";
 import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./issues.ts";
 import { startApiServer } from "./api-server.ts";
 import { scheduler, installGracefulShutdown } from "./scheduler.ts";
@@ -95,7 +95,7 @@ async function main() {
   await recoverPlanningSession();
 
   const previous = await loadPersistedState();
-  let persistedSettings = await loadRuntimeSettings();
+  const persistedSettings = await loadRuntimeSettings();
   debugBoot("main:state-loaded");
   config = applyPersistedSettings(config, persistedSettings);
   await syncRuntimeConfigSettings(config, persistedSettings);
@@ -184,24 +184,6 @@ async function main() {
       await startDevFrontend(dashboardPort, devPort);
     }
   }
-
-  // Watch WORKFLOW.md for dynamic reload
-  watchWorkflowFile((newDefinition) => {
-    void (async () => {
-      persistedSettings = await loadRuntimeSettings();
-      const newConfig = applyPersistedSettings(
-        applyWorkflowConfig(deriveConfig(args), newDefinition, port),
-        persistedSettings,
-      );
-      await syncRuntimeConfigSettings(newConfig, persistedSettings);
-      Object.assign(state.config, newConfig);
-      addEvent(state, undefined, "info", `WORKFLOW.md reloaded — config updated (concurrency: ${newConfig.workerConcurrency}, turns: ${newConfig.maxTurns}).`);
-      state.updatedAt = now();
-      await persistState(state);
-    })().catch((error) => {
-      logger.warn(`Failed to apply reloaded workflow config: ${String(error)}`);
-    });
-  });
 
   try {
     addEvent(state, undefined, "info", `Runtime started in local-only mode (filesystem tracker).`);

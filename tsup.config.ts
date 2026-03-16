@@ -21,7 +21,6 @@ export default defineConfig({
     "pino",
     "pino-pretty",
     "yaml",
-    "node-cron",
     "cli-args-parser",
     "raffel",
     "vite",

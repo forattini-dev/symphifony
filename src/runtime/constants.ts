@@ -11,7 +11,7 @@ const __dirname = dirname(__filename);
 export const PACKAGE_ROOT = resolve(__dirname, "../..");
 export const CLI_ARGS = argv.slice(2);
 
-export function readArgValue(args: string[], flag: string): string | undefined {
+function readArgValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   if (index === -1) return undefined;
   const value = args[index + 1];
@@ -19,7 +19,7 @@ export function readArgValue(args: string[], flag: string): string | undefined {
   return value;
 }
 
-export function resolveInputPath(value: string): string {
+function resolveInputPath(value: string): string {
   if (value.startsWith("~/")) {
     return resolve(homedir(), value.slice(2));
   }
@@ -101,5 +101,4 @@ export const ALLOWED_STATES: IssueState[] = [
 
 export const TERMINAL_STATES = new Set<IssueState>(["Done", "Cancelled"]);
 export const EXECUTING_STATES = new Set<IssueState>(["Running", "In Review"]);
-export const ACTIVE_STATES = new Set<IssueState>(["Queued", "Running", "In Review"]);
 export const PERSIST_EVENTS_MAX = 500;

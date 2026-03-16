@@ -15,10 +15,6 @@ export function clearApiRuntimeContext(): void {
   context = null;
 }
 
-export function getApiRuntimeContext(): RuntimeApiContext | null {
-  return context;
-}
-
 export function getApiRuntimeContextOrThrow(): RuntimeApiContext {
   if (!context) {
     throw new Error("API runtime context was not initialized.");

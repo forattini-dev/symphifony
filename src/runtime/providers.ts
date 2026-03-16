@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -172,7 +172,54 @@ const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  * Fetch models from the OpenAI /v1/models API.
  * Filters to models relevant for Codex CLI usage (chat/reasoning models).
  */
-async function fetchOpenAIModels(): Promise<DiscoveredModel[]> {
+/**
+ * Read Codex CLI's own model list from ~/.codex/models_cache.json.
+ *
+ * The Codex CLI fetches and caches its supported models locally.
+ * This is the authoritative source — same data the /model picker uses.
+ * We read it directly: zero hardcoding, always up-to-date with the CLI version.
+ *
+ * Falls back to OpenAI /v1/models API (filtered to gpt-5.*) if cache doesn't exist.
+ */
+async function fetchCodexModels(): Promise<DiscoveredModel[]> {
+  // 1. Try ~/.codex/models_cache.json (authoritative — from the CLI itself)
+  const cachePath = join(homedir(), ".codex", "models_cache.json");
+  try {
+    if (existsSync(cachePath)) {
+      const raw = readFileSync(cachePath, "utf8");
+      const cache = JSON.parse(raw) as {
+        models?: Array<{
+          slug: string;
+          display_name?: string;
+          description?: string;
+          visibility?: string;
+          priority?: number;
+          supported_reasoning_levels?: Array<{ effort: string; description?: string }>;
+        }>;
+      };
+
+      if (Array.isArray(cache.models) && cache.models.length > 0) {
+        return cache.models
+          // Show "list" models first, then "hide" (legacy) — sorted by CLI priority
+          .sort((a, b) => {
+            const visA = a.visibility === "list" ? 0 : 1;
+            const visB = b.visibility === "list" ? 0 : 1;
+            if (visA !== visB) return visA - visB;
+            return (a.priority ?? 99) - (b.priority ?? 99);
+          })
+          .map((m) => ({
+            id: m.slug,
+            provider: "codex",
+            label: m.display_name || m.slug,
+            tier: m.description || (m.visibility === "list" ? "Supported" : "Legacy"),
+          }));
+      }
+    }
+  } catch {
+    // Cache unreadable — fall through to API
+  }
+
+  // 2. Fallback: OpenAI API filtered to gpt-5.*
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return [];
 
@@ -185,27 +232,12 @@ async function fetchOpenAIModels(): Promise<DiscoveredModel[]> {
     const data = (await res.json()) as { data?: Array<{ id: string }> };
     if (!Array.isArray(data.data)) return [];
 
-    // Filter to models usable with Codex CLI (reasoning + chat models)
-    const relevant = data.data
+    return data.data
       .map((m) => m.id)
-      .filter((id) => /^(o[1-9]|gpt-[45]|codex-)/i.test(id))
-      // Exclude audio, realtime, search-only, and deprecated variants
-      .filter((id) => !/(audio|realtime|search|vision-preview)/i.test(id))
-      .sort();
-
-    return relevant.map((id) => {
-      let tier = "Standard";
-      if (/^o[34]/i.test(id) && /mini/i.test(id)) tier = "Fast reasoning";
-      else if (/^o[34]/i.test(id)) tier = "Reasoning";
-      else if (/^o1/i.test(id)) tier = "Reasoning (legacy)";
-      else if (/nano/i.test(id)) tier = "Nano";
-      else if (/mini/i.test(id)) tier = "Fast";
-      else if (/gpt-4\.1(?!-)/i.test(id)) tier = "Balanced";
-      else if (/gpt-4o/i.test(id)) tier = "Multimodal";
-      else if (/gpt-4-turbo/i.test(id)) tier = "Legacy turbo";
-      else if (/codex-/i.test(id)) tier = "Codex-optimized";
-      return { id, provider: "codex", label: id, tier };
-    });
+      .filter((id) => /^gpt-5/i.test(id))
+      .filter((id) => !/(chat-latest|search-api|-\d{4}-\d{2}-\d{2}|-pro)/i.test(id))
+      .sort()
+      .map((id) => ({ id, provider: "codex", label: id, tier: "OpenAI model" }));
   } catch {
     return [];
   }
@@ -249,40 +281,41 @@ async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
   }
 
   // Fallback: Claude Code authenticates via OAuth — no API key available.
-  // Use the CLI to resolve model aliases to real IDs without burning tokens.
-  // `claude --model <alias> --print --max-turns 0 ""` will fail fast but
-  // include the resolved model name in the error JSON output.
+  // Probe all aliases in parallel via the CLI to resolve real model IDs.
   try {
-    const aliases = ["opus", "sonnet", "haiku"];
-    const discovered: DiscoveredModel[] = [];
-    for (const alias of aliases) {
-      try {
-        // --max-turns 1 with an empty prompt resolves the model and exits quickly
-        const probe = execFileSync("claude", [
-          "--print", "--output-format", "json", "--model", alias,
-          "--max-turns", "1", "--no-session-persistence",
-          "reply ok",
-        ], {
-          encoding: "utf8",
-          timeout: 20_000,
-          env: { ...process.env },
-        });
-        // Parse the JSON response to extract the actual model ID
-        const parsed = JSON.parse(probe.trim()) as { model?: string; modelUsage?: Record<string, unknown> };
-        const modelId = parsed.model
-          || Object.keys(parsed.modelUsage || {})[0]
-          || "";
-        if (modelId) {
-          let tier = "Standard";
-          if (/opus/i.test(modelId)) tier = "Most capable";
-          else if (/sonnet/i.test(modelId)) tier = "Balanced";
-          else if (/haiku/i.test(modelId)) tier = "Fast";
-          discovered.push({ id: modelId, provider: "claude", label: modelId, tier });
-        }
-      } catch {
-        // Alias not available or CLI not authenticated — skip
-      }
-    }
+    const aliases: Array<{ alias: string; tier: string }> = [
+      { alias: "opus", tier: "Most capable" },
+      { alias: "sonnet", tier: "Balanced" },
+      { alias: "haiku", tier: "Fast" },
+    ];
+
+    const probeOne = (alias: string): Promise<string | null> =>
+      new Promise((resolve) => {
+        try {
+          const child = spawn("claude", [
+            "--print", "--output-format", "json", "--model", alias,
+            "--max-turns", "1", "--no-session-persistence",
+            "reply ok",
+          ], { stdio: ["pipe", "pipe", "pipe"], timeout: 20_000 });
+          let stdout = "";
+          child.stdout?.on("data", (chunk: Buffer) => { stdout += String(chunk); });
+          child.on("close", () => {
+            try {
+              const parsed = JSON.parse(stdout.trim()) as { model?: string; modelUsage?: Record<string, unknown> };
+              resolve(parsed.model || Object.keys(parsed.modelUsage || {})[0] || null);
+            } catch { resolve(null); }
+          });
+          child.on("error", () => resolve(null));
+          child.stdin?.end();
+        } catch { resolve(null); }
+      });
+
+    const results = await Promise.all(aliases.map(async ({ alias, tier }) => {
+      const modelId = await probeOne(alias);
+      return modelId ? { id: modelId, provider: "claude" as const, label: modelId, tier } : null;
+    }));
+
+    const discovered = results.filter((m): m is DiscoveredModel => m !== null);
     if (discovered.length > 0) return discovered;
   } catch {
     // CLI not available
@@ -307,7 +340,7 @@ export async function discoverModels(providers: DetectedProvider[]): Promise<Rec
       result[p.name] = cached.models;
       continue;
     }
-    if (p.name === "codex") tasks.push({ name: "codex", fetch: fetchOpenAIModels });
+    if (p.name === "codex") tasks.push({ name: "codex", fetch: fetchCodexModels });
     if (p.name === "claude") tasks.push({ name: "claude", fetch: fetchAnthropicModels });
   }
 
