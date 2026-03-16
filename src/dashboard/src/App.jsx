@@ -1,19 +1,20 @@
 import { useMemo, useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
-import { useRuntimeState, useRuntimeEvents, useProviders, useParallelism, useRuntimeWebSocket, useTheme } from "./hooks";
+import { useRuntimeState, useRuntimeEvents, useProviders, useParallelism, useProvidersUsage, useRuntimeWebSocket, useTheme } from "./hooks";
 import Header from "./components/Header";
 import StatsBar from "./components/StatsBar";
 import BoardView from "./components/BoardView";
 import ListView from "./components/ListView";
 import EventsDrawer from "./components/EventsDrawer";
 import RuntimeView from "./components/RuntimeView";
+import ProvidersView from "./components/ProvidersView";
 import CreateIssueDrawer from "./components/CreateIssueForm";
 import IssueDetailDrawer from "./components/IssueDetailDrawer";
 import Filters from "./components/Filters";
 import Fab from "./components/Fab";
 import MobileDock from "./components/MobileDock";
-import { LayoutGrid, Settings } from "lucide-react";
+import { LayoutGrid, Settings, Cpu } from "lucide-react";
 
 const ISSUE_VIEWS = [
   { id: "kanban", label: "Kanban" },
@@ -22,6 +23,7 @@ const ISSUE_VIEWS = [
 
 const VIEWS = [
   { id: "issues", label: "Issues", icon: LayoutGrid },
+  { id: "providers", label: "Providers", icon: Cpu },
   { id: "runtime", label: "Runtime Monitor", icon: Settings },
 ];
 
@@ -100,6 +102,7 @@ export default function App() {
   const events = useRuntimeEvents(eventKind, eventIssueId, liveMode ? 10000 : 2500);
   const providers = useProviders();
   const parallelism = useParallelism();
+  const providersUsage = useProvidersUsage();
 
   const data = runtime.data || {};
   const issues = Array.isArray(data.issues) ? data.issues : [];

@@ -135,6 +135,15 @@ export function useParallelism() {
   });
 }
 
+/** Fetch providers usage data. */
+export function useProvidersUsage() {
+  return useQuery({
+    queryKey: ["providers-usage"],
+    queryFn: () => api.get("/providers/usage"),
+    refetchInterval: 30000,
+  });
+}
+
 // ── Theme ───────────────────────────────────────────────────────────────────
 
 const PINNED_THEMES = ["auto", "light", "dark"];
