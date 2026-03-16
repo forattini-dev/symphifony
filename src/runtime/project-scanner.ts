@@ -13,6 +13,7 @@ import { env } from "node:process";
 import { logger } from "./logger.ts";
 import { detectAvailableProviders } from "./providers.ts";
 import { appendFileTail } from "./helpers.ts";
+import { renderPrompt } from "../prompting.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export type ProjectScanResult = {
 
 export type ProjectAnalysis = {
   description: string;
+  language: string;
   domains: string[];
   stack: string[];
   suggestedAgents: string[];
@@ -57,6 +59,12 @@ export function scanProjectFiles(targetRoot: string): ProjectScanResult {
     codexDir: check(".codex"),
     readmeMd: check("README.md"),
     packageJson: check("package.json"),
+    cargoToml: check("Cargo.toml"),
+    pyprojectToml: check("pyproject.toml"),
+    goMod: check("go.mod"),
+    buildGradle: check("build.gradle") || check("build.gradle.kts"),
+    gemfile: check("Gemfile"),
+    dockerfile: check("Dockerfile"),
     workflowMd: check("WORKFLOW.md"),
     agentsMd: check("AGENTS.md"),
     claudeAgentsDir: check(".claude/agents"),
@@ -139,84 +147,104 @@ export function scanProjectFiles(targetRoot: string): ProjectScanResult {
 
 // ── CLI-based analysis ───────────────────────────────────────────────────────
 
-const ANALYSIS_PROMPT = `Analyze this project directory and return a JSON object with:
-- "description": A 2-sentence description of what this project does
-- "domains": An array of relevant domain tags from this list: frontend, backend, mobile, devops, database, ai-ml, security, testing, games, ecommerce, fintech, healthcare, education, saas, design, product, marketing, embedded, blockchain, spatial-computing. Only include domains that clearly apply.
-- "stack": An array of key technologies/frameworks used (e.g., "react", "typescript", "express", "postgresql")
-- "suggestedAgents": Based on the domains, suggest which specialist agents would help from this list: frontend-developer, backend-architect, database-optimizer, security-engineer, devops-automator, mobile-app-builder, ai-engineer, ui-designer, ux-architect, code-reviewer, technical-writer, sre, data-engineer, software-architect, game-designer
-
-Return ONLY valid JSON, no markdown, no explanation.`;
+// Detect language from build files present in the project root
+const BUILD_FILE_SIGNALS: Record<string, { language: string; stack: string[] }> = {
+  "package.json": { language: "javascript", stack: ["node"] },
+  "Cargo.toml": { language: "rust", stack: ["cargo"] },
+  "pyproject.toml": { language: "python", stack: ["python"] },
+  "setup.py": { language: "python", stack: ["python"] },
+  "requirements.txt": { language: "python", stack: ["pip"] },
+  "Pipfile": { language: "python", stack: ["pipenv"] },
+  "go.mod": { language: "go", stack: ["go"] },
+  "build.gradle": { language: "java", stack: ["gradle"] },
+  "build.gradle.kts": { language: "kotlin", stack: ["gradle"] },
+  "pom.xml": { language: "java", stack: ["maven"] },
+  "Gemfile": { language: "ruby", stack: ["bundler"] },
+  "mix.exs": { language: "elixir", stack: ["mix"] },
+  "pubspec.yaml": { language: "dart", stack: ["flutter"] },
+  "CMakeLists.txt": { language: "c++", stack: ["cmake"] },
+  "Makefile": { language: "unknown", stack: ["make"] },
+  "Dockerfile": { language: "unknown", stack: ["docker"] },
+  "composer.json": { language: "php", stack: ["composer"] },
+  "Package.swift": { language: "swift", stack: ["spm"] },
+  "deno.json": { language: "typescript", stack: ["deno"] },
+  "bun.lockb": { language: "typescript", stack: ["bun"] },
+};
 
 function buildFallbackAnalysis(targetRoot: string): ProjectAnalysis {
-  let packageName = "";
-  let packageDescription = "";
+  // Read any available project description
+  let description = "";
+  let readmeExcerpt = "";
+
+  for (const readmeFile of ["README.md", "README.rst", "README.txt", "README"]) {
+    const p = join(targetRoot, readmeFile);
+    if (existsSync(p)) {
+      try {
+        readmeExcerpt = readFileSync(p, "utf8").slice(0, 300).trim();
+        break;
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Try package.json description (JS/TS projects)
   const pkgPath = join(targetRoot, "package.json");
   if (existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-      packageName = typeof pkg.name === "string" ? pkg.name : "";
-      packageDescription = typeof pkg.description === "string" ? pkg.description : "";
-    } catch {
-      // ignore
-    }
+      const name = typeof pkg.name === "string" ? pkg.name : "";
+      const desc = typeof pkg.description === "string" ? pkg.description : "";
+      if (desc) description = name ? `${name}: ${desc}` : desc;
+    } catch { /* ignore */ }
   }
 
-  let readmeExcerpt = "";
-  const readmePath = join(targetRoot, "README.md");
-  if (existsSync(readmePath)) {
+  // Try Cargo.toml description (Rust)
+  const cargoPath = join(targetRoot, "Cargo.toml");
+  if (!description && existsSync(cargoPath)) {
     try {
-      readmeExcerpt = readFileSync(readmePath, "utf8").slice(0, 300).trim();
-    } catch {
-      // ignore
-    }
+      const content = readFileSync(cargoPath, "utf8");
+      const descMatch = content.match(/^description\s*=\s*"([^"]+)"/m);
+      const nameMatch = content.match(/^name\s*=\s*"([^"]+)"/m);
+      if (descMatch) description = nameMatch ? `${nameMatch[1]}: ${descMatch[1]}` : descMatch[1];
+    } catch { /* ignore */ }
   }
 
-  const description = packageDescription
-    ? `${packageName ? packageName + ": " : ""}${packageDescription}`
-    : readmeExcerpt
+  // Try pyproject.toml description (Python)
+  const pyprojectPath = join(targetRoot, "pyproject.toml");
+  if (!description && existsSync(pyprojectPath)) {
+    try {
+      const content = readFileSync(pyprojectPath, "utf8");
+      const descMatch = content.match(/^description\s*=\s*"([^"]+)"/m);
+      const nameMatch = content.match(/^name\s*=\s*"([^"]+)"/m);
+      if (descMatch) description = nameMatch ? `${nameMatch[1]}: ${descMatch[1]}` : descMatch[1];
+    } catch { /* ignore */ }
+  }
+
+  if (!description) {
+    description = readmeExcerpt
       ? readmeExcerpt.split("\n").filter(Boolean).slice(0, 2).join(". ")
       : "A software project.";
+  }
 
-  // Infer basic domains from package.json dependencies
-  const domains: string[] = [];
+  // Detect language and stack from build files
+  let language = "unknown";
   const stack: string[] = [];
 
-  if (existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-      const allDeps = {
-        ...((pkg.dependencies as Record<string, string>) ?? {}),
-        ...((pkg.devDependencies as Record<string, string>) ?? {}),
-      };
-      const depNames = Object.keys(allDeps);
-
-      if (depNames.some((d) => /react|vue|angular|svelte|next|nuxt/.test(d))) {
-        domains.push("frontend");
+  for (const [file, signal] of Object.entries(BUILD_FILE_SIGNALS)) {
+    if (existsSync(join(targetRoot, file))) {
+      if (language === "unknown" && signal.language !== "unknown") {
+        language = signal.language;
       }
-      if (depNames.some((d) => /express|fastify|hono|koa|nest/.test(d))) {
-        domains.push("backend");
+      for (const s of signal.stack) {
+        if (!stack.includes(s)) stack.push(s);
       }
-      if (depNames.some((d) => /react-native|expo/.test(d))) {
-        domains.push("mobile");
-      }
-      if (depNames.some((d) => /typescript|tsup|tsx/.test(d))) {
-        stack.push("typescript");
-      }
-      if (depNames.some((d) => /react/.test(d))) {
-        stack.push("react");
-      }
-      if (depNames.some((d) => /vite/.test(d))) {
-        stack.push("vite");
-      }
-    } catch {
-      // ignore
     }
   }
 
   return {
     description,
-    domains: domains.length ? domains : ["backend"],
-    stack: stack.length ? stack : ["javascript"],
+    language,
+    domains: [],
+    stack: stack.length ? stack : [language],
     suggestedAgents: ["code-reviewer", "software-architect"],
     source: "fallback",
   };
@@ -270,6 +298,7 @@ function validateAnalysis(parsed: Record<string, unknown>): ProjectAnalysis | nu
   if (!parsed || typeof parsed !== "object") return null;
 
   const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+  const language = typeof parsed.language === "string" ? parsed.language.trim().toLowerCase() : "";
   const domains = Array.isArray(parsed.domains)
     ? (parsed.domains as unknown[]).filter((d): d is string => typeof d === "string")
     : [];
@@ -284,6 +313,7 @@ function validateAnalysis(parsed: Record<string, unknown>): ProjectAnalysis | nu
 
   return {
     description: description || "A software project.",
+    language,
     domains,
     stack,
     suggestedAgents,
@@ -309,7 +339,8 @@ export async function analyzeProjectWithCli(
 
   const tempDir = mkdtempSync(join(tmpdir(), "fifony-scan-"));
   const promptFile = join(tempDir, "fifony-scan-prompt.txt");
-  writeFileSync(promptFile, ANALYSIS_PROMPT, "utf8");
+  const analysisPrompt = await renderPrompt("project-analysis");
+  writeFileSync(promptFile, analysisPrompt, "utf8");
 
   // Build environment with prompt file path
   const processEnv: Record<string, string> = {};
@@ -331,14 +362,13 @@ export async function analyzeProjectWithCli(
         command = "claude";
         args = [
           "--print",
+          "--reasoning-effort", "low",
           "--no-session-persistence",
           "--output-format", "json",
-          "-p", ANALYSIS_PROMPT,
+          "-p", analysisPrompt,
         ];
       } else if (normalizedProvider === "codex") {
-        command = "codex";
-        args = ["exec", "--skip-git-repo-check", "<", promptFile];
-        // For codex, wrap in shell to handle stdin redirection
+        // Codex: wrap in shell for stdin redirection, no --reasoning-effort flag
         command = "sh";
         args = ["-c", `codex exec --skip-git-repo-check < "${promptFile}"`];
       } else {

@@ -8,21 +8,22 @@
     "fifony": "./bin/fifony.js"
   },
   "scripts": {
-    "start": "node ./bin/fifony.js",
-    "dev": "node ./bin/fifony.js --port 4000 --dev",
-    "dev:api": "node ./bin/fifony.js --port 4000",
-    "dev:ui": "vite --config src/dashboard/vite.config.js",
-    "build": "tsup && vite build --config src/dashboard/vite.config.js",
-    "build:server": "tsup",
-    "build:ui": "vite build --config src/dashboard/vite.config.js",
+    "prompts:generate": "tsx ./scripts/generate-prompts.ts",
+    "start": "pnpm prompts:generate && node ./bin/fifony.js",
+    "dev": "pnpm prompts:generate && node ./bin/fifony.js --port 4000 --dev",
+    "dev:api": "pnpm prompts:generate && node ./bin/fifony.js --port 4000",
+    "dev:ui": "vite --config app/vite.config.js",
+    "build": "pnpm prompts:generate && tsup && vite build --config app/vite.config.js",
+    "build:server": "pnpm prompts:generate && tsup",
+    "build:ui": "vite build --config app/vite.config.js",
     "prepublishOnly": "pnpm build",
-    "mcp": "node ./bin/fifony.js mcp"
+    "mcp": "pnpm prompts:generate && node ./bin/fifony.js mcp"
   },
   "files": [
     "bin/",
     "dist/",
-    "src/dashboard/dist/",
-    "src/dashboard/public/",
+    "app/dist/",
+    "app/public/",
     "src/fixtures/",
     "README.md",
     "FIFONY.md",

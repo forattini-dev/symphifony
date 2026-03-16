@@ -1,8 +1,8 @@
 import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } from "../types.ts";
 import type { CompiledExecution } from "./index.ts";
+import { renderPrompt } from "../../prompting.ts";
 import {
   buildFullPlanPrompt,
-  buildToolingSection,
   resolveEffortForProvider,
   extractValidationCommands,
 } from "./shared.ts";
@@ -17,93 +17,32 @@ const CLAUDE_RESULT_SCHEMA = JSON.stringify({
   required: ["status"],
 });
 
-export function compileForClaude(
+export async function compileForClaude(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
   plan: IssuePlan,
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
-): CompiledExecution {
+): Promise<CompiledExecution> {
   const effort = resolveEffortForProvider(plan, provider.role, config.defaultEffort);
   // Claude caps at "high"
   const claudeEffort = effort === "extra-high" ? "high" : effort;
-
-  // ── Build maximalist prompt ──────────────────────────────────────────────
-  const sections: string[] = [];
-
-  // Role instructions
-  if (provider.role === "planner") {
-    sections.push("Role: planner. Analyze the issue and prepare an execution plan.");
-  } else if (provider.role === "reviewer") {
-    sections.push("Role: reviewer. Inspect and review the implementation critically.");
-  } else {
-    sections.push("Role: executor. Implement the required changes.");
-  }
-
-  // Profile instructions
-  if (provider.profileInstructions) {
-    sections.push("", "## Agent Profile", provider.profileInstructions);
-  }
-
-  // Skill context
-  if (skillContext) sections.push("", skillContext);
-
-  // Plan — the core
-  sections.push("", buildFullPlanPrompt(plan));
-
-  // Claude-specific: subagent instructions
-  if (plan.toolingDecision?.shouldUseSubagents && plan.toolingDecision.subagentsToUse?.length) {
-    sections.push("", "## Subagent Strategy (Claude-specific)");
-    sections.push("You have access to the Agent tool for spawning subagents. Use them for:");
-    for (const sa of plan.toolingDecision.subagentsToUse) {
-      sections.push(`- **${sa.name}** (${sa.role}): ${sa.why}`);
-    }
-    sections.push("", "Launch subagents for independent subtasks to maximize parallelism.");
-    sections.push("Use the main thread for coordination and integration.");
-  }
-
-  // Claude-specific: skill activation
-  if (plan.toolingDecision?.shouldUseSkills && plan.toolingDecision.skillsToUse?.length) {
-    sections.push("", "## Skills to Activate");
-    for (const skill of plan.toolingDecision.skillsToUse) {
-      sections.push(`- Invoke **/${skill.name}** — ${skill.why}`);
-    }
-  }
-
-  // Path focus
-  if (plan.suggestedPaths?.length) {
-    sections.push("", `Target paths: ${plan.suggestedPaths.join(", ")}`);
-  }
-
-  // Workspace
-  sections.push("", `Workspace: ${workspacePath}`);
-
-  // Issue context
-  sections.push(
-    "",
-    `Issue: ${issue.identifier}`,
-    `Title: ${issue.title}`,
-    `Description: ${issue.description || "(none)"}`,
-  );
-
-  // Structured payload reference
-  sections.push(
-    "",
-    "## Structured Input",
-    "The file `fifony-execution-payload.json` in the workspace contains the canonical structured data for this task.",
-    "Use it as the source of truth for constraints, success criteria, execution intent, and plan details.",
-    "If there is any conflict between this prompt and the structured fields in the payload, prioritize the payload.",
-  );
-
-  // Enforcement
-  if (plan.validation?.length) {
-    sections.push("", "## Pre-completion enforcement");
-    sections.push("Before reporting done, verify:");
-    plan.validation.forEach((v) => sections.push(`- ${v}`));
-  }
-
-  const prompt = sections.join("\n");
+  const prompt = await renderPrompt("compile-execution-claude", {
+    isPlanner: provider.role === "planner",
+    isReviewer: provider.role === "reviewer",
+    profileInstructions: provider.profileInstructions || "",
+    skillContext,
+    planPrompt: buildFullPlanPrompt(plan),
+    subagentsToUse: plan.toolingDecision?.shouldUseSubagents ? (plan.toolingDecision.subagentsToUse ?? []) : [],
+    skillsToUse: plan.toolingDecision?.shouldUseSkills ? (plan.toolingDecision.skillsToUse ?? []) : [],
+    suggestedPaths: plan.suggestedPaths ?? [],
+    workspacePath,
+    issueIdentifier: issue.identifier,
+    title: issue.title,
+    description: issue.description || "(none)",
+    validationItems: (plan.validation ?? []).map((value) => ({ value })),
+  });
 
   // ── Build command ────────────────────────────────────────────────────────
   const cmdParts = [

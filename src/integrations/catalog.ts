@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { renderPrompt } from "../prompting.ts";
 
 export type FifonyIntegration = {
   id: "agency-agents" | "impeccable";
@@ -99,52 +100,13 @@ export function discoverIntegrations(workspaceRoot: string): FifonyIntegration[]
   ];
 }
 
-export function buildIntegrationSnippet(integrationId: string, workspaceRoot: string): string {
+export async function buildIntegrationSnippet(integrationId: string, workspaceRoot: string): Promise<string> {
   if (integrationId === "agency-agents") {
-    return [
-      "---",
-      "agent:",
-      "  providers:",
-      "    - provider: claude",
-      "      role: planner",
-      "      profile: agency-senior-project-manager",
-      "    - provider: codex",
-      "      role: executor",
-      "      profile: agency-senior-developer",
-      "    - provider: claude",
-      "      role: reviewer",
-      "      profile: agency-code-reviewer",
-      "codex:",
-      '  command: "codex"',
-      "claude:",
-      '  command: "claude"',
-      "---",
-      "",
-      "Use local agency agent profiles discovered from workspace or home directories.",
-      `Workspace: ${workspaceRoot}`,
-    ].join("\n");
+    return renderPrompt("integrations-agency-agents", { workspaceRoot });
   }
 
   if (integrationId === "impeccable") {
-    return [
-      "# Impeccable integration idea",
-      "",
-      "Use impeccable-oriented skills as a frontend review layer around Fifony issues.",
-      "",
-      "Suggested pattern:",
-      "",
-      "1. Use `agency-senior-developer` or `codex` as executor.",
-      "2. Route UI-heavy issues to a reviewer prompt that explicitly asks for impeccable-style critique.",
-      "3. Expose the resulting review through the Fifony MCP prompts or as a follow-up review issue.",
-      "",
-      "Suggested labels:",
-      "- frontend",
-      "- ui",
-      "- design-system",
-      "",
-      "Suggested reviewer prompt seed:",
-      "\"Review this implementation using impeccable standards for frontend quality, polish, hierarchy, spacing, responsiveness, and interaction clarity.\"",
-    ].join("\n");
+    return renderPrompt("integrations-impeccable");
   }
 
   return "Unknown integration.";

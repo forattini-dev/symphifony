@@ -18,6 +18,7 @@ import type {
   AgentPipelineRecord,
   AgentPipelineState,
   AgentProviderDefinition,
+  AgentProviderRole,
   AgentSessionRecord,
   AgentSessionResult,
   AgentSessionState,
@@ -68,9 +69,11 @@ import {
   inferCapabilityPaths,
   resolveTaskCapabilities,
 } from "../routing/capability-resolver.ts";
+import { renderPrompt, renderPromptString } from "../prompting.ts";
 import { discoverSkills, buildSkillContext } from "./skills.ts";
 import { compileExecution, compileReview, persistCompilationArtifacts, buildExecutionAudit, persistExecutionAudit } from "./adapters/index.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
+import { record as recordTokens } from "./token-ledger.ts";
 
 function normalizeAgentDirectiveStatus(value: unknown, fallback: AgentDirectiveStatus): AgentDirectiveStatus {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -80,21 +83,42 @@ function normalizeAgentDirectiveStatus(value: unknown, fallback: AgentDirectiveS
   return fallback;
 }
 
-function addTokenUsage(issue: IssueEntry, usage?: AgentTokenUsage): void {
+function addTokenUsage(issue: IssueEntry, usage?: AgentTokenUsage, role?: AgentProviderRole): void {
   if (!usage || usage.totalTokens === 0) return;
 
-  // Aggregate tokenUsage summary
+  // 1. Aggregate overall tokenUsage summary
   const prev = issue.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   issue.tokenUsage = {
     inputTokens: prev.inputTokens + usage.inputTokens,
     outputTokens: prev.outputTokens + usage.outputTokens,
     totalTokens: prev.totalTokens + usage.totalTokens,
-    costUsd: (prev.costUsd ?? 0) + (usage.costUsd ?? 0) || undefined,
     model: usage.model || prev.model,
   };
 
-  // Update usage.tokens keyed by model (for eventual-consistency analytics)
+  // 2. Per-phase breakdown (planner / executor / reviewer)
+  if (role) {
+    if (!issue.tokensByPhase) issue.tokensByPhase = {} as Record<AgentProviderRole, AgentTokenUsage>;
+    const prevPhase = issue.tokensByPhase[role] ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    issue.tokensByPhase[role] = {
+      inputTokens: prevPhase.inputTokens + usage.inputTokens,
+      outputTokens: prevPhase.outputTokens + usage.outputTokens,
+      totalTokens: prevPhase.totalTokens + usage.totalTokens,
+      model: usage.model || prevPhase.model,
+    };
+  }
+
+  // 3. Per-model breakdown with full input/output detail
   const model = usage.model || issue.tokenUsage?.model || "unknown";
+  if (!issue.tokensByModel) issue.tokensByModel = {};
+  const prevModel = issue.tokensByModel[model] ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  issue.tokensByModel[model] = {
+    inputTokens: prevModel.inputTokens + usage.inputTokens,
+    outputTokens: prevModel.outputTokens + usage.outputTokens,
+    totalTokens: prevModel.totalTokens + usage.totalTokens,
+    model,
+  };
+
+  // 4. Legacy per-model totals for EventualConsistency analytics
   if (!issue.usage) issue.usage = { tokens: {} };
   issue.usage.tokens[model] = (issue.usage.tokens[model] || 0) + usage.totalTokens;
 }
@@ -687,159 +711,71 @@ export async function loadAgentSessionSnapshotsForIssue(
   return sessions;
 }
 
-function buildPrompt(issue: IssueEntry, workflowDefinition: WorkflowDefinition | null): string {
-  const template = workflowDefinition?.promptTemplate.trim() || [
-    "You are working on {{ issue.identifier }}.",
-    "",
-    "Title: {{ issue.title }}",
-    "Description:",
-    "{{ issue.description }}",
-  ].join("\n");
+async function buildPrompt(issue: IssueEntry, workflowDefinition: WorkflowDefinition | null): Promise<string> {
+  const template = workflowDefinition?.promptTemplate.trim();
+  const rendered = template
+    ? await renderPromptString(template, { issue, attempt: issue.attempts || 0 })
+    : await renderPrompt("workflow-default", { issue, attempt: issue.attempts || 0 });
 
-  const knownKeys = new Set(Object.keys(issue));
-  const errors: string[] = [];
+  if (!issue.plan?.steps?.length) {
+    return rendered;
+  }
 
-  const rendered = template.replace(/{{\s*issue\.([a-zA-Z0-9_]+)\s*}}/g, (_match, key: string) => {
-    if (!knownKeys.has(key)) {
-      errors.push(`Unknown template variable: issue.${key}`);
-      return `{{ issue.${key} }}`;
-    }
-    const value = issue[key as keyof IssueEntry];
-    if (Array.isArray(value)) return value.join(", ");
-    return value == null ? "" : String(value);
+  const planSection = await renderPrompt("workflow-plan-section", {
+    estimatedComplexity: issue.plan.estimatedComplexity,
+    summary: issue.plan.summary,
+    steps: issue.plan.steps.map((step) => ({
+      step: step.step,
+      action: step.action,
+      files: step.files ?? [],
+      details: step.details ?? "",
+    })),
   });
 
-  // Also check for {{ attempt }} variable
-  const withAttempt = rendered.replace(/{{\s*attempt\s*}}/g, String(issue.attempts || 0));
-
-  if (errors.length > 0) {
-    throw new Error(`Prompt rendering failed: ${errors.join("; ")}`);
-  }
-
-  // Append plan if available
-  if (issue.plan?.steps?.length) {
-    const planSection = [
-      "",
-      "## Execution Plan",
-      "",
-      `Complexity: ${issue.plan.estimatedComplexity}`,
-      `Summary: ${issue.plan.summary}`,
-      "",
-      "Steps:",
-      ...issue.plan.steps.map((s) =>
-        `${s.step}. ${s.action}${s.files?.length ? ` (files: ${s.files.join(", ")})` : ""}${s.details ? ` — ${s.details}` : ""}`
-      ),
-      "",
-      "Follow this plan. Complete each step in order.",
-    ];
-    return `${withAttempt}\n${planSection.join("\n")}`;
-  }
-
-  return withAttempt;
+  return `${rendered}\n\n${planSection}`;
 }
 
-function buildTurnPrompt(
+async function buildTurnPrompt(
   issue: IssueEntry,
   basePrompt: string,
   previousOutput: string,
   turnIndex: number,
   maxTurns: number,
   nextPrompt: string,
-): string {
+): Promise<string> {
   if (turnIndex === 1) return basePrompt;
 
-  const outputTail = previousOutput.trim() || "No previous output captured.";
-  const continuation = nextPrompt.trim() || "Continue the work, inspect the workspace, and move the issue toward completion.";
-
-  return [
-    `Continue working on ${issue.identifier}.`,
-    `Turn ${turnIndex} of ${maxTurns}.`,
-    "",
-    "Base objective:",
+  return renderPrompt("agent-turn", {
+    issueIdentifier: issue.identifier,
+    turnIndex,
+    maxTurns,
     basePrompt,
-    "",
-    "Continuation guidance:",
-    continuation,
-    "",
-    "Previous command output tail:",
-    "```text",
-    outputTail,
-    "```",
-    "",
-    "Before exiting successfully, emit one of the following control markers:",
-    "- `FIFONY_STATUS=continue` if more turns are required.",
-    "- `FIFONY_STATUS=done` if the issue is complete.",
-    "- `FIFONY_STATUS=blocked` if manual intervention is required.",
-    'You may also write `fifony-result.json` with `{ "status": "...", "summary": "...", "nextPrompt": "..." }`.',
-  ].join("\n");
+    continuation: nextPrompt.trim() || "Continue the work, inspect the workspace, and move the issue toward completion.",
+    outputTail: previousOutput.trim() || "No previous output captured.",
+  });
 }
 
-function buildProviderBasePrompt(
+async function buildProviderBasePrompt(
   provider: AgentProviderDefinition,
   issue: IssueEntry,
   basePrompt: string,
   workspacePath: string,
   skillContext: string,
-): string {
-  const roleInstructions = provider.role === "planner"
-    ? [
-        "Role: planner.",
-        "Analyze the issue and prepare an execution plan for the implementation agents.",
-        "Do not claim the issue is complete unless the plan itself is the deliverable.",
-      ]
-    : provider.role === "reviewer"
-      ? [
-          "Role: reviewer.",
-          "Inspect the workspace and review the current implementation critically.",
-          "If rework is required, emit `FIFONY_STATUS=continue` and provide actionable `nextPrompt` feedback.",
-          "Emit `FIFONY_STATUS=done` only when the work is acceptable.",
-        ]
-      : [
-          "Role: executor.",
-          "Implement the required changes in the workspace.",
-          "Use any planner guidance or prior reviewer feedback already persisted in the workspace.",
-        ];
-
-  const overlayInstructions = provider.overlays?.includes("impeccable")
-    ? [
-        "Impeccable overlay is active.",
-        "Raise the bar on UI polish, clarity, responsiveness, visual hierarchy, and interaction quality.",
-        provider.role === "reviewer"
-          ? "Review with a stricter frontend and product-quality standard than a normal correctness-only pass."
-          : "When touching frontend work, do not settle for baseline implementation quality.",
-      ]
-    : provider.overlays?.includes("frontend-design")
-      ? [
-          "Frontend-design overlay is active.",
-          "Prefer stronger hierarchy, spacing, and readability decisions over generic implementation choices.",
-        ]
-      : [];
-
-  const sections = [
-    ...roleInstructions,
-    ...overlayInstructions,
-    ...(provider.profileInstructions
-      ? ["", "## Agent Profile", provider.profileInstructions]
-      : []),
-    ...(skillContext ? ["", skillContext] : []),
-    ...(provider.capabilityCategory
-      ? [
-          "",
-          `Capability routing: ${provider.capabilityCategory}.`,
-          `Selection reason: ${provider.selectionReason ?? "No additional routing reason."}`,
-          ...(provider.overlays?.length ? [`Overlays: ${provider.overlays.join(", ")}.`] : []),
-        ]
-      : []),
-    ...(issue.paths?.length
-      ? ["", `Target paths: ${issue.paths.join(", ")}`]
-      : []),
-    "",
-    `Workspace: ${workspacePath}`,
-    "",
+): Promise<string> {
+  return renderPrompt("agent-provider-base", {
+    isPlanner: provider.role === "planner",
+    isReviewer: provider.role === "reviewer",
+    hasImpeccableOverlay: provider.overlays?.includes("impeccable") ?? false,
+    hasFrontendDesignOverlay: provider.overlays?.includes("frontend-design") ?? false,
+    profileInstructions: provider.profileInstructions || "",
+    skillContext,
+    capabilityCategory: provider.capabilityCategory || "",
+    selectionReason: provider.selectionReason ?? "No additional routing reason.",
+    overlays: provider.overlays ?? [],
+    targetPaths: issue.paths ?? [],
+    workspacePath,
     basePrompt,
-  ];
-
-  return sections.join("\n");
+  });
 }
 
 async function runCommandWithTimeout(
@@ -1040,7 +976,7 @@ async function prepareWorkspace(
   }
 
   const metaPath = join(workspaceRoot, "fifony-issue.json");
-  const promptText = buildPrompt(issue, workflowDefinition);
+  const promptText = await buildPrompt(issue, workflowDefinition);
   const promptFile = join(workspaceRoot, "fifony-prompt.md");
   writeFileSync(metaPath, JSON.stringify({ ...issue, runtimeSource: SOURCE_ROOT, bootstrapAt: now() }, null, 2), "utf8");
   writeFileSync(promptFile, `${promptText}\n`, "utf8");
@@ -1084,7 +1020,7 @@ async function runAgentSession(
     return { success: false, blocked: true, continueRequested: false, code: lastCode, output: session.lastOutput, turns: session.turns.length };
   }
 
-  const turnPrompt = buildTurnPrompt(issue, basePromptText, previousOutput, turnIndex, maxTurns, nextPrompt);
+  const turnPrompt = await buildTurnPrompt(issue, basePromptText, previousOutput, turnIndex, maxTurns, nextPrompt);
   const turnPromptFile = turnIndex === 1
     ? basePromptFile
     : join(workspacePath, `fifony-turn-${String(turnIndex).padStart(2, "0")}.md`);
@@ -1139,14 +1075,29 @@ async function runAgentSession(
   lastOutput = turnResult.output;
   previousOutput = turnResult.output;
   nextPrompt = directive.nextPrompt;
-  addTokenUsage(issue, directive.tokenUsage);
+  addTokenUsage(issue, directive.tokenUsage, provider.role);
+  if (directive.tokenUsage) recordTokens(issue, directive.tokenUsage, provider.role);
 
   if (directive.tokenUsage) {
-    addEvent(state, issue.id, "info", `Turn ${turnIndex} used ${directive.tokenUsage.totalTokens.toLocaleString()} tokens${directive.tokenUsage.costUsd ? ` ($${directive.tokenUsage.costUsd.toFixed(4)})` : ""}${directive.tokenUsage.model ? ` [${directive.tokenUsage.model}]` : ""}.`);
+    const tu = directive.tokenUsage;
+    const parts = [
+      `Turn ${turnIndex} (${provider.role})`,
+      `${tu.totalTokens.toLocaleString()} tokens`,
+      `(in: ${tu.inputTokens.toLocaleString()}, out: ${tu.outputTokens.toLocaleString()})`,
+    ];
+    if (tu.model) parts.push(`[${tu.model}]`);
+    // Running totals
+    const cumulative = issue.tokenUsage;
+    if (cumulative && cumulative.totalTokens > tu.totalTokens) {
+      parts.push(`| cumulative: ${cumulative.totalTokens.toLocaleString()}`);
+    }
+    addEvent(state, issue.id, "info", parts.join(" "));
   }
 
   session.turns.push({
     turn: turnIndex,
+    role: provider.role,
+    model: directive.tokenUsage?.model || provider.model || provider.provider,
     startedAt: turnStartedAt,
     completedAt: now(),
     promptFile: turnPromptFile,
@@ -1217,7 +1168,7 @@ export async function runAgentPipeline(
   }
 
   // Compile plan-aware execution if plan exists
-  const compiled = compileExecution(issue, activeProvider, state.config, workspacePath, skillContext);
+  const compiled = await compileExecution(issue, activeProvider, state.config, workspacePath, skillContext);
 
   let providerPrompt: string;
   let effectiveProvider = activeProvider;
@@ -1237,7 +1188,7 @@ export async function runAgentPipeline(
       writeFileSync(envFile, envLines, "utf8");
     }
   } else {
-    providerPrompt = buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext);
+    providerPrompt = await buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext);
   }
 
   if (!effectiveProvider.command.trim()) {
@@ -1372,7 +1323,7 @@ export async function runIssueOnce(
       }
 
       // Compile a rich review prompt with plan context, diff, and criteria
-      const compiled = compileReview(issue, reviewer, workspacePath, diffSummary);
+      const compiled = await compileReview(issue, reviewer, workspacePath, diffSummary);
       const effectiveReviewer = { ...reviewer, command: compiled.command || reviewer.command };
 
       const reviewPromptFile = join(workspacePath, "fifony-review-prompt.md");

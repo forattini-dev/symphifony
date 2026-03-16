@@ -1,5 +1,6 @@
 import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } from "../types.ts";
 import type { CompiledExecution } from "./index.ts";
+import { renderPrompt } from "../../prompting.ts";
 import {
   buildFullPlanPrompt,
   resolveEffortForProvider,
@@ -21,95 +22,35 @@ Return a JSON object with this exact schema when finished:
 }
 `.trim();
 
-export function compileForCodex(
+export async function compileForCodex(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
   plan: IssuePlan,
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
-): CompiledExecution {
+): Promise<CompiledExecution> {
   const effort = resolveEffortForProvider(plan, provider.role, config.defaultEffort);
-
-  // ── Build maximalist prompt ──────────────────────────────────────────────
-  const sections: string[] = [];
-
-  // Role
-  if (provider.role === "reviewer") {
-    sections.push("Role: reviewer. Inspect and review the implementation critically.");
-  } else if (provider.role === "planner") {
-    sections.push("Role: planner. Analyze and prepare an execution plan.");
-  } else {
-    sections.push("Role: executor. Implement the required changes in the workspace.");
-  }
-
-  // Profile
-  if (provider.profileInstructions) {
-    sections.push("", "## Agent Profile", provider.profileInstructions);
-  }
-
-  // Skills
-  if (skillContext) sections.push("", skillContext);
-
-  // Issue context
-  sections.push(
-    "",
-    `Issue: ${issue.identifier}`,
-    `Title: ${issue.title}`,
-    `Description: ${issue.description || "(none)"}`,
-    `Workspace: ${workspacePath}`,
-  );
-
-  // Plan — the core
-  sections.push("", buildFullPlanPrompt(plan));
-
-  // Codex-specific: checkpoint-based execution
-  if (plan.phases?.length) {
-    sections.push("", "## Checkpoint Execution (Codex mode)");
-    sections.push("Execute in strict phases. After each phase, verify outputs before proceeding.");
-    for (const phase of plan.phases) {
-      sections.push(`- **${phase.phaseName}**: ${phase.goal}`);
-      if (phase.outputs?.length) sections.push(`  Checkpoint: verify ${phase.outputs.join(", ")} before next phase.`);
-    }
-  } else {
-    sections.push("", "## Execution Order");
-    sections.push("Execute steps in order. Verify each step's 'doneWhen' criterion before proceeding.");
-  }
-
-  // Path focus
-  if (plan.suggestedPaths?.length) {
-    sections.push("", `Target paths: ${plan.suggestedPaths.join(", ")}`);
-    sections.push("Focus changes on these paths. Do not make unnecessary changes elsewhere.");
-  }
-
-  // Codex-specific: tooling delegation as structured instructions
-  if (plan.toolingDecision?.shouldUseSkills && plan.toolingDecision.skillsToUse?.length) {
-    sections.push("", "## Specialized Procedures");
-    for (const skill of plan.toolingDecision.skillsToUse) {
-      sections.push(`- Apply **${skill.name}** procedure: ${skill.why}`);
-    }
-  }
-
-  // Enforcement
-  if (plan.validation?.length) {
-    sections.push("", "## Pre-completion checks");
-    sections.push("Before reporting done, run:");
-    plan.validation.forEach((v) => sections.push(`- ${v}`));
-  }
-
-  // Structured payload reference
-  sections.push(
-    "",
-    "## Structured Input",
-    "The file `fifony-execution-payload.json` in the workspace contains the canonical structured data for this task.",
-    "Use it as the source of truth for constraints, success criteria, execution intent, and plan details.",
-    "If there is any conflict between this prompt and the structured fields in the payload, prioritize the payload.",
-  );
-
-  // Result contract (Codex doesn't have --json-schema)
-  sections.push("", "## Output Format", "", CODEX_RESULT_CONTRACT);
-
-  const prompt = sections.join("\n");
+  const prompt = await renderPrompt("compile-execution-codex", {
+    isPlanner: provider.role === "planner",
+    isReviewer: provider.role === "reviewer",
+    profileInstructions: provider.profileInstructions || "",
+    skillContext,
+    issueIdentifier: issue.identifier,
+    title: issue.title,
+    description: issue.description || "(none)",
+    workspacePath,
+    planPrompt: buildFullPlanPrompt(plan),
+    phases: (plan.phases ?? []).map((phase) => ({
+      phaseName: phase.phaseName,
+      goal: phase.goal,
+      outputs: phase.outputs ?? [],
+    })),
+    suggestedPaths: plan.suggestedPaths ?? [],
+    skillsToUse: plan.toolingDecision?.shouldUseSkills ? (plan.toolingDecision.skillsToUse ?? []) : [],
+    validationItems: (plan.validation ?? []).map((value) => ({ value })),
+    outputContract: CODEX_RESULT_CONTRACT,
+  });
 
   // ── Build command ────────────────────────────────────────────────────────
   const cmdParts = ["codex", "exec", "--skip-git-repo-check"];

@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { PACKAGE_ROOT } from "./constants.ts";
 import { logger } from "./logger.ts";
 
-const VITE_CONFIG_PATH = resolve(PACKAGE_ROOT, "src/dashboard/vite.config.js");
+const VITE_CONFIG_PATH = resolve(PACKAGE_ROOT, "app/vite.config.js");
 
 export async function startDevFrontend(apiPort: number, devPort: number): Promise<void> {
   let createViteServer: typeof import("vite").createServer;

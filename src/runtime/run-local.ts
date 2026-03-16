@@ -23,6 +23,7 @@ import { scheduler, installGracefulShutdown } from "./scheduler.ts";
 import { cleanWorkspace, isAgentStillRunning, cleanStalePidFile } from "./agent.ts";
 import { startDevFrontend } from "./dev-server.ts";
 import { recoverPlanningSession } from "./issue-planner.ts";
+import { hydrate as hydrateTokenLedger } from "./token-ledger.ts";
 
 function usage() {
   console.log(
@@ -166,6 +167,7 @@ async function main() {
   installGracefulShutdown(state, running);
 
   logger.info(`Rendered local workflow: ${WORKFLOW_RENDERED}`);
+  hydrateTokenLedger(state.issues);
   logger.info(`Loaded issues: ${state.issues.length}`);
   logger.info(`Worker concurrency: ${state.config.workerConcurrency}`);
   logger.info(`Max attempts: ${state.config.maxAttemptsDefault}`);

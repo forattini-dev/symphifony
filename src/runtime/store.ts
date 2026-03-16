@@ -161,7 +161,16 @@ export async function initStateStore(): Promise<void> {
       const ecPlugin = new EventualConsistencyPlugin({
         resources: {
           [S3DB_ISSUE_RESOURCE]: [
+            // Per-model totals (dynamic keys: { "claude-sonnet-4-6": 12345, "o4-mini": 6789 })
             { field: "usage.tokens", fieldPath: "usage.tokens", initialValue: 0, cohort: { granularity: "day" } },
+            // Overall volume
+            { field: "tokenUsage.totalTokens", fieldPath: "tokenUsage.totalTokens", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "tokenUsage.inputTokens", fieldPath: "tokenUsage.inputTokens", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "tokenUsage.outputTokens", fieldPath: "tokenUsage.outputTokens", initialValue: 0, cohort: { granularity: "day" } },
+            // Per-phase volume
+            { field: "tokensByPhase.planner.totalTokens", fieldPath: "tokensByPhase.planner.totalTokens", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "tokensByPhase.executor.totalTokens", fieldPath: "tokensByPhase.executor.totalTokens", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "tokensByPhase.reviewer.totalTokens", fieldPath: "tokensByPhase.reviewer.totalTokens", initialValue: 0, cohort: { granularity: "day" } },
           ],
         },
         enableAnalytics: true,

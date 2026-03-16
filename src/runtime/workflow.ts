@@ -21,6 +21,7 @@ import {
   parseIntArg,
 } from "./helpers.ts";
 import { logger } from "./logger.ts";
+import { PROMPT_TEMPLATES } from "../generated/prompts.ts";
 import {
   normalizeAgentProvider,
   resolveAgentProfile,
@@ -92,13 +93,7 @@ export function bootstrapSource(): void {
  * (Settings → Workflow in the dashboard).
  */
 export function loadWorkflowDefinition(): WorkflowDefinition {
-  const defaultPrompt = [
-    "You are working on {{ issue.identifier }}.",
-    "",
-    "Title: {{ issue.title }}",
-    "Description:",
-    "{{ issue.description }}",
-  ].join("\n");
+  const defaultPrompt = PROMPT_TEMPLATES["workflow-default"];
 
   return {
     workflowPath: "",

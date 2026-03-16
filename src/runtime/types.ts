@@ -62,7 +62,9 @@ export type IssueEntry = {
   commandOutputTail?: string;
   terminalWeek?: string; // e.g. "2026-W12" — set when issue reaches Done/Cancelled, "" when active
   tokenUsage?: AgentTokenUsage; // aggregated across all turns/attempts
-  usage?: { tokens: Record<string, number> }; // { tokens: { "claude-opus-4-6": 12345, "gpt-5.3": 6789 } }
+  tokensByPhase?: Record<AgentProviderRole, AgentTokenUsage>; // per-phase breakdown (planner/executor/reviewer)
+  tokensByModel?: Record<string, AgentTokenUsage>; // full per-model breakdown with input/output
+  usage?: { tokens: Record<string, number> }; // { tokens: { "claude-opus-4-6": 12345, "gpt-5.3": 6789 } } — for EventualConsistency
   effort?: EffortConfig; // per-issue reasoning effort override
   linesAdded?: number;
   linesRemoved?: number;
@@ -255,6 +257,8 @@ export type AgentSessionResult = {
 
 export type AgentSessionTurn = {
   turn: number;
+  role?: AgentProviderRole;
+  model?: string;
   startedAt: string;
   completedAt: string;
   promptFile: string;

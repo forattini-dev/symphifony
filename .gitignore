@@ -8,7 +8,7 @@ node_modules/
 npm-debug.log*
 pnpm-debug.log*
 dist/
-src/dashboard/dist/
-src/dashboard/src/routeTree.gen.ts
+app/dist/
+app/src/routeTree.gen.ts
 CLAUDE.md
 AGENTS.md

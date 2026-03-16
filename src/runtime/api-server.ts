@@ -29,7 +29,6 @@ import {
 import { NATIVE_RESOURCE_CONFIGS } from "./resources/index.ts";
 import { now, isoWeek, clamp, toStringValue } from "./helpers.ts";
 import { isAgentStillRunning } from "./agent.ts";
-import { getActiveEcPlugin } from "./store.ts";
 import { logger } from "./logger.ts";
 import {
   loadS3dbModule,
@@ -46,11 +45,12 @@ import {
   handleStatePatch,
   transitionIssueState,
 } from "./issues.ts";
-import { detectAvailableProviders } from "./providers.ts";
+import { detectAvailableProviders, discoverModels } from "./providers.ts";
 import { collectProvidersUsage } from "./providers-usage.ts";
 import { analyzeParallelizability } from "./scheduler.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
 import { TERMINAL_STATES } from "./constants.ts";
+import { getAnalytics as getTokenAnalytics } from "./token-ledger.ts";
 import { enhanceIssueField } from "./issue-enhancer.ts";
 import { generatePlan, loadPlanningSession, savePlanningInput, clearPlanningSession } from "./issue-planner.ts";
 import {
@@ -473,6 +473,15 @@ export async function startApiServer(
         const defaultConfig = buildDefaultWorkflowConfig(providers);
         return c.json({ ok: true, workflow: saved || defaultConfig, isDefault: !saved, providers });
       },
+      "GET /api/config/models": async (c: any) => {
+        const providers = detectAvailableProviders();
+        const models = await discoverModels(providers);
+        return c.json({ ok: true, models });
+      },
+      "GET /api/analytics/tokens": async (c: any) => {
+        // O(1) read from in-memory ledger — no disk I/O, no scans
+        return c.json({ ok: true, ...getTokenAnalytics() });
+      },
       "POST /api/config/workflow": async (c: any) => {
         try {
           const payload = await c.req.json() as JsonRecord;
@@ -768,28 +777,10 @@ export async function startApiServer(
           return c.json({ ok: false, error: "Failed to load issue diff." }, 500);
         }
       },
-      "GET /api/analytics/tokens": async (c: any) => {
-        const ec = getActiveEcPlugin();
-        if (!ec) return c.json({ ok: false, error: "Analytics not available." }, 503);
-        try {
-          const days = parseInt(c.req.query("days") || "30", 10);
-          const data = await ec.getLastNDays?.("issues", "usage.tokens", days) ?? [];
-          const topIssues = await ec.getTopRecords?.("issues", "usage.tokens", { limit: 10 }) ?? [];
-          return c.json({ ok: true, data, topIssues });
-        } catch (error) {
-          return c.json({ ok: false, error: String(error) }, 500);
-        }
-      },
+      // Token analytics served from in-memory ledger (primary endpoint is above)
       "GET /api/analytics/tokens/weekly": async (c: any) => {
-        const ec = getActiveEcPlugin();
-        if (!ec) return c.json({ ok: false, error: "Analytics not available." }, 503);
-        try {
-          const weeks = parseInt(c.req.query("weeks") || "12", 10);
-          const data = await ec.getLastNWeeks?.("issues", "usage.tokens", weeks) ?? [];
-          return c.json({ ok: true, data });
-        } catch (error) {
-          return c.json({ ok: false, error: String(error) }, 500);
-        }
+        // Weekly is part of the daily data in the ledger — filter client-side
+        return c.json({ ok: true, ...getTokenAnalytics() });
       },
       "GET /api/events/feed": async (c: any) => {
         const since = c.req.query("since");

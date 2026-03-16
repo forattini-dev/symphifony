@@ -1,0 +1,208 @@
+[
+  {
+    "name": "frontend-developer",
+    "displayName": "Frontend Developer",
+    "description": "Expert in React, Vue, CSS, responsive design, and performance optimization",
+    "emoji": "🎨",
+    "domains": [
+      "frontend",
+      "saas",
+      "ecommerce",
+      "design"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-frontend-developer.stub.md"
+  },
+  {
+    "name": "backend-architect",
+    "displayName": "Backend Architect",
+    "description": "Designs scalable APIs, microservices, database schemas, and cloud infrastructure",
+    "emoji": "🏗️",
+    "domains": [
+      "backend",
+      "saas",
+      "fintech",
+      "ecommerce"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-backend-architect.stub.md"
+  },
+  {
+    "name": "database-optimizer",
+    "displayName": "Database Optimizer",
+    "description": "Specializes in schema design, query optimization, indexing strategies, and data modeling",
+    "emoji": "🗄️",
+    "domains": [
+      "database",
+      "backend",
+      "fintech",
+      "ecommerce"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-database-optimizer.stub.md"
+  },
+  {
+    "name": "security-engineer",
+    "displayName": "Security Engineer",
+    "description": "Expert in application security, threat modeling, OWASP compliance, and secure code review",
+    "emoji": "🔒",
+    "domains": [
+      "security",
+      "backend",
+      "fintech",
+      "healthcare"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-security-engineer.stub.md"
+  },
+  {
+    "name": "devops-automator",
+    "displayName": "DevOps Automator",
+    "description": "CI/CD pipelines, Docker, Kubernetes, cloud infrastructure, and deployment automation",
+    "emoji": "⚙️",
+    "domains": [
+      "devops",
+      "backend",
+      "saas"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-devops-automator.stub.md"
+  },
+  {
+    "name": "mobile-app-builder",
+    "displayName": "Mobile App Builder",
+    "description": "iOS, Android, React Native, and Flutter development with platform-specific optimizations",
+    "emoji": "📱",
+    "domains": [
+      "mobile",
+      "frontend",
+      "ecommerce"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-mobile-app-builder.stub.md"
+  },
+  {
+    "name": "ai-engineer",
+    "displayName": "AI Engineer",
+    "description": "ML model integration, AI feature development, LLM applications, and data pipelines",
+    "emoji": "🧠",
+    "domains": [
+      "ai-ml",
+      "backend",
+      "saas"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-ai-engineer.stub.md"
+  },
+  {
+    "name": "ui-designer",
+    "displayName": "UI Designer",
+    "description": "Visual design, component libraries, design systems, and design-to-code implementation",
+    "emoji": "🎭",
+    "domains": [
+      "design",
+      "frontend",
+      "saas",
+      "ecommerce"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-ui-designer.stub.md"
+  },
+  {
+    "name": "ux-architect",
+    "displayName": "UX Architect",
+    "description": "User experience patterns, accessibility, information architecture, and user flow design",
+    "emoji": "📝",
+    "domains": [
+      "design",
+      "frontend",
+      "saas",
+      "ecommerce",
+      "healthcare"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-ux-architect.stub.md"
+  },
+  {
+    "name": "code-reviewer",
+    "displayName": "Code Reviewer",
+    "description": "Code quality analysis, best practices enforcement, and constructive review feedback",
+    "emoji": "🔍",
+    "domains": [
+      "backend",
+      "frontend",
+      "testing",
+      "security"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-code-reviewer.stub.md"
+  },
+  {
+    "name": "technical-writer",
+    "displayName": "Technical Writer",
+    "description": "Documentation, READMEs, API references, tutorials, and developer guides",
+    "emoji": "📖",
+    "domains": [
+      "backend",
+      "frontend",
+      "saas"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-technical-writer.stub.md"
+  },
+  {
+    "name": "sre",
+    "displayName": "Site Reliability Engineer",
+    "description": "Reliability, observability, incident response, SLOs, and production operations",
+    "emoji": "🛡️",
+    "domains": [
+      "devops",
+      "backend",
+      "saas",
+      "fintech"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-sre.stub.md"
+  },
+  {
+    "name": "data-engineer",
+    "displayName": "Data Engineer",
+    "description": "ETL pipelines, data warehousing, analytics infrastructure, and data quality",
+    "emoji": "📊",
+    "domains": [
+      "database",
+      "backend",
+      "ai-ml",
+      "fintech"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-data-engineer.stub.md"
+  },
+  {
+    "name": "software-architect",
+    "displayName": "Software Architect",
+    "description": "System design, domain-driven design, architectural patterns, and technical strategy",
+    "emoji": "🏛️",
+    "domains": [
+      "backend",
+      "frontend",
+      "saas",
+      "fintech"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-software-architect.stub.md"
+  },
+  {
+    "name": "game-designer",
+    "displayName": "Game Designer",
+    "description": "Game mechanics, level design, game loops, and cross-engine development patterns",
+    "emoji": "🎮",
+    "domains": [
+      "games",
+      "frontend",
+      "design"
+    ],
+    "source": "agency-agents",
+    "stub": "agent-game-designer.stub.md"
+  }
+]

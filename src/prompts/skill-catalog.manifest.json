@@ -1,0 +1,67 @@
+[
+  {
+    "name": "impeccable",
+    "displayName": "Impeccable Design",
+    "description": "Comprehensive frontend design skill with typography, color, spatial design, motion, and UX writing reference",
+    "domains": [
+      "frontend",
+      "design"
+    ],
+    "source": "impeccable",
+    "installType": "reference",
+    "url": "https://github.com/pbakaus/impeccable"
+  },
+  {
+    "name": "commit",
+    "displayName": "Git Commit",
+    "description": "Git commit best practices: conventional commits, atomic changes, and meaningful messages",
+    "domains": [
+      "backend",
+      "frontend",
+      "devops"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-commit.stub.md"
+  },
+  {
+    "name": "review-pr",
+    "displayName": "PR Review",
+    "description": "Pull request review methodology: structured feedback, security checks, and constructive communication",
+    "domains": [
+      "backend",
+      "frontend",
+      "security",
+      "testing"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-review-pr.stub.md"
+  },
+  {
+    "name": "debug",
+    "displayName": "Debugging",
+    "description": "Systematic debugging methodology: reproduce, isolate, diagnose, fix, and verify",
+    "domains": [
+      "backend",
+      "frontend",
+      "testing"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-debug.stub.md"
+  },
+  {
+    "name": "testing",
+    "displayName": "Testing Strategies",
+    "description": "Testing methodology: unit, integration, E2E, test design patterns, and coverage strategies",
+    "domains": [
+      "backend",
+      "frontend",
+      "testing"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-testing.stub.md"
+  }
+]

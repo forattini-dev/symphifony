@@ -2,6 +2,7 @@ import { appendFileTail, getNestedRecord, getNestedString } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { detectAvailableProviders, normalizeAgentProvider, resolveAgentCommand } from "./providers.ts";
 import type { RuntimeConfig, WorkflowDefinition } from "./types.ts";
+import { renderPrompt } from "../prompting.ts";
 import { env } from "node:process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -35,40 +36,17 @@ function getProviderCommand(
   return resolveAgentCommand(provider, config.agentCommand || "", codexCommand, claudeCommand);
 }
 
-function buildPrompt(field: EnhancementField, title: string, description: string): string {
+async function buildPrompt(field: EnhancementField, title: string, description: string): Promise<string> {
+  const context = {
+    title: title || "(empty)",
+    description: description || "(empty)",
+  };
+
   if (field === "title") {
-    return [
-      "You are helping improve issue metadata for a software execution queue.",
-      "Rewrite the title for clarity, actionability, and specificity.",
-      "Return strict JSON only with this schema:",
-      '{ "field": "title", "value": "..." }',
-      "",
-      `Current title: ${title || "(empty)"}`,
-      `Description context: ${description || "(empty)"}`,
-      "",
-      "Rules:",
-      "- Keep it concise and suitable as a task title.",
-      "- Use imperative language when possible.",
-      "- Do not include markdown, quotes, or extra explanation.",
-      "- The value should be in Portuguese if the input is in Portuguese; otherwise in English.",
-    ].join("\n");
+    return renderPrompt("issue-enhancer-title", context);
   }
 
-  return [
-    "You are helping improve issue metadata for a software execution queue.",
-    "Rewrite the description to be clearer, complete, and directly actionable.",
-    "Return strict JSON only with this schema:",
-    '{ "field": "description", "value": "..." }',
-    "",
-    `Current title: ${title || "(empty)"}`,
-    `Current description: ${description || "(empty)"}`,
-    "",
-    "Rules:",
-    "- Keep it concise but include meaningful acceptance criteria.",
-    "- Use plain text only, with short paragraphs or bullet style.",
-    "- Avoid markdown wrappers, quotes, and extra explanation.",
-    "- The value should be in Portuguese if the input is in Portuguese; otherwise in English.",
-  ].join("\n");
+  return renderPrompt("issue-enhancer-description", context);
 }
 
 function parseEnhancerOutput(raw: string, expectedField: EnhancementField): string {
@@ -316,7 +294,7 @@ export async function enhanceIssueField(
     throw new Error(`No AI provider available (codex/claude). Detected: ${known}`);
   }
 
-  const prompt = buildPrompt(field, title, description);
+  const prompt = await buildPrompt(field, title, description);
   const errors: string[] = [];
 
   for (const selectedProvider of orderedProviders) {

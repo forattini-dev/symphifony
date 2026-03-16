@@ -322,13 +322,13 @@ export function buildDefaultWorkflowConfig(detectedProviders: DetectedProvider[]
   const hasCodex = available.some((p) => p.name === "codex");
 
   const claudeDefault: PipelineStageConfig = { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" };
-  const codexDefault: PipelineStageConfig = { provider: "codex", model: "codex", effort: "medium" };
+  const codexDefault: PipelineStageConfig = { provider: "codex", model: "o4-mini", effort: "medium" };
 
   // Default: claude for plan+review (better reasoning), codex for execute (better code)
   if (hasClaude && hasCodex) {
     return {
       plan: { provider: "claude", model: "claude-sonnet-4-6", effort: "high" },
-      execute: { provider: "codex", model: "codex", effort: "medium" },
+      execute: { provider: "codex", model: "o4-mini", effort: "medium" },
       review: { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" },
     };
   }

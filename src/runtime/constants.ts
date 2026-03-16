@@ -77,7 +77,7 @@ export const S3DB_AGENT_PIPELINE_RESOURCE = "agent_pipelines";
 export const S3DB_RUNTIME_RECORD_ID = "current";
 export const S3DB_RUNTIME_SCHEMA_VERSION = 1;
 
-export const FRONTEND_DIR = `${PACKAGE_ROOT}/src/dashboard/dist`;
+export const FRONTEND_DIR = `${PACKAGE_ROOT}/app/dist`;
 export const FRONTEND_INDEX = `${FRONTEND_DIR}/index.html`;
 export const FRONTEND_MANIFEST_JSON = `${FRONTEND_DIR}/manifest.webmanifest`;
 export const FRONTEND_SERVICE_WORKER_JS = `${FRONTEND_DIR}/service-worker.js`;

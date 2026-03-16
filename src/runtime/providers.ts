@@ -155,6 +155,173 @@ export function detectAvailableProviders(): DetectedProvider[] {
   return providers;
 }
 
+// ── Model discovery ─────────────────────────────────────────────────────────
+
+export type DiscoveredModel = {
+  id: string;
+  provider: string;
+  label: string;
+  tier: string;
+};
+
+/** Cache: { models, fetchedAt } per provider */
+const modelCache = new Map<string, { models: DiscoveredModel[]; fetchedAt: number }>();
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch models from the OpenAI /v1/models API.
+ * Filters to models relevant for Codex CLI usage (chat/reasoning models).
+ */
+async function fetchOpenAIModels(): Promise<DiscoveredModel[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { data?: Array<{ id: string }> };
+    if (!Array.isArray(data.data)) return [];
+
+    // Filter to models usable with Codex CLI (reasoning + chat models)
+    const relevant = data.data
+      .map((m) => m.id)
+      .filter((id) => /^(o[1-9]|gpt-[45]|codex-)/i.test(id))
+      // Exclude audio, realtime, search-only, and deprecated variants
+      .filter((id) => !/(audio|realtime|search|vision-preview)/i.test(id))
+      .sort();
+
+    return relevant.map((id) => {
+      let tier = "Standard";
+      if (/^o[34]/i.test(id) && /mini/i.test(id)) tier = "Fast reasoning";
+      else if (/^o[34]/i.test(id)) tier = "Reasoning";
+      else if (/^o1/i.test(id)) tier = "Reasoning (legacy)";
+      else if (/nano/i.test(id)) tier = "Nano";
+      else if (/mini/i.test(id)) tier = "Fast";
+      else if (/gpt-4\.1(?!-)/i.test(id)) tier = "Balanced";
+      else if (/gpt-4o/i.test(id)) tier = "Multimodal";
+      else if (/gpt-4-turbo/i.test(id)) tier = "Legacy turbo";
+      else if (/codex-/i.test(id)) tier = "Codex-optimized";
+      return { id, provider: "codex", label: id, tier };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch models from the Anthropic /v1/models API.
+ * Falls back to well-known model IDs if API key is not set (Claude Code uses OAuth).
+ */
+async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (apiKey) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/models", {
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: string; display_name?: string }> };
+        if (Array.isArray(data.data) && data.data.length > 0) {
+          return data.data
+            .map((m) => m.id)
+            .filter((id) => /^claude-/i.test(id))
+            .sort()
+            .map((id) => {
+              let tier = "Standard";
+              if (/opus/i.test(id)) tier = "Most capable";
+              else if (/sonnet/i.test(id)) tier = "Balanced";
+              else if (/haiku/i.test(id)) tier = "Fast";
+              return { id, provider: "claude", label: id, tier };
+            });
+        }
+      }
+    } catch {
+      // Fall through to fallback
+    }
+  }
+
+  // Fallback: Claude Code authenticates via OAuth — no API key available.
+  // Use the CLI to resolve model aliases to real IDs without burning tokens.
+  // `claude --model <alias> --print --max-turns 0 ""` will fail fast but
+  // include the resolved model name in the error JSON output.
+  try {
+    const aliases = ["opus", "sonnet", "haiku"];
+    const discovered: DiscoveredModel[] = [];
+    for (const alias of aliases) {
+      try {
+        // --max-turns 1 with an empty prompt resolves the model and exits quickly
+        const probe = execFileSync("claude", [
+          "--print", "--output-format", "json", "--model", alias,
+          "--max-turns", "1", "--no-session-persistence",
+          "reply ok",
+        ], {
+          encoding: "utf8",
+          timeout: 20_000,
+          env: { ...process.env },
+        });
+        // Parse the JSON response to extract the actual model ID
+        const parsed = JSON.parse(probe.trim()) as { model?: string; modelUsage?: Record<string, unknown> };
+        const modelId = parsed.model
+          || Object.keys(parsed.modelUsage || {})[0]
+          || "";
+        if (modelId) {
+          let tier = "Standard";
+          if (/opus/i.test(modelId)) tier = "Most capable";
+          else if (/sonnet/i.test(modelId)) tier = "Balanced";
+          else if (/haiku/i.test(modelId)) tier = "Fast";
+          discovered.push({ id: modelId, provider: "claude", label: modelId, tier });
+        }
+      } catch {
+        // Alias not available or CLI not authenticated — skip
+      }
+    }
+    if (discovered.length > 0) return discovered;
+  } catch {
+    // CLI not available
+  }
+
+  return [];
+}
+
+/**
+ * Discover available models for all detected providers.
+ * Results are cached for 5 minutes.
+ */
+export async function discoverModels(providers: DetectedProvider[]): Promise<Record<string, DiscoveredModel[]>> {
+  const result: Record<string, DiscoveredModel[]> = {};
+
+  const tasks: Array<{ name: string; fetch: () => Promise<DiscoveredModel[]> }> = [];
+
+  for (const p of providers) {
+    if (!p.available) continue;
+    const cached = modelCache.get(p.name);
+    if (cached && Date.now() - cached.fetchedAt < MODEL_CACHE_TTL_MS) {
+      result[p.name] = cached.models;
+      continue;
+    }
+    if (p.name === "codex") tasks.push({ name: "codex", fetch: fetchOpenAIModels });
+    if (p.name === "claude") tasks.push({ name: "claude", fetch: fetchAnthropicModels });
+  }
+
+  const settled = await Promise.allSettled(tasks.map((t) => t.fetch()));
+  for (let i = 0; i < tasks.length; i++) {
+    const res = settled[i];
+    const models = res.status === "fulfilled" ? res.value : [];
+    result[tasks[i].name] = models;
+    modelCache.set(tasks[i].name, { models, fetchedAt: Date.now() });
+  }
+
+  return result;
+}
+
 export function resolveDefaultProvider(detected: DetectedProvider[]): string {
   const available = detected.filter((p) => p.available);
   if (available.length === 0) return "";

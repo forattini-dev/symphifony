@@ -9,16 +9,6 @@ const STAGES = [
   { key: "review", label: "Review", icon: Eye, description: "Agent reviews the implementation" },
 ];
 
-const CLAUDE_MODELS = [
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6", tier: "Most capable" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", tier: "Balanced" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", tier: "Fast" },
-];
-
-const CODEX_MODELS = [
-  { value: "codex", label: "Codex (default)", tier: "Auto-selected" },
-];
-
 const EFFORTS = [
   { value: "low", label: "Low", description: "Simple fixes, minimal reasoning" },
   { value: "medium", label: "Medium", description: "Standard work" },
@@ -26,15 +16,9 @@ const EFFORTS = [
   { value: "extra-high", label: "Extra High", description: "Maximum reasoning (Codex only)" },
 ];
 
-function getModelsForProvider(provider) {
-  if (provider === "claude") return CLAUDE_MODELS;
-  if (provider === "codex") return CODEX_MODELS;
-  return [];
-}
-
-function StageCard({ stage, config, providers, onChange }) {
+function StageCard({ stage, config, providers, modelsByProvider, onChange }) {
   const Icon = stage.icon;
-  const models = getModelsForProvider(config.provider);
+  const models = modelsByProvider[config.provider] || [];
   const availableProviders = (providers || []).filter((p) => p.available);
 
   return (
@@ -57,11 +41,11 @@ function StageCard({ stage, config, providers, onChange }) {
               value={config.provider}
               onChange={(e) => {
                 const newProvider = e.target.value;
-                const newModels = getModelsForProvider(newProvider);
+                const newModels = modelsByProvider[newProvider] || [];
                 onChange({
                   ...config,
                   provider: newProvider,
-                  model: newModels[0]?.value || newProvider,
+                  model: newModels[0]?.id || newProvider,
                 });
               }}
             >
@@ -79,8 +63,11 @@ function StageCard({ stage, config, providers, onChange }) {
               value={config.model}
               onChange={(e) => onChange({ ...config, model: e.target.value })}
             >
+              {models.length === 0 && (
+                <option value={config.model}>{config.model || "(detecting...)"}</option>
+              )}
               {models.map((m) => (
-                <option key={m.value} value={m.value}>{m.label} — {m.tier}</option>
+                <option key={m.id} value={m.id}>{m.label} — {m.tier}</option>
               ))}
             </select>
           </div>
@@ -111,6 +98,7 @@ export const Route = createFileRoute("/settings/workflow")({
 function WorkflowSettings() {
   const [workflow, setWorkflow] = useState(null);
   const [providers, setProviders] = useState([]);
+  const [modelsByProvider, setModelsByProvider] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -119,10 +107,14 @@ function WorkflowSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/config/workflow");
-      setWorkflow(res.workflow);
-      setProviders(res.providers || []);
-      setIsDefault(res.isDefault);
+      const [workflowRes, modelsRes] = await Promise.all([
+        api.get("/config/workflow"),
+        api.get("/config/models").catch(() => ({ models: {} })),
+      ]);
+      setWorkflow(workflowRes.workflow);
+      setProviders(workflowRes.providers || []);
+      setIsDefault(workflowRes.isDefault);
+      setModelsByProvider(modelsRes.models || {});
     } catch {}
     setLoading(false);
   }, []);
@@ -152,9 +144,9 @@ function WorkflowSettings() {
       const hasCodex = defaultProviders.some((p) => p.name === "codex");
 
       const defaults = {
-        plan: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? "claude-sonnet-4-6" : "codex", effort: "high" },
-        execute: { provider: hasCodex ? "codex" : "claude", model: hasCodex ? "codex" : "claude-sonnet-4-6", effort: "medium" },
-        review: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? "claude-sonnet-4-6" : "codex", effort: "medium" },
+        plan: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? "claude-sonnet-4-6" : "o3", effort: "high" },
+        execute: { provider: hasCodex ? "codex" : "claude", model: hasCodex ? "o4-mini" : "claude-sonnet-4-6", effort: "medium" },
+        review: { provider: hasClaude ? "claude" : "codex", model: hasClaude ? "claude-sonnet-4-6" : "o3", effort: "medium" },
       };
       setWorkflow(defaults);
     } catch {}
@@ -195,6 +187,7 @@ function WorkflowSettings() {
           stage={stage}
           config={workflow[stage.key]}
           providers={providers}
+          modelsByProvider={modelsByProvider}
           onChange={(newConfig) => setWorkflow({ ...workflow, [stage.key]: newConfig })}
         />
       ))}

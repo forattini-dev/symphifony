@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { env, stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
+import { renderPrompt } from "../prompting.ts";
 import { buildIntegrationSnippet, discoverIntegrations } from "../integrations/catalog.ts";
 import { inferCapabilityPaths, resolveTaskCapabilities } from "../routing/capability-resolver.ts";
 import {
@@ -63,37 +64,12 @@ function hashInput(value: string): string {
   return createHash("sha1").update(value).digest("hex").slice(0, 10);
 }
 
-function buildIntegrationGuide(): string {
-  return [
-    "# Fifony MCP integration",
-    "",
-    `Workspace root: \`${WORKSPACE_ROOT}\``,
-    `Persistence root: \`${PERSISTENCE_ROOT}\``,
-    `State root: \`${STATE_ROOT}\``,
-    "",
-    "Recommended MCP client command:",
-    "",
-    "```json",
-    "{",
-    '  "mcpServers": {',
-    '    "fifony": {',
-    '      "command": "npx",',
-    `      "args": ["fifony", "mcp", "--workspace", "${WORKSPACE_ROOT}", "--persistence", "${PERSISTENCE_ROOT}"]`,
-    "    }",
-    "  }",
-    "}",
-    "```",
-    "",
-    "Expected workflow:",
-    "",
-    "1. Read `fifony://guide/overview` and `fifony://state/summary`.",
-    "2. Use `fifony.list_issues` or read `fifony://issues`.",
-    "3. Create work with `fifony.create_issue`.",
-    "4. Update workflow state with `fifony.update_issue_state`.",
-    "5. Use the prompts exposed by this MCP server to structure planning or execution.",
-    "",
-    "The MCP server is read-write against the same `s3db` filesystem store used by the Fifony runtime.",
-  ].join("\n");
+async function buildIntegrationGuide(): Promise<string> {
+  return renderPrompt("mcp-integration-guide", {
+    workspaceRoot: WORKSPACE_ROOT,
+    persistenceRoot: PERSISTENCE_ROOT,
+    stateRoot: STATE_ROOT,
+  });
 }
 
 function computeCapabilityCounts(issues: IssueRecord[]): Record<string, number> {
@@ -136,7 +112,7 @@ async function buildStateSummary(): Promise<string> {
   }, null, 2);
 }
 
-function buildIssuePrompt(issue: IssueRecord, provider: string, role: string): string {
+async function buildIssuePrompt(issue: IssueRecord, provider: string, role: string): Promise<string> {
   const resolution = resolveTaskCapabilities({
     id: issue.id,
     identifier: issue.identifier,
@@ -145,22 +121,17 @@ function buildIssuePrompt(issue: IssueRecord, provider: string, role: string): s
     labels: Array.isArray(issue.labels) ? issue.labels.filter((value): value is string => typeof value === "string") : [],
     paths: Array.isArray(issue.paths) ? issue.paths.filter((value): value is string => typeof value === "string") : [],
   });
-  return [
-    `You are integrating with Fifony as the ${role} using ${provider}.`,
-    "",
-    `Issue ID: ${issue.id}`,
-    `Title: ${issue.title}`,
-    `State: ${issue.state ?? "Todo"}`,
-    `Capability category: ${resolution.category}`,
-    ...(resolution.overlays.length ? [`Overlays: ${resolution.overlays.join(", ")}`] : []),
-    ...(Array.isArray(issue.paths) && issue.paths.length ? [`Paths: ${issue.paths.join(", ")}`] : []),
-    issue.description ? `Description:\n${issue.description}` : "Description:\nNo description provided.",
-    "",
-    "Use Fifony as the source of truth:",
-    "- Read the workflow contract from WORKFLOW.md if available.",
-    "- Persist transitions through the Fifony tools instead of inventing local state.",
-    "- Keep outputs actionable and aligned with the tracked issue lifecycle.",
-  ].join("\n");
+  return renderPrompt("mcp-issue", {
+    role,
+    provider,
+    id: issue.id,
+    title: issue.title,
+    state: issue.state ?? "Todo",
+    capabilityCategory: resolution.category,
+    overlays: resolution.overlays,
+    paths: Array.isArray(issue.paths) ? issue.paths.filter((value): value is string => typeof value === "string") : [],
+    description: issue.description || "No description provided.",
+  });
 }
 
 async function listResourcesMcp(): Promise<Array<Record<string, unknown>>> {
@@ -189,7 +160,7 @@ async function listResourcesMcp(): Promise<Array<Record<string, unknown>>> {
 async function readResource(uri: string): Promise<Array<Record<string, unknown>>> {
   if (uri === "fifony://guide/overview") return [{ uri, mimeType: "text/markdown", text: safeRead(README_PATH) }];
   if (uri === "fifony://guide/runtime") return [{ uri, mimeType: "text/markdown", text: safeRead(FIFONY_GUIDE_PATH) }];
-  if (uri === "fifony://guide/integration") return [{ uri, mimeType: "text/markdown", text: buildIntegrationGuide() }];
+  if (uri === "fifony://guide/integration") return [{ uri, mimeType: "text/markdown", text: await buildIntegrationGuide() }];
   if (uri === "fifony://state/summary") return [{ uri, mimeType: "application/json", text: await buildStateSummary() }];
   if (uri === "fifony://issues") return [{ uri, mimeType: "application/json", text: JSON.stringify(await getIssues(), null, 2) }];
 
@@ -249,7 +220,17 @@ async function getPrompt(name: string, args: Record<string, unknown> = {}): Prom
   if (name === "fifony-integrate-client") {
     const client = typeof args.client === "string" && args.client.trim() ? args.client.trim() : "mcp-client";
     const goal = typeof args.goal === "string" && args.goal.trim() ? args.goal.trim() : "integrate with the local Fifony workspace";
-    return { description: "Client integration prompt for Fifony.", messages: [{ role: "user", content: { type: "text", text: [`Integrate ${client} with the local Fifony MCP server.`, "", `Goal: ${goal}`, "", buildIntegrationGuide(), "", "Use the available Fifony resources and tools instead of inventing your own persistence model."].join("\n") } }] };
+    const integrationGuide = await buildIntegrationGuide();
+    return {
+      description: "Client integration prompt for Fifony.",
+      messages: [{
+        role: "user",
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-integrate-client", { client, goal, integrationGuide }),
+        },
+      }],
+    };
   }
 
   if (name === "fifony-plan-issue") {
@@ -257,17 +238,42 @@ async function getPrompt(name: string, args: Record<string, unknown> = {}): Prom
     const provider = typeof args.provider === "string" && args.provider.trim() ? args.provider.trim() : "codex";
     const issue = issueId ? await getIssue(issueId) : null;
     if (!issue) throw new Error(`Issue not found: ${issueId}`);
-    return { description: "Issue planning prompt grounded in the Fifony issue store.", messages: [{ role: "user", content: { type: "text", text: buildIssuePrompt(issue, provider, "planner") } }] };
+    return {
+      description: "Issue planning prompt grounded in the Fifony issue store.",
+      messages: [{
+        role: "user",
+        content: { type: "text", text: await buildIssuePrompt(issue, provider, "planner") },
+      }],
+    };
   }
 
   if (name === "fifony-review-workflow") {
     const provider = typeof args.provider === "string" && args.provider.trim() ? args.provider.trim() : "claude";
-    return { description: "Workflow review prompt for Fifony orchestration.", messages: [{ role: "user", content: { type: "text", text: [`Review the WORKFLOW.md for this Fifony workspace as ${provider}.`, "", `Workspace: ${WORKSPACE_ROOT}`, `Workflow present: ${existsSync(WORKFLOW_PATH) ? "yes" : "no"}`, "", "Focus on:", "- provider orchestration quality", "- hooks safety", "- prompt clarity", "- issue lifecycle correctness", "- what an MCP client needs in order to integrate cleanly"].join("\n") } }] };
+    return {
+      description: "Workflow review prompt for Fifony orchestration.",
+      messages: [{
+        role: "user",
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-review-workflow", {
+            provider,
+            workspaceRoot: WORKSPACE_ROOT,
+            workflowPresent: existsSync(WORKFLOW_PATH) ? "yes" : "no",
+          }),
+        },
+      }],
+    };
   }
 
   if (name === "fifony-use-integration") {
     const integration = typeof args.integration === "string" ? args.integration : "";
-    return { description: "Integration guidance for a discovered Fifony extension.", messages: [{ role: "user", content: { type: "text", text: buildIntegrationSnippet(integration, WORKSPACE_ROOT) } }] };
+    return {
+      description: "Integration guidance for a discovered Fifony extension.",
+      messages: [{
+        role: "user",
+        content: { type: "text", text: await buildIntegrationSnippet(integration, WORKSPACE_ROOT) },
+      }],
+    };
   }
 
   if (name === "fifony-route-task") {
@@ -276,7 +282,18 @@ async function getPrompt(name: string, args: Record<string, unknown> = {}): Prom
     const labels = typeof args.labels === "string" ? args.labels.split(",").map((label) => label.trim()).filter(Boolean) : [];
     const paths = typeof args.paths === "string" ? args.paths.split(",").map((value) => value.trim()).filter(Boolean) : [];
     const resolution = resolveTaskCapabilities({ title, description, labels, paths });
-    return { description: "Task routing prompt produced by the Fifony capability resolver.", messages: [{ role: "user", content: { type: "text", text: ["Use this routing decision as the execution plan for the task.", "", JSON.stringify(resolution, null, 2)].join("\n") } }] };
+    return {
+      description: "Task routing prompt produced by the Fifony capability resolver.",
+      messages: [{
+        role: "user",
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-route-task", {
+            resolutionJson: JSON.stringify(resolution, null, 2),
+          }),
+        },
+      }],
+    };
   }
 
   throw new Error(`Unknown prompt: ${name}`);
@@ -363,7 +380,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
 
   if (name === "fifony.integration_snippet") {
     const integration = typeof args.integration === "string" ? args.integration : "";
-    return toolText(buildIntegrationSnippet(integration, WORKSPACE_ROOT));
+    return toolText(await buildIntegrationSnippet(integration, WORKSPACE_ROOT));
   }
 
   if (name === "fifony.resolve_capabilities") {

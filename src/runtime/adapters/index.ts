@@ -3,6 +3,7 @@ import { compileForClaude } from "./plan-to-claude.ts";
 import { compileForCodex } from "./plan-to-codex.ts";
 import { buildFullPlanPrompt, buildValidationSection, buildExecutionPayload } from "./shared.ts";
 import type { ExecutionPayload } from "./shared.ts";
+import { renderPrompt } from "../../prompting.ts";
 
 export type CompiledExecution = {
   /** Enriched prompt with plan context, phases, risks, validation */
@@ -59,13 +60,13 @@ export type ExecutionAudit = {
  * Generates a canonical ExecutionPayload (JSON source of truth) and
  * a provider-specific prompt (markdown frame that references the payload).
  */
-export function compileExecution(
+export async function compileExecution(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
-): CompiledExecution | null {
+): Promise<CompiledExecution | null> {
   const plan = issue.plan;
   if (!plan?.steps?.length) return null; // No plan → use default behavior
 
@@ -75,9 +76,9 @@ export function compileExecution(
   let compiled: CompiledExecution | null = null;
 
   if (provider.provider === "claude") {
-    compiled = compileForClaude(issue, provider, plan, config, workspacePath, skillContext);
+    compiled = await compileForClaude(issue, provider, plan, config, workspacePath, skillContext);
   } else if (provider.provider === "codex") {
-    compiled = compileForCodex(issue, provider, plan, config, workspacePath, skillContext);
+    compiled = await compileForCodex(issue, provider, plan, config, workspacePath, skillContext);
   }
 
   if (compiled) {
@@ -90,77 +91,23 @@ export function compileExecution(
 /**
  * Compile a rich review prompt using the original plan, diff context, and success criteria.
  */
-export function compileReview(
+export async function compileReview(
   issue: IssueEntry,
   reviewer: AgentProviderDefinition,
   workspacePath: string,
   diffSummary: string,
-): CompiledReview {
-  const sections: string[] = [];
-
-  sections.push(`Review the work done for ${issue.identifier}.`);
-  sections.push("");
-  sections.push(`Title: ${issue.title}`);
-  sections.push(`Description: ${issue.description || "(none)"}`);
-  sections.push("");
-  sections.push(`Workspace: ${workspacePath}`);
-
-  // Include the original plan for context
+): Promise<CompiledReview> {
   const plan = issue.plan;
-  if (plan) {
-    sections.push("");
-    sections.push("# Original Execution Plan");
-    sections.push("");
-    sections.push(buildFullPlanPrompt(plan));
-
-    // Explicit success criteria for the reviewer to evaluate against
-    if (plan.successCriteria?.length) {
-      sections.push("");
-      sections.push("# Success Criteria (evaluate against these)");
-      for (const criterion of plan.successCriteria) {
-        sections.push(`- [ ] ${criterion}`);
-      }
-    }
-
-    // Deliverables checklist
-    if (plan.deliverables?.length) {
-      sections.push("");
-      sections.push("# Expected Deliverables");
-      for (const d of plan.deliverables) {
-        sections.push(`- [ ] ${d}`);
-      }
-    }
-  }
-
-  // Include diff summary if available
-  if (diffSummary) {
-    sections.push("");
-    sections.push("# Changes Made (diff summary)");
-    sections.push("```");
-    sections.push(diffSummary);
-    sections.push("```");
-  }
-
-  // Reference the execution payload if it exists
-  sections.push("");
-  sections.push("# Structured Context");
-  sections.push("If `fifony-execution-payload.json` exists in the workspace, read it for the canonical structured task data.");
-  sections.push("Use the `successCriteria`, `constraints`, and `deliverables` fields as your evaluation checklist.");
-
-  sections.push("");
-  sections.push("# Review Instructions");
-  sections.push("");
-  sections.push("1. Verify each success criterion from the plan is met.");
-  sections.push("2. Check that all expected deliverables are present.");
-  sections.push("3. Review the diff for correctness, security issues, and code quality.");
-  sections.push("4. Verify validation checks pass (run commands if specified in the plan).");
-  sections.push("5. Check for unintended side effects or regressions.");
-  sections.push("");
-  sections.push("If the work is acceptable, emit FIFONY_STATUS=done.");
-  sections.push("If rework is needed, emit FIFONY_STATUS=continue and provide actionable feedback in nextPrompt.");
-  sections.push("If the work is fundamentally broken, emit FIFONY_STATUS=blocked.");
-
-  const prompt = sections.join("\n");
+  const prompt = await renderPrompt("compile-review", {
+    issueIdentifier: issue.identifier,
+    title: issue.title,
+    description: issue.description || "(none)",
+    workspacePath,
+    planPrompt: plan ? buildFullPlanPrompt(plan) : "",
+    successCriteria: (plan?.successCriteria ?? []).map((value) => ({ value })),
+    deliverables: (plan?.deliverables ?? []).map((value) => ({ value })),
+    diffSummary,
+  });
 
   // Build the reviewer command with model injection
   const REVIEW_RESULT_SCHEMA = JSON.stringify({
