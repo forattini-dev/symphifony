@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { env } from "node:process";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import type {
   AgentDirective,
   AgentDirectiveStatus,
@@ -91,7 +91,7 @@ function addTokenUsage(issue: IssueEntry, usage?: AgentTokenUsage): void {
   };
 
   // Update usage.tokens keyed by model (for eventual-consistency analytics)
-  const model = usage.model || "unknown";
+  const model = usage.model || issue.tokenUsage?.model || "unknown";
   if (!issue.usage) issue.usage = { tokens: {} };
   issue.usage.tokens[model] = (issue.usage.tokens[model] || 0) + usage.totalTokens;
 }
@@ -120,12 +120,18 @@ function extractTokenUsage(output: string, jsonObj?: JsonRecord | null): AgentTo
     }
   }
 
-  // 2. Codex: "tokens used\n1,681\n" in stdout
+  // 2. Codex: "tokens used\n1,681\n" and "model: gpt-5.3" in stdout
   const codexMatch = output.match(/tokens?\s+used\s*\n\s*([\d,]+)/i);
   if (codexMatch) {
     const total = parseInt(codexMatch[1].replace(/,/g, ""), 10);
     if (total > 0) {
-      return { inputTokens: 0, outputTokens: 0, totalTokens: total };
+      const modelMatch = output.match(/^model:\s*(.+)$/im);
+      return {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: total,
+        model: modelMatch?.[1]?.trim() || undefined,
+      };
     }
   }
 
@@ -334,6 +340,45 @@ function inferChangedWorkspacePaths(workspacePath: string, limit = 32): string[]
 
   walk(workspacePath);
   return [...changed];
+}
+
+/** Compute lines added/removed/files changed from workspace diff. */
+export function computeDiffStats(issue: IssueEntry): void {
+  const wp = issue.workspacePath;
+  if (!wp || !existsSync(wp) || !existsSync(SOURCE_ROOT)) return;
+
+  try {
+    let raw = "";
+    try {
+      raw = execSync(
+        `git diff --no-index --stat -- "${SOURCE_ROOT}" "${wp}" 2>/dev/null`,
+        { encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+      );
+    } catch (err: any) {
+      raw = err.stdout || "";
+    }
+    if (!raw) return;
+
+    // Parse git diff --stat output: last line is " N files changed, M insertions(+), K deletions(-)"
+    const lines = raw.trim().split("\n");
+    const summary = lines[lines.length - 1] || "";
+    const filesMatch = summary.match(/(\d+)\s+files?\s+changed/);
+    const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
+    const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
+
+    // Filter out symphifony internal files from the file count
+    const internalRe = /symphifony[-_]|\.symphifony-|WORKFLOW\.local/;
+    const fileLines = lines.slice(0, -1).filter((l) => {
+      const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
+      return !internalRe.test(name);
+    });
+
+    issue.filesChanged = fileLines.length || (filesMatch ? parseInt(filesMatch[1], 10) : 0);
+    issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
+    issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
+  } catch {
+    // ignore diff failures
+  }
 }
 
 export function hydrateIssuePathsFromWorkspace(issue: IssueEntry): string[] {
@@ -666,6 +711,25 @@ function buildPrompt(issue: IssueEntry, workflowDefinition: WorkflowDefinition |
 
   if (errors.length > 0) {
     throw new Error(`Prompt rendering failed: ${errors.join("; ")}`);
+  }
+
+  // Append plan if available
+  if (issue.plan?.steps?.length) {
+    const planSection = [
+      "",
+      "## Execution Plan",
+      "",
+      `Complexity: ${issue.plan.estimatedComplexity}`,
+      `Summary: ${issue.plan.summary}`,
+      "",
+      "Steps:",
+      ...issue.plan.steps.map((s) =>
+        `${s.step}. ${s.action}${s.files?.length ? ` (files: ${s.files.join(", ")})` : ""}${s.details ? ` — ${s.details}` : ""}`
+      ),
+      "",
+      "Follow this plan. Complete each step in order.",
+    ];
+    return `${withAttempt}\n${planSection.join("\n")}`;
   }
 
   return withAttempt;
@@ -1327,6 +1391,11 @@ export async function runIssueOnce(
     issue.commandOutputTail = runResult.output;
 
     if (runResult.success) {
+      // Compute diff stats before transitioning
+      computeDiffStats(issue);
+      if (issue.filesChanged) {
+        addEvent(state, issue.id, "info", `Diff: ${issue.filesChanged} files, +${issue.linesAdded || 0} -${issue.linesRemoved || 0} lines.`);
+      }
       // Move to In Review — the reviewer will run as a separate scheduler pick
       await transitionIssueState(issue, "In Review", `Agent execution finished in ${runResult.turns} turn(s) for ${issue.identifier}. Awaiting review.`);
       issue.lastError = undefined;

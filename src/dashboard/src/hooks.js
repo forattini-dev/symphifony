@@ -147,11 +147,22 @@ export function useProvidersUsage() {
 // ── Theme ───────────────────────────────────────────────────────────────────
 
 const PINNED_THEMES = ["auto", "light", "dark"];
-const OTHER_THEMES = ["black", "cupcake", "night", "sunset"].sort((a, b) => a.localeCompare(b));
-const THEME_OPTIONS = [...PINNED_THEMES, ...OTHER_THEMES];
+const ALL_DAISYUI_THEMES = [
+  "cupcake", "bumblebee", "emerald", "corporate", "synthwave", "retro",
+  "cyberpunk", "valentine", "halloween", "garden", "forest", "aqua",
+  "lofi", "pastel", "fantasy", "wireframe", "black", "luxury", "dracula",
+  "cmyk", "autumn", "business", "acid", "lemonade", "night", "coffee",
+  "winter", "dim", "nord", "sunset", "caramellatte", "abyss", "silk",
+];
+const THEME_OPTIONS = [...PINNED_THEMES, ...ALL_DAISYUI_THEMES];
 export const SETTINGS_QUERY_KEY = ["settings"];
 export const SETTING_ID_UI_THEME = "ui.theme";
 export const SETTING_ID_UI_NOTIFICATIONS_ENABLED = "ui.notifications.enabled";
+export const SETTING_ID_UI_ISSUES_STATE_FILTER = "ui.issues.stateFilter";
+export const SETTING_ID_UI_ISSUES_CATEGORY_FILTER = "ui.issues.categoryFilter";
+export const SETTING_ID_UI_ISSUES_COMPLETION_FILTER = "ui.issues.completionFilter";
+export const SETTING_ID_UI_EVENTS_KIND = "ui.events.kind";
+export const SETTING_ID_UI_EVENTS_ISSUE_ID = "ui.events.issueId";
 const SYSTEM_DARK_QUERY = window.matchMedia("(prefers-color-scheme: dark)");
 
 function resolveTheme(value) {
@@ -191,6 +202,48 @@ export function useSettings() {
   });
 }
 
+export function useUiSetting(settingId, fallbackValue, options = {}) {
+  const qc = useQueryClient();
+  const settingsQuery = useSettings();
+  const normalize = typeof options.normalize === "function" ? options.normalize : (value) => value;
+  const persistedValue = normalize(
+    getSettingValue(getSettingsList(settingsQuery.data), settingId, fallbackValue),
+  );
+  const [value, setValueRaw] = useState(persistedValue);
+
+  const setValue = useCallback((nextValue) => {
+    const normalized = normalize(nextValue);
+    setValueRaw(normalized);
+    const optimisticSetting = {
+      id: settingId,
+      scope: "ui",
+      value: normalized,
+      source: "user",
+      updatedAt: new Date().toISOString(),
+    };
+    // Cancel in-flight settings fetches so stale server data cannot overwrite our optimistic update
+    qc.cancelQueries({ queryKey: SETTINGS_QUERY_KEY });
+    qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, optimisticSetting));
+    void api.post(`/settings/${encodeURIComponent(settingId)}`, {
+      scope: "ui",
+      value: normalized,
+      source: "user",
+    }).then((response) => {
+      if (response?.setting) {
+        qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, response.setting));
+      }
+    }).catch(() => {
+      qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+    });
+  }, [normalize, qc, settingId]);
+
+  useEffect(() => {
+    setValueRaw((current) => Object.is(current, persistedValue) ? current : persistedValue);
+  }, [persistedValue]);
+
+  return [value, setValue];
+}
+
 /**
  * Manages the DaisyUI theme.
  * Persists preference in s3db; "auto" resolves based on prefers-color-scheme.
@@ -214,6 +267,8 @@ export function useTheme() {
       source: "user",
       updatedAt: new Date().toISOString(),
     };
+    // Cancel in-flight settings fetches so stale server data cannot overwrite our optimistic update
+    qc.cancelQueries({ queryKey: SETTINGS_QUERY_KEY });
     qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, optimisticSetting));
     void api.post(`/settings/${encodeURIComponent(SETTING_ID_UI_THEME)}`, {
       scope: "ui",
@@ -255,43 +310,11 @@ export function useTheme() {
 }
 
 export function useUiNotificationsSetting() {
-  const qc = useQueryClient();
-  const settingsQuery = useSettings();
-  const persistedEnabled = normalizeBoolean(
-    getSettingValue(getSettingsList(settingsQuery.data), SETTING_ID_UI_NOTIFICATIONS_ENABLED, false),
+  return useUiSetting(
+    SETTING_ID_UI_NOTIFICATIONS_ENABLED,
     false,
+    { normalize: (value) => normalizeBoolean(value, false) },
   );
-  const [enabled, setEnabledRaw] = useState(persistedEnabled);
-
-  const setEnabled = useCallback((value) => {
-    const normalized = Boolean(value);
-    setEnabledRaw(normalized);
-    const optimisticSetting = {
-      id: SETTING_ID_UI_NOTIFICATIONS_ENABLED,
-      scope: "ui",
-      value: normalized,
-      source: "user",
-      updatedAt: new Date().toISOString(),
-    };
-    qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, optimisticSetting));
-    void api.post(`/settings/${encodeURIComponent(SETTING_ID_UI_NOTIFICATIONS_ENABLED)}`, {
-      scope: "ui",
-      value: normalized,
-      source: "user",
-    }).then((response) => {
-      if (response?.setting) {
-        qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, response.setting));
-      }
-    }).catch(() => {
-      qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
-    });
-  }, [qc]);
-
-  useEffect(() => {
-    setEnabledRaw((current) => current === persistedEnabled ? current : persistedEnabled);
-  }, [persistedEnabled]);
-
-  return [enabled, setEnabled];
 }
 
 export function usePwa() {

@@ -1,8 +1,26 @@
-import { useMemo, useCallback, useRef, useEffect } from "react";
+import { useMemo, useCallback, useRef, useEffect, useState } from "react";
 import { IssueCard } from "./IssueCard.jsx";
 import { EmptyState } from "./EmptyState.jsx";
 import { Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import { useDragAndDrop } from "../hooks/useDragAndDrop.js";
+
+function ColumnBadge({ count, className }) {
+  const prevRef = useRef(count);
+  const [bumping, setBumping] = useState(false);
+  useEffect(() => {
+    if (prevRef.current !== count) {
+      prevRef.current = count;
+      setBumping(true);
+      const t = setTimeout(() => setBumping(false), 300);
+      return () => clearTimeout(t);
+    }
+  }, [count]);
+  return (
+    <span className={`badge badge-xs ${className} ${bumping ? "animate-count-bump" : ""}`}>
+      {count}
+    </span>
+  );
+}
 
 // Kanban columns — Queued/Running/Interrupted are grouped as "In Progress"
 const COLUMNS = ["Todo", "In Progress", "In Review", "Blocked", "Done", "Cancelled"];
@@ -57,7 +75,7 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
   const isValid = dragState?.validColumns?.has(col) ?? false;
   const isDimmed = isDragging && !isValid && !isSource;
 
-  let columnClass = "kanban-column bg-base-200 rounded-box p-3 flex flex-col";
+  let columnClass = "kanban-column bg-base-200 rounded-box p-3 flex flex-col min-h-0 overflow-hidden";
   if (isDragging) {
     if (isOver && isValid) {
       columnClass += " kanban-column-drop-valid";
@@ -74,9 +92,7 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
         <h3 className="text-xs font-bold uppercase tracking-wide opacity-70">
           {col}
         </h3>
-        <span className={`badge badge-xs ${badgeClass}`}>
-          {issues.length}
-        </span>
+        <ColumnBadge count={issues.length} className={badgeClass} />
       </div>
 
       <div className="space-y-2 flex-1 overflow-y-auto kanban-card-list">

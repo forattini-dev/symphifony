@@ -96,7 +96,7 @@ function buildDailyTokens(issues, days = 7) {
   return buckets;
 }
 
-export function StatsBar({ metrics, total, issues = [] }) {
+export function StatsBar({ metrics, total, issues = [], compact = false }) {
   // Aggregate token usage across all issues
   const { totalTokens, totalCost, byModel, dailyData } = useMemo(() => {
     let totalTokens = 0;
@@ -121,6 +121,65 @@ export function StatsBar({ metrics, total, issues = [] }) {
 
   const modelEntries = Object.entries(byModel).sort((a, b) => b[1] - a[1]);
   const hasTokenData = totalTokens > 0;
+
+  if (compact) {
+    return (
+      <div className="flex items-stretch gap-3 bg-base-200 rounded-box animate-fade-in overflow-hidden">
+        {/* Tokens + Cost */}
+        <div className="flex items-center gap-5 px-4 py-2.5">
+          <div className="flex flex-col">
+            <span className="text-[10px] uppercase tracking-wide opacity-40">Tokens</span>
+            <span className="text-base font-bold font-mono leading-tight flex items-center gap-1.5">
+              <Zap className="size-3.5 text-primary" />
+              <AnimatedCount value={formatTokens(totalTokens)} />
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] uppercase tracking-wide opacity-40">Cost</span>
+            <span className="text-base font-bold font-mono leading-tight flex items-center gap-1.5">
+              <Coins className="size-3.5 text-secondary" />
+              <AnimatedCount value={formatCost(totalCost)} />
+            </span>
+          </div>
+        </div>
+
+        {/* Sparkline */}
+        <div className="flex flex-col justify-center py-2 px-3 border-l border-base-300 min-w-[180px]">
+          <span className="text-[10px] uppercase tracking-wide opacity-40 mb-1">Last 7 days</span>
+          {hasTokenData ? (
+            <MiniBarChart data={dailyData} height={32} />
+          ) : (
+            <div className="text-xs opacity-20 h-8 flex items-center">No data yet</div>
+          )}
+        </div>
+
+        {/* Models breakdown */}
+        {modelEntries.length > 0 && (
+          <div className="flex flex-col justify-center py-2 px-3 border-l border-base-300">
+            <span className="text-[10px] uppercase tracking-wide opacity-40 mb-1">Models</span>
+            <div className="flex flex-col gap-0.5">
+              {modelEntries.slice(0, 3).map(([model, tokens]) => {
+                const color = model.includes("claude") ? "bg-primary" : model.includes("gpt") || model.includes("codex") ? "bg-secondary" : "bg-accent";
+                const short = model.split("-").slice(-2).join("-");
+                return (
+                  <span key={model} className="flex items-center gap-1.5 text-xs">
+                    <span className={`inline-block w-2 h-2 rounded-full ${color} shrink-0`} />
+                    <span className="opacity-60">{short}</span>
+                    <span className="font-mono opacity-80">{formatTokens(tokens)}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Issue count */}
+        <div className="flex items-center px-4 ml-auto">
+          <span className="text-xs opacity-40">{issues.length} issues</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="stats stats-horizontal bg-base-200 rounded-box w-full mb-4 overflow-x-auto animate-fade-in">

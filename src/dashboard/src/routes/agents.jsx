@@ -9,11 +9,14 @@ export const Route = createFileRoute("/agents")({
 function RuntimePage() {
   const ctx = useDashboard();
   return (
-    <RuntimeView
-      state={ctx.data}
-      providers={ctx.providers.data || {}}
-      parallelism={ctx.parallelism.data || {}}
-      onRefresh={ctx.refresh}
-    />
+    <div className="flex-1 flex flex-col min-h-0 px-4 pb-4">
+      <RuntimeView
+        state={ctx.data}
+        providers={ctx.providers.data || {}}
+        parallelism={ctx.parallelism.data || {}}
+        onRefresh={ctx.refresh}
+        issues={ctx.issues}
+      />
+    </div>
   );
 }

@@ -1,5 +1,13 @@
 import { safeJson } from "./utils.js";
 
+function extractError(data, status) {
+  if (!data) return `HTTP ${status}`;
+  const err = data.error;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") return err.message || err.code || JSON.stringify(err);
+  return data.message || `HTTP ${status}`;
+}
+
 export const api = {
   /** GET request that parses JSON. Throws on non-2xx with server error message. */
   async get(path) {
@@ -8,7 +16,7 @@ export const api = {
     });
     const text = await res.text();
     const data = text ? safeJson(text) : null;
-    if (!res.ok) throw new Error(data?.error || `${res.status}`);
+    if (!res.ok) throw new Error(extractError(data, res.status));
     return data || { ok: true };
   },
 
@@ -24,7 +32,7 @@ export const api = {
     });
     const text = await res.text();
     const data = text ? safeJson(text) : null;
-    if (!res.ok) throw new Error(data?.error || `${res.status}`);
+    if (!res.ok) throw new Error(extractError(data, res.status));
     return data || { ok: true };
   },
 };

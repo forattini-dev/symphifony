@@ -10,8 +10,8 @@ export const Route = createFileRoute("/kanban")({
 function KanbanPage() {
   const ctx = useDashboard();
   return (
-    <>
-      <StatsBar metrics={ctx.metrics} total={ctx.issues.length} issues={ctx.issues} />
+    <div className="flex-1 flex flex-col min-h-0 px-3 pb-2 gap-2">
+      <StatsBar metrics={ctx.metrics} total={ctx.issues.length} issues={ctx.issues} compact />
       <BoardView
         issues={ctx.filtered}
         onStateChange={ctx.updateState}
@@ -19,6 +19,6 @@ function KanbanPage() {
         onCancel={ctx.cancelIssue}
         onSelect={ctx.setSelectedIssue}
       />
-    </>
+    </div>
   );
 }

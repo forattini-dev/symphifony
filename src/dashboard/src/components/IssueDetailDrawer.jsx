@@ -86,9 +86,9 @@ function CopyButton({ text }) {
     });
   }, [text]);
   return (
-    <button className="btn btn-xs btn-ghost gap-1" onClick={copy} title="Copy to clipboard">
-      {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
-      {copied ? "Copied" : "Copy"}
+    <button className={`btn btn-xs btn-ghost gap-1 ${copied ? "text-success" : ""}`} onClick={copy} title="Copy to clipboard">
+      {copied ? <Check className="size-3 animate-bounce-in" /> : <Copy className="size-3" />}
+      {copied ? <span className="animate-fade-in">Copied</span> : "Copy"}
     </button>
   );
 }
@@ -718,21 +718,31 @@ function ReviewTab({ issue, issueId, onStateChange }) {
 
 export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCancel }) {
   const [tab, setTab] = useState("overview");
+  const [visible, setVisible] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   // Reset tab when issue changes — auto-open Review tab when In Review
   useEffect(() => {
     setTab(issue?.state === "In Review" ? "review" : "overview");
+    if (issue) { setVisible(true); setClosing(false); }
   }, [issue?.id, issue?.state]);
 
-  if (!issue) return null;
+  const handleClose = useCallback(() => {
+    setClosing(true);
+    setTimeout(() => { setVisible(false); setClosing(false); onClose(); }, 250);
+  }, [onClose]);
+
+  if (!issue && !visible) return null;
+  const displayIssue = issue || {};
 
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/35 animate-fade-in"
-      onClick={onClose}
+      className={`fixed inset-0 z-40 bg-black/35 ${closing ? "animate-toast-out" : "animate-fade-in"}`}
+      onClick={handleClose}
+      style={closing ? { animationDuration: "0.2s" } : undefined}
     >
       <div
-        className="fixed top-0 right-0 z-50 h-full w-full md:w-[520px] lg:w-[600px] bg-base-100 shadow-2xl animate-slide-in-right flex flex-col"
+        className={`fixed top-0 right-0 z-50 h-full w-full md:w-[520px] lg:w-[600px] bg-base-100 shadow-2xl flex flex-col ${closing ? "animate-slide-out-right" : "animate-slide-in-right"}`}
         onClick={(event) => event.stopPropagation()}
       >
         {/* Header */}
@@ -743,7 +753,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
               <span className="font-mono text-sm opacity-60">{issue.identifier}</span>
               <span className={`badge badge-sm ${STATE_BADGE[issue.state] || "badge-ghost"}`}>{issue.state}</span>
             </div>
-            <button type="button" className="btn btn-sm btn-ghost btn-circle shrink-0" onClick={onClose} aria-label="Close">
+            <button type="button" className="btn btn-sm btn-ghost btn-circle shrink-0" onClick={handleClose} aria-label="Close">
               <X className="size-4" />
             </button>
           </div>
@@ -771,17 +781,19 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
-          {tab === "overview" && <OverviewTab issue={issue} onStateChange={onStateChange} onRetry={onRetry} onCancel={onCancel} />}
-          {tab === "review" && <ReviewTab issue={issue} issueId={issue.id} onStateChange={onStateChange} />}
-          {tab === "execution" && <ExecutionTab issue={issue} />}
-          {tab === "diff" && <DiffTab issueId={issue.id} />}
-          {tab === "routing" && <RoutingTab issue={issue} />}
-          {tab === "history" && <HistoryTab issue={issue} />}
+          <div key={tab} className="animate-fade-in">
+            {tab === "overview" && <OverviewTab issue={issue} onStateChange={onStateChange} onRetry={onRetry} onCancel={onCancel} />}
+            {tab === "review" && <ReviewTab issue={issue} issueId={issue.id} onStateChange={onStateChange} />}
+            {tab === "execution" && <ExecutionTab issue={issue} />}
+            {tab === "diff" && <DiffTab issueId={issue.id} />}
+            {tab === "routing" && <RoutingTab issue={issue} />}
+            {tab === "history" && <HistoryTab issue={issue} />}
+          </div>
         </div>
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-base-300 shrink-0 flex items-center justify-end">
-          <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>Close</button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={handleClose}>Close</button>
         </div>
       </div>
     </div>

@@ -52,12 +52,24 @@ import { analyzeParallelizability } from "./scheduler.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
 import { TERMINAL_STATES } from "./constants.ts";
 import { enhanceIssueField } from "./issue-enhancer.ts";
+import { generatePlan } from "./issue-planner.ts";
 import {
+  applyPersistedSettings,
   inferSettingScope,
   loadRuntimeSettings,
   persistSetting,
   persistWorkerConcurrencySetting,
+  RUNTIME_CONFIG_SETTING_IDS,
 } from "./settings.ts";
+import { scanProjectFiles, analyzeProjectWithCli } from "./project-scanner.ts";
+import {
+  loadAgentCatalog,
+  loadSkillCatalog,
+  filterByDomains,
+  installAgents,
+  installSkills,
+} from "./catalog.ts";
+import { TARGET_ROOT } from "./constants.ts";
 
 // ── WebSocket broadcast (same port via listeners) ────────────────────────────
 // s3db.js 21.2.7 WebSocket contract: handlers receive (socketId, send, req)
@@ -341,6 +353,9 @@ export async function startApiServer(
       "GET /issues": () => serveAppShell(),
       "GET /agents": () => serveAppShell(),
       "GET /settings": () => serveAppShell(),
+      "GET /settings/general": () => serveAppShell(),
+      "GET /settings/notifications": () => serveAppShell(),
+      "GET /settings/providers": () => serveAppShell(),
       "GET /api/state": async (c: any) => {
         const showAll = c.req.query("all") === "1";
         let issues = state.issues;
@@ -426,6 +441,12 @@ export async function startApiServer(
           scope: scopeValue as RuntimeSettingScope,
           source: sourceValue as RuntimeSettingSource,
         });
+        if (RUNTIME_CONFIG_SETTING_IDS.has(settingId)) {
+          state.config = applyPersistedSettings(state.config, [setting]);
+          state.updatedAt = now();
+          addEvent(state, undefined, "manual", `Runtime setting ${settingId} updated.`);
+          await persistState(state);
+        }
         return c.json({ ok: true, setting });
       },
       "POST /api/config/concurrency": async (c: any) => {
@@ -441,12 +462,28 @@ export async function startApiServer(
         await persistState(state);
         return c.json({ ok: true, workerConcurrency: state.config.workerConcurrency });
       },
+      "POST /api/issues/plan": async (c: any) => {
+        try {
+          const payload = await c.req.json() as JsonRecord;
+          const title = toStringValue(payload.title);
+          const description = toStringValue(payload.description);
+          if (!title) return c.json({ ok: false, error: "Title is required." }, 400);
+          const plan = await generatePlan(title, description, state.config, workflowDefinition);
+          return c.json({ ok: true, plan });
+        } catch (error) {
+          logger.error({ err: error }, `Plan generation failed: ${String(error)}`);
+          return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      },
       "POST /api/issues/create": async (c: any) => {
         try {
           const payload = await c.req.json() as JsonRecord;
           const issue = createIssueFromPayload(payload, state.issues, workflowDefinition);
           state.issues.push(issue);
           addEvent(state, issue.id, "info", `Issue ${issue.identifier} created via API.`);
+          if (issue.plan) {
+            addEvent(state, issue.id, "info", `Plan: ${issue.plan.steps.length} steps, complexity: ${issue.plan.estimatedComplexity}.`);
+          }
           await persistState(state);
           return c.json({ ok: true, issue }, 201);
         } catch (error) {
@@ -683,6 +720,69 @@ export async function startApiServer(
           kind: typeof kind === "string" && kind ? kind : undefined,
         });
         return c.json({ events: events.slice(0, 200) });
+      },
+      // ── Onboarding: project scanning & catalog ─────────────────────────
+      "GET /api/scan/project": async (c: any) => {
+        try {
+          const result = scanProjectFiles(TARGET_ROOT);
+          return c.json(result);
+        } catch (error) {
+          logger.error({ err: error }, "Failed to scan project files");
+          return c.json({ ok: false, error: "Failed to scan project." }, 500);
+        }
+      },
+      "POST /api/scan/analyze": async (c: any) => {
+        try {
+          const payload = await c.req.json() as { provider?: string };
+          const provider = typeof payload.provider === "string" ? payload.provider : state.config.agentProvider;
+          const result = await analyzeProjectWithCli(provider, TARGET_ROOT);
+          return c.json(result);
+        } catch (error) {
+          logger.error({ err: error }, "Failed to analyze project with CLI");
+          return c.json({ ok: false, error: "Failed to analyze project." }, 500);
+        }
+      },
+      "GET /api/catalog/agents": async (c: any) => {
+        const domainsParam = c.req.query("domains");
+        const domains = typeof domainsParam === "string"
+          ? domainsParam.split(",").map((d: string) => d.trim()).filter(Boolean)
+          : [];
+        const catalog = loadAgentCatalog();
+        return c.json({ agents: domains.length ? filterByDomains(catalog, domains) : catalog });
+      },
+      "GET /api/catalog/skills": async (c: any) => {
+        const catalog = loadSkillCatalog();
+        return c.json({ skills: catalog });
+      },
+      "POST /api/install/agents": async (c: any) => {
+        try {
+          const payload = await c.req.json() as { agents?: string[] };
+          const agentNames = Array.isArray(payload.agents) ? payload.agents.filter((a): a is string => typeof a === "string") : [];
+          if (agentNames.length === 0) {
+            return c.json({ ok: false, error: "No agent names provided." }, 400);
+          }
+          const catalog = loadAgentCatalog();
+          const result = installAgents(TARGET_ROOT, agentNames, catalog);
+          return c.json({ ok: true, ...result });
+        } catch (error) {
+          logger.error({ err: error }, "Failed to install agents");
+          return c.json({ ok: false, error: "Failed to install agents." }, 500);
+        }
+      },
+      "POST /api/install/skills": async (c: any) => {
+        try {
+          const payload = await c.req.json() as { skills?: string[] };
+          const skillNames = Array.isArray(payload.skills) ? payload.skills.filter((s): s is string => typeof s === "string") : [];
+          if (skillNames.length === 0) {
+            return c.json({ ok: false, error: "No skill names provided." }, 400);
+          }
+          const catalog = loadSkillCatalog();
+          const result = installSkills(TARGET_ROOT, skillNames, catalog);
+          return c.json({ ok: true, ...result });
+        } catch (error) {
+          logger.error({ err: error }, "Failed to install skills");
+          return c.json({ ok: false, error: "Failed to install skills." }, 500);
+        }
       },
     },
   });

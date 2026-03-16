@@ -9,6 +9,7 @@ import {
   applyPersistedSettings,
   loadRuntimeSettings,
   persistDetectedProvidersSetting,
+  syncRuntimeConfigSettings,
 } from "./settings.ts";
 import {
   detectAvailableProviders,
@@ -94,6 +95,7 @@ async function main() {
   let persistedSettings = await loadRuntimeSettings();
   debugBoot("main:state-loaded");
   config = applyPersistedSettings(config, persistedSettings);
+  await syncRuntimeConfigSettings(config, persistedSettings);
   const state = buildRuntimeState(previous, config, workflowDefinition);
   debugBoot("main:state-merged");
 
@@ -187,6 +189,7 @@ async function main() {
         applyWorkflowConfig(deriveConfig(args), newDefinition, port),
         persistedSettings,
       );
+      await syncRuntimeConfigSettings(newConfig, persistedSettings);
       Object.assign(state.config, newConfig);
       addEvent(state, undefined, "info", `WORKFLOW.md reloaded — config updated (concurrency: ${newConfig.workerConcurrency}, turns: ${newConfig.maxTurns}).`);
       state.updatedAt = now();

@@ -63,6 +63,28 @@ export type IssueEntry = {
   tokenUsage?: AgentTokenUsage; // aggregated across all turns/attempts
   usage?: { tokens: Record<string, number> }; // { tokens: { "claude-opus-4-6": 12345, "gpt-5.3": 6789 } }
   effort?: EffortConfig; // per-issue reasoning effort override
+  linesAdded?: number;
+  linesRemoved?: number;
+  filesChanged?: number;
+  plan?: IssuePlan;
+};
+
+export type IssuePlanStep = {
+  step: number;
+  action: string;
+  files?: string[];
+  details?: string;
+};
+
+export type IssuePlan = {
+  summary: string;
+  steps: IssuePlanStep[];
+  suggestedPaths: string[];
+  suggestedLabels: string[];
+  suggestedEffort: EffortConfig;
+  estimatedComplexity: "trivial" | "low" | "medium" | "high";
+  provider: string;
+  createdAt: string;
 };
 
 export type RuntimeConfig = {

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "impeccable",
+    "displayName": "Impeccable Design",
+    "description": "Comprehensive frontend design skill with typography, color, spatial design, motion, and UX writing reference",
+    "domains": ["frontend", "design"],
+    "source": "impeccable",
+    "installType": "reference",
+    "url": "https://github.com/pbakaus/impeccable"
+  },
+  {
+    "name": "commit",
+    "displayName": "Git Commit",
+    "description": "Git commit best practices: conventional commits, atomic changes, and meaningful messages",
+    "domains": ["backend", "frontend", "devops"],
+    "source": "bundled",
+    "installType": "bundled",
+    "content": "# Git Commit Skill\n\nWhen creating git commits, follow these practices:\n\n## Conventional Commits Format\n\nUse the format: `<type>(<scope>): <description>`\n\nTypes:\n- `feat`: A new feature\n- `fix`: A bug fix\n- `docs`: Documentation changes\n- `style`: Code style changes (formatting, semicolons)\n- `refactor`: Code refactoring without behavior change\n- `perf`: Performance improvements\n- `test`: Adding or updating tests\n- `build`: Build system or dependency changes\n- `ci`: CI/CD configuration changes\n- `chore`: Maintenance tasks\n\n## Rules\n\n1. Each commit should represent a single logical change\n2. The subject line must be under 72 characters\n3. Use imperative mood: \"add feature\" not \"added feature\"\n4. The body should explain WHY the change was made, not WHAT changed\n5. Reference issue numbers when applicable\n6. Never commit secrets, credentials, or large binary files\n7. Stage files deliberately; avoid `git add -A` in complex changes\n\n## Process\n\n1. Review staged changes with `git diff --staged`\n2. Verify no unintended files are included\n3. Write a clear commit message following the format above\n4. If the change is complex, add a body separated by a blank line"
+  },
+  {
+    "name": "review-pr",
+    "displayName": "PR Review",
+    "description": "Pull request review methodology: structured feedback, security checks, and constructive communication",
+    "domains": ["backend", "frontend", "security", "testing"],
+    "source": "bundled",
+    "installType": "bundled",
+    "content": "# PR Review Skill\n\nWhen reviewing pull requests, follow this structured methodology:\n\n## Review Checklist\n\n### 1. Context (before reading code)\n- Read the PR description and linked issues\n- Understand the goal and acceptance criteria\n- Check if the scope matches the stated goal\n\n### 2. Architecture\n- Does the change fit the existing architecture?\n- Are new patterns introduced? Are they justified?\n- Is the code in the right module/service/layer?\n\n### 3. Correctness\n- Does the code handle edge cases?\n- Are error states handled properly?\n- Are there race conditions or concurrency issues?\n- Is input validated at the boundary?\n\n### 4. Security\n- Is user input sanitized?\n- Are there injection vulnerabilities (SQL, XSS, command)?\n- Are secrets handled properly?\n- Are permissions checked correctly?\n\n### 5. Testing\n- Are tests included for new behavior?\n- Do tests cover happy path and error cases?\n- Are tests testing behavior, not implementation?\n\n### 6. Maintainability\n- Is the code readable without comments?\n- Are names descriptive and consistent?\n- Is there unnecessary complexity?\n\n## Feedback Format\n\n- **Blocker**: Must be fixed before merge (prefix with `[blocker]`)\n- **Suggestion**: Improvement that should be considered (prefix with `[suggestion]`)\n- **Nit**: Style or minor preference (prefix with `[nit]`)\n- **Question**: Clarification needed (prefix with `[question]`)\n- **Praise**: Acknowledge good decisions (prefix with `[praise]`)"
+  },
+  {
+    "name": "debug",
+    "displayName": "Debugging",
+    "description": "Systematic debugging methodology: reproduce, isolate, diagnose, fix, and verify",
+    "domains": ["backend", "frontend", "testing"],
+    "source": "bundled",
+    "installType": "bundled",
+    "content": "# Debugging Skill\n\nFollow this systematic approach when debugging issues:\n\n## The RIDVF Method\n\n### 1. Reproduce\n- Get exact steps to reproduce the issue\n- Note the environment: OS, runtime version, configuration\n- Create the minimal reproduction case\n- Confirm the issue is consistent, not intermittent\n\n### 2. Isolate\n- Narrow down the affected code path\n- Use binary search: disable half the system, check if the bug persists\n- Check recent changes: `git log --oneline -20` and `git bisect` for regressions\n- Verify assumptions: add assertions and logging at boundaries\n\n### 3. Diagnose\n- Read the error message carefully, including the full stack trace\n- Check logs at all levels: application, framework, system\n- Use debugger breakpoints at the suspected failure point\n- Trace the data flow: what is the input, what is expected, what is actual?\n- Check external dependencies: database state, API responses, file permissions\n\n### 4. Fix\n- Fix the root cause, not the symptom\n- Consider side effects of the fix on other code paths\n- Keep the fix minimal and focused\n- Add a test that fails without the fix and passes with it\n\n### 5. Verify\n- Run the reproduction steps to confirm the fix\n- Run the full test suite to check for regressions\n- Test edge cases around the fix\n- Document what caused the issue and how it was resolved\n\n## Common Pitfalls\n\n- Do not change multiple things at once; change one thing and test\n- Do not assume; verify with data and evidence\n- Do not ignore warnings; they often point to the root cause\n- Do not fix symptoms; trace to the root cause even if it takes longer"
+  },
+  {
+    "name": "testing",
+    "displayName": "Testing Strategies",
+    "description": "Testing methodology: unit, integration, E2E, test design patterns, and coverage strategies",
+    "domains": ["backend", "frontend", "testing"],
+    "source": "bundled",
+    "installType": "bundled",
+    "content": "# Testing Strategies Skill\n\nApply these testing strategies to ensure code reliability:\n\n## Testing Pyramid\n\n### Unit Tests (70%)\n- Test pure functions and business logic in isolation\n- Fast execution (under 10ms per test)\n- Mock external dependencies; test only the unit's behavior\n- Use descriptive test names: `should return empty array when no items match filter`\n\n### Integration Tests (20%)\n- Test component interactions: API routes, database queries, service calls\n- Use real dependencies where practical (test databases, in-memory stores)\n- Test the contract between modules, not internal implementation\n- Cover authentication, authorization, and data validation flows\n\n### End-to-End Tests (10%)\n- Test critical user journeys: signup, purchase, data export\n- Run against a production-like environment\n- Keep the suite small and focused on high-value paths\n- Accept slower execution; optimize for reliability over speed\n\n## Test Design Patterns\n\n### Arrange-Act-Assert (AAA)\n```\n// Arrange: set up test data and dependencies\n// Act: execute the function under test\n// Assert: verify the result matches expectations\n```\n\n### Test Naming\n- Describe the scenario: `when user has no permissions`\n- State the expected outcome: `should return 403 forbidden`\n- Full: `when user has no permissions, should return 403 forbidden`\n\n### What to Test\n- Happy path: normal expected usage\n- Edge cases: empty inputs, boundary values, max sizes\n- Error cases: invalid input, network failures, timeouts\n- Security: unauthorized access, injection attempts\n\n### What Not to Test\n- Implementation details (private methods, internal state)\n- Third-party library behavior\n- Trivial getters/setters without logic\n- Generated code"
+  }
+]

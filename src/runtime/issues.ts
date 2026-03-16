@@ -183,7 +183,21 @@ export function createIssueFromPayload(
     maxAttempts: clamp(toNumberValue(payload.maxAttempts ?? payload.max_attempts, 3), 1, 10),
     terminalWeek: "",
     effort: parseEffortConfig(payload.effort),
+    plan: payload.plan && typeof payload.plan === "object" ? payload.plan as IssueEntry["plan"] : undefined,
   };
+
+  // If plan provides suggestions, apply them
+  if (issue.plan) {
+    if (issue.plan.suggestedPaths?.length && !issue.paths?.length) {
+      issue.paths = issue.plan.suggestedPaths;
+    }
+    if (issue.plan.suggestedLabels?.length && !issue.labels?.length) {
+      issue.labels = issue.plan.suggestedLabels;
+    }
+    if (issue.plan.suggestedEffort && !issue.effort) {
+      issue.effort = issue.plan.suggestedEffort;
+    }
+  }
 
   applyCapabilityMetadata(issue, resolveTaskCapabilities({
     id: issue.id,

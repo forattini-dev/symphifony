@@ -175,6 +175,11 @@ export default {
     commandOutputTail: "string|optional",
     terminalWeek: "string|optional",
     usage: "json|optional",
+    plan: "json|optional",
+    linesAdded: "number|optional",
+    linesRemoved: "number|optional",
+    filesChanged: "number|optional",
+    effort: "json|optional",
   },
   partitions: {
     byState: { fields: { state: "string" } },

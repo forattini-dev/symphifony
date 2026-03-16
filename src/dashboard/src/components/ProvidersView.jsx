@@ -70,7 +70,7 @@ function WeeklyProgressBar({ percentUsed, weeklyLimit, weeklyUsed }) {
         </span>
       </div>
       <progress
-        className={`progress ${progressClass} w-full`}
+        className={`progress ${progressClass} w-full progress-animated`}
         value={percentUsed}
         max={100}
       />
@@ -208,15 +208,17 @@ export function ProvidersView({ providersUsage }) {
 
   if (isLoading && !data) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <span className="loading loading-spinner loading-md"></span>
+      <div className="grid gap-4 md:grid-cols-2">
+        {[...Array(2)].map((_, i) => (
+          <div key={i} className="skeleton-card h-72" style={{ animationDelay: `${i * 100}ms` }} />
+        ))}
       </div>
     );
   }
 
   if (providers.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 gap-2 opacity-50">
+      <div className="flex flex-col items-center justify-center py-12 gap-2 opacity-50 animate-fade-in-up">
         <Cpu className="size-8" />
         <p className="text-sm">No providers detected</p>
       </div>
@@ -225,7 +227,7 @@ export function ProvidersView({ providersUsage }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 stagger-children">
         {providers.map((p) => (
           <ProviderCard key={p.name} provider={p} />
         ))}

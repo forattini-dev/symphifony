@@ -1,5 +1,8 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router";
 import { DashboardProvider, useDashboard } from "../context/DashboardContext";
+import { useSettings, getSettingsList, getSettingValue, SETTINGS_QUERY_KEY } from "../hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import Header from "../components/Header";
 import Fab from "../components/Fab";
 import MobileDock from "../components/MobileDock";
@@ -8,10 +11,41 @@ import CreateIssueDrawer from "../components/CreateIssueForm";
 import IssueDetailDrawer from "../components/IssueDetailDrawer";
 import PwaBanner from "../components/PwaBanner";
 import Confetti from "../components/Confetti";
+import OnboardingWizard from "../components/OnboardingWizard";
 import { CheckCircle, AlertTriangle, Info } from "lucide-react";
+
+function ViewTransition({ children }) {
+  const routerState = useRouterState();
+  const key = routerState.location.pathname;
+  return (
+    <div key={key} className="flex-1 flex flex-col min-h-0 animate-view-enter">
+      {children}
+    </div>
+  );
+}
 
 function RootLayout() {
   const ctx = useDashboard();
+  const settingsQuery = useSettings();
+  const queryClient = useQueryClient();
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+
+  const onboardingDone = onboardingDismissed || getSettingValue(
+    getSettingsList(settingsQuery.data),
+    "ui.onboarding.completed",
+    false,
+  );
+
+  if (!onboardingDone && !settingsQuery.isLoading) {
+    return (
+      <OnboardingWizard
+        onComplete={() => {
+          setOnboardingDismissed(true);
+          queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+        }}
+      />
+    );
+  }
 
   if (ctx.runtime.isLoading && !ctx.runtime.data) {
     return (
@@ -64,13 +98,15 @@ function RootLayout() {
       />
       <PwaBanner pwa={ctx.pwa} />
 
-      <div className="container mx-auto px-4 pb-8 flex-1 flex flex-col gap-4">
-        <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 flex flex-col min-h-0">
+        <ViewTransition>
           <Outlet />
-        </div>
+        </ViewTransition>
 
         {ctx.runtime.isError && (
-          <div className="alert alert-error">{String(ctx.runtime.error?.message || "Runtime unavailable")}</div>
+          <div className="px-4 pb-4">
+            <div className="alert alert-error">{String(ctx.runtime.error?.message || "Runtime unavailable")}</div>
+          </div>
         )}
       </div>
 

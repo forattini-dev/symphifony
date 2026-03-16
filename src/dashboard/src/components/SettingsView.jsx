@@ -1,8 +1,19 @@
-import { Sun, Moon, Wifi, WifiOff, CircleDot, Palette, Cpu, Radio, Download, RefreshCw, Smartphone, Bell, BellOff } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import { SETTINGS_QUERY_KEY, upsertSettingPayload } from "../hooks";
+import OnboardingWizard from "./OnboardingWizard";
+import { Sun, Moon, Wifi, WifiOff, CircleDot, Palette, Cpu, Radio, Download, RefreshCw, Smartphone, Bell, BellOff, Wand2 } from "lucide-react";
 
 const PINNED_THEMES = ["auto", "light", "dark"];
-const OTHER_THEMES = ["black", "cupcake", "night", "sunset"].sort((a, b) => a.localeCompare(b));
-const THEME_OPTIONS = [...PINNED_THEMES, ...OTHER_THEMES];
+const ALL_DAISYUI_THEMES = [
+  "cupcake", "bumblebee", "emerald", "corporate", "synthwave", "retro",
+  "cyberpunk", "valentine", "halloween", "garden", "forest", "aqua",
+  "lofi", "pastel", "fantasy", "wireframe", "black", "luxury", "dracula",
+  "cmyk", "autumn", "business", "acid", "lemonade", "night", "coffee",
+  "winter", "dim", "nord", "sunset", "caramellatte", "abyss", "silk",
+];
+const THEME_OPTIONS = [...PINNED_THEMES, ...ALL_DAISYUI_THEMES];
 
 function resolveTheme(value) {
   return value === "auto"
@@ -12,11 +23,11 @@ function resolveTheme(value) {
 
 function ThemeSection({ theme, onThemeChange }) {
   const resolved = resolveTheme(theme);
-  const isDark = ["dark", "night", "sunset", "black"].includes(resolved);
+  const isDark = ["dark", "night", "sunset", "black", "synthwave", "halloween", "forest", "luxury", "dracula", "business", "coffee", "dim", "abyss"].includes(resolved);
 
   return (
     <div className="card bg-base-200">
-      <div className="card-body gap-3">
+      <div className="card-body gap-4 p-6">
         <h3 className="card-title text-sm flex items-center gap-2">
           <Palette className="size-4 opacity-50" />
           Theme
@@ -45,7 +56,7 @@ function ThemeSection({ theme, onThemeChange }) {
 function ConcurrencySection({ concurrency, setConcurrency, saveConcurrency, savePending }) {
   return (
     <div className="card bg-base-200">
-      <div className="card-body gap-3">
+      <div className="card-body gap-4 p-6">
         <h3 className="card-title text-sm flex items-center gap-2">
           <Cpu className="size-4 opacity-50" />
           Worker Concurrency
@@ -93,7 +104,7 @@ function ConnectionSection({ status, wsStatus }) {
 
   return (
     <div className="card bg-base-200">
-      <div className="card-body gap-3">
+      <div className="card-body gap-4 p-6">
         <h3 className="card-title text-sm flex items-center gap-2">
           <Radio className="size-4 opacity-50" />
           Connection Status
@@ -133,7 +144,7 @@ function PwaSection({ pwa }) {
 
   return (
     <div className="card bg-base-200">
-      <div className="card-body gap-3">
+      <div className="card-body gap-4 p-6">
         <h3 className="card-title text-sm flex items-center gap-2">
           <Smartphone className="size-4 opacity-50" />
           Progressive Web App
@@ -175,7 +186,7 @@ function NotificationsSection({ notifications }) {
   if (!notifications?.supported) {
     return (
       <div className="card bg-base-200">
-        <div className="card-body gap-3">
+        <div className="card-body gap-4 p-6">
           <h3 className="card-title text-sm flex items-center gap-2">
             <BellOff className="size-4 opacity-50" />
             Notifications
@@ -191,7 +202,7 @@ function NotificationsSection({ notifications }) {
 
   return (
     <div className="card bg-base-200">
-      <div className="card-body gap-3">
+      <div className="card-body gap-4 p-6">
         <h3 className="card-title text-sm flex items-center gap-2">
           <Bell className="size-4 opacity-50" />
           Desktop Notifications
@@ -254,9 +265,68 @@ function NotificationsSection({ notifications }) {
   );
 }
 
+function SetupWizardSection() {
+  const [showWizard, setShowWizard] = useState(false);
+  const qc = useQueryClient();
+
+  const handleRerun = async () => {
+    // Clear onboarding.completed so the wizard appears
+    try {
+      await api.post(`/settings/${encodeURIComponent("ui.onboarding.completed")}`, {
+        scope: "ui",
+        value: false,
+        source: "user",
+      });
+      qc.setQueryData(SETTINGS_QUERY_KEY, (current) =>
+        upsertSettingPayload(current, {
+          id: "ui.onboarding.completed",
+          scope: "ui",
+          value: false,
+          source: "user",
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    } catch {
+      // ignore
+    }
+    setShowWizard(true);
+  };
+
+  if (showWizard) {
+    return (
+      <OnboardingWizard
+        onComplete={() => {
+          setShowWizard(false);
+          qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="card bg-base-200">
+      <div className="card-body gap-4 p-6">
+        <h3 className="card-title text-sm flex items-center gap-2">
+          <Wand2 className="size-4 opacity-50" />
+          Setup Wizard
+        </h3>
+        <p className="text-xs opacity-50">
+          Re-run the initial setup wizard to reconfigure providers, effort level, concurrency, and theme.
+        </p>
+        <button className="btn btn-sm btn-primary gap-1 w-fit" onClick={handleRerun}>
+          <Wand2 className="size-3.5" /> Re-run Setup Wizard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Export individual sections for use in tabbed layout
+export { ThemeSection, ConcurrencySection, ConnectionSection, PwaSection, NotificationsSection, SetupWizardSection };
+
 export function SettingsView({ theme, onThemeChange, concurrency, setConcurrency, saveConcurrency, savePending, status, wsStatus, pwa, notifications }) {
   return (
-    <div className="space-y-4 max-w-2xl stagger-children">
+    <div className="space-y-5 stagger-children">
       <ConnectionSection status={status} wsStatus={wsStatus} />
       <NotificationsSection notifications={notifications} />
       <PwaSection pwa={pwa} />
@@ -267,6 +337,7 @@ export function SettingsView({ theme, onThemeChange, concurrency, setConcurrency
         saveConcurrency={saveConcurrency}
         savePending={savePending}
       />
+      <SetupWizardSection />
     </div>
   );
 }

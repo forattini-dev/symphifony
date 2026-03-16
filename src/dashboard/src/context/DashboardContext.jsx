@@ -1,10 +1,28 @@
 import { createContext, useContext, useMemo, useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { useRuntimeState, useRuntimeEvents, useProviders, useParallelism, useProvidersUsage, useRuntimeWebSocket, useTheme, usePwa } from "../hooks";
+import {
+  useRuntimeState,
+  useRuntimeEvents,
+  useProviders,
+  useParallelism,
+  useProvidersUsage,
+  useRuntimeWebSocket,
+  useTheme,
+  usePwa,
+  useUiSetting,
+  SETTING_ID_UI_ISSUES_STATE_FILTER,
+  SETTING_ID_UI_ISSUES_CATEGORY_FILTER,
+  SETTING_ID_UI_ISSUES_COMPLETION_FILTER,
+  SETTING_ID_UI_EVENTS_KIND,
+  SETTING_ID_UI_EVENTS_ISSUE_ID,
+} from "../hooks";
 import { useNotifications } from "../hooks/useNotifications";
+import { STATES } from "../utils";
 
 const DashboardContext = createContext(null);
+const EVENT_KINDS = ["all", "info", "state", "progress", "error", "manual", "runner"];
+const COMPLETION_FILTERS = new Set(["recent", "all"]);
 
 export function useDashboard() {
   const ctx = useContext(DashboardContext);
@@ -14,12 +32,32 @@ export function useDashboard() {
 
 export function DashboardProvider({ children }) {
   const [theme, setTheme] = useTheme();
-  const [stateFilter, setStateFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [completionFilter, setCompletionFilter] = useState("recent");
+  const [stateFilter, setStateFilter] = useUiSetting(
+    SETTING_ID_UI_ISSUES_STATE_FILTER,
+    "all",
+    { normalize: (value) => (value === "all" || STATES.includes(value) ? value : "all") },
+  );
+  const [categoryFilter, setCategoryFilter] = useUiSetting(
+    SETTING_ID_UI_ISSUES_CATEGORY_FILTER,
+    "all",
+    { normalize: (value) => (typeof value === "string" && value.trim() ? value : "all") },
+  );
+  const [completionFilter, setCompletionFilter] = useUiSetting(
+    SETTING_ID_UI_ISSUES_COMPLETION_FILTER,
+    "recent",
+    { normalize: (value) => (COMPLETION_FILTERS.has(value) ? value : "recent") },
+  );
   const [query, setQuery] = useState("");
-  const [eventKind, setEventKind] = useState("all");
-  const [eventIssueId, setEventIssueId] = useState("all");
+  const [eventKind, setEventKind] = useUiSetting(
+    SETTING_ID_UI_EVENTS_KIND,
+    "all",
+    { normalize: (value) => (EVENT_KINDS.includes(value) ? value : "all") },
+  );
+  const [eventIssueId, setEventIssueId] = useUiSetting(
+    SETTING_ID_UI_EVENTS_ISSUE_ID,
+    "all",
+    { normalize: (value) => (typeof value === "string" && value.trim() ? value : "all") },
+  );
   const [concurrency, setConcurrency] = useState("2");
   const [toast, setToast] = useState(null);
   const [toastExiting, setToastExiting] = useState(false);
@@ -68,6 +106,18 @@ export function DashboardProvider({ children }) {
   }, [issues]);
 
   const issueOptions = useMemo(() => [...new Set(issues.map((i) => i.id))].sort(), [issues]);
+
+  useEffect(() => {
+    if (categoryFilter !== "all" && !categoryOptions.includes(categoryFilter)) {
+      setCategoryFilter("all");
+    }
+  }, [categoryFilter, categoryOptions, setCategoryFilter]);
+
+  useEffect(() => {
+    if (eventIssueId !== "all" && !issueOptions.includes(eventIssueId)) {
+      setEventIssueId("all");
+    }
+  }, [eventIssueId, issueOptions, setEventIssueId]);
 
   const showToast = useCallback((msg, type = "info") => {
     setToastExiting(false);

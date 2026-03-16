@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Cpu, Circle, Clock, Terminal, CheckCircle2, XCircle, AlertTriangle, Pause, ListOrdered } from "lucide-react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { Cpu, Circle, Clock, Terminal, CheckCircle2, XCircle, AlertTriangle, Pause, ListOrdered, Zap, Gauge, Users } from "lucide-react";
 import { timeAgo, formatDuration } from "../utils.js";
 import { api } from "../api.js";
 
@@ -12,6 +12,13 @@ const STATE_ICON = {
   Queued: ListOrdered, Running: Circle, Interrupted: Pause,
   "In Review": Circle, Blocked: AlertTriangle, Done: CheckCircle2, Cancelled: XCircle,
 };
+
+function formatTokens(n) {
+  if (!n || n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
 
 // ── Slot live output ────────────────────────────────────────────────────────
 
@@ -47,8 +54,8 @@ function SlotLiveInfo({ issueId }) {
         {live.agentAlive === false && live.agentPid && <span className="text-error">dead</span>}
       </div>
       {live.logTail && (
-        <pre className="text-[10px] bg-base-300 rounded-box p-2 overflow-x-auto whitespace-pre-wrap max-h-28 overflow-y-auto font-mono opacity-70 leading-relaxed">
-          {live.logTail.slice(-1200)}
+        <pre className="text-[11px] bg-base-300 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto font-mono opacity-80 leading-relaxed break-all w-full max-w-full">
+          {live.logTail.slice(-2000)}
         </pre>
       )}
     </div>
@@ -57,13 +64,13 @@ function SlotLiveInfo({ issueId }) {
 
 // ── Active agent slot ───────────────────────────────────────────────────────
 
-function AgentSlot({ index, issue }) {
+function AgentSlot({ index, issue, total }) {
   if (!issue) {
     return (
-      <div className="slot-idle rounded-box p-4 flex items-center justify-center opacity-30 transition-opacity duration-300 hover:opacity-40">
+      <div className="slot-idle rounded-box p-6 flex items-center justify-center opacity-30 transition-opacity duration-300 hover:opacity-40 border-2 border-dashed border-base-300">
         <div className="flex items-center gap-2 text-sm">
-          <Circle className="size-4 animate-pulse-soft" />
-          Slot {index + 1} — idle
+          <Circle className="size-5 animate-pulse-soft" />
+          Slot {index + 1} -- idle
         </div>
       </div>
     );
@@ -71,23 +78,23 @@ function AgentSlot({ index, issue }) {
 
   const isRunning = issue.state === "Running";
   const borderClass = issue.state === "In Review"
-    ? "border-secondary/40 bg-secondary/5"
-    : "border-primary/40 bg-primary/5";
+    ? "border-secondary bg-secondary/5"
+    : "border-primary bg-primary/5";
 
   return (
-    <div className={`border rounded-box p-4 space-y-2 animate-fade-in-scale ${borderClass} ${isRunning ? "slot-active" : ""}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="loading loading-spinner loading-xs text-primary" />
-          <span className="font-mono text-sm font-semibold">{issue.identifier}</span>
-          <span className={`badge badge-xs ${STATE_BADGE[issue.state] || "badge-ghost"}`}>{issue.state}</span>
+    <div className={`border-2 rounded-box p-5 space-y-2 animate-fade-in-scale overflow-hidden min-w-0 ${borderClass} ${isRunning ? "slot-active" : ""}`}>
+      <div className="flex items-center justify-between min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="loading loading-spinner loading-sm text-primary shrink-0" />
+          <span className="font-mono text-base font-bold truncate">{issue.identifier}</span>
+          <span className={`badge badge-sm ${STATE_BADGE[issue.state] || "badge-ghost"} shrink-0`}>{issue.state}</span>
         </div>
-        <span className="text-xs opacity-40">Slot {index + 1}</span>
+        <span className="text-xs font-mono opacity-50 shrink-0 bg-base-200 px-2 py-0.5 rounded">Slot {index + 1}/{total}</span>
       </div>
 
-      <div className="text-sm truncate">{issue.title}</div>
+      <div className="text-sm font-medium">{issue.title}</div>
 
-      <div className="flex flex-wrap gap-2 text-xs opacity-50">
+      <div className="flex flex-wrap gap-2 text-xs opacity-60">
         {issue.capabilityCategory && <span className="badge badge-xs badge-ghost">{issue.capabilityCategory}</span>}
         <span>P{issue.priority}</span>
         <span>Attempt {(issue.attempts || 0) + 1}/{issue.maxAttempts}</span>
@@ -132,21 +139,78 @@ function CompletedItem({ issue }) {
   );
 }
 
+// ── Summary cockpit bar ─────────────────────────────────────────────────────
+
+function CockpitSummary({ running, queued, concurrency, totalTokensToday }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3">
+      <div className="bg-base-200 rounded-box p-3 flex items-center gap-3">
+        <div className="bg-primary/10 rounded-btn p-2">
+          <Users className="size-5 text-primary" />
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-mono">{running.length}<span className="text-sm opacity-50">/{concurrency}</span></div>
+          <div className="text-xs opacity-50">Active agents</div>
+        </div>
+      </div>
+      <div className="bg-base-200 rounded-box p-3 flex items-center gap-3">
+        <div className="bg-info/10 rounded-btn p-2">
+          <ListOrdered className="size-5 text-info" />
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-mono">{queued.length}</div>
+          <div className="text-xs opacity-50">Queued</div>
+        </div>
+      </div>
+      <div className="bg-base-200 rounded-box p-3 flex items-center gap-3">
+        <div className="bg-accent/10 rounded-btn p-2">
+          <Zap className="size-5 text-accent" />
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-mono">{formatTokens(totalTokensToday)}</div>
+          <div className="text-xs opacity-50">Tokens today</div>
+        </div>
+      </div>
+      <div className="bg-base-200 rounded-box p-3 flex items-center gap-3">
+        <div className="bg-secondary/10 rounded-btn p-2">
+          <Gauge className="size-5 text-secondary" />
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-mono">{concurrency}</div>
+          <div className="text-xs opacity-50">Max parallelism</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main view ───────────────────────────────────────────────────────────────
 
-export function RuntimeView({ state, providers, parallelism, onRefresh }) {
-  const issues = Array.isArray(state.issues) ? state.issues : [];
+export function RuntimeView({ state, providers, parallelism, onRefresh, issues: allIssues = [] }) {
+  const stateIssues = Array.isArray(state.issues) ? state.issues : [];
   const concurrency = Number(state.config?.workerConcurrency) || 2;
 
-  const running = issues.filter((i) => i.state === "Running" || i.state === "In Review");
-  const queued = issues.filter((i) =>
+  const running = stateIssues.filter((i) => i.state === "Running" || i.state === "In Review");
+  const queued = stateIssues.filter((i) =>
     i.state === "Todo" || i.state === "Queued" || i.state === "Interrupted"
     || (i.state === "Blocked" && i.nextRetryAt),
   );
-  const completed = issues
+  const completed = stateIssues
     .filter((i) => i.state === "Done" || i.state === "Cancelled")
     .sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""))
     .slice(0, 10);
+
+  // Calculate tokens used today
+  const totalTokensToday = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    let sum = 0;
+    for (const issue of allIssues) {
+      if (!issue.tokenUsage?.totalTokens) continue;
+      const d = (issue.completedAt || issue.updatedAt || "").slice(0, 10);
+      if (d === today) sum += issue.tokenUsage.totalTokens;
+    }
+    return sum;
+  }, [allIssues]);
 
   // Build slot array
   const slots = [];
@@ -155,9 +219,12 @@ export function RuntimeView({ state, providers, parallelism, onRefresh }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 min-w-0 overflow-hidden flex-1">
+      {/* Cockpit summary */}
+      <CockpitSummary running={running} queued={queued} concurrency={concurrency} totalTokensToday={totalTokensToday} />
+
       {/* Active agents */}
-      <div className="space-y-3">
+      <div className="space-y-3 min-w-0">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm flex items-center gap-1.5">
             <Cpu className="size-4 opacity-50" />
@@ -165,9 +232,9 @@ export function RuntimeView({ state, providers, parallelism, onRefresh }) {
           </h3>
           <span className="text-xs opacity-50">{running.length}/{concurrency} slots</span>
         </div>
-        <div className="grid gap-3">
+        <div className="grid gap-3 min-w-0" style={{ gridTemplateColumns: `repeat(${Math.min(concurrency, 3)}, 1fr)` }}>
           {slots.map((issue, i) => (
-            <AgentSlot key={i} index={i} issue={issue} />
+            <AgentSlot key={i} index={i} issue={issue} total={concurrency} />
           ))}
         </div>
       </div>
