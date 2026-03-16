@@ -83,14 +83,16 @@ export function formatDuration(ms) {
   return `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`;
 }
 
-export const STATES = ["Todo", "In Progress", "In Review", "Blocked", "Done", "Cancelled"];
+export const STATES = ["Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
 export const ISSUE_STATE_MACHINE = {
-  Todo: ["In Progress", "Cancelled"],
-  "In Progress": ["In Review", "Blocked", "Cancelled"],
-  "In Review": ["In Progress", "Done", "Blocked", "Cancelled"],
-  Blocked: ["In Review", "In Progress", "Cancelled"],
-  Done: ["Cancelled", "Todo"],
-  Cancelled: ["Todo", "In Progress"],
+  Todo: ["Queued", "Cancelled"],
+  Queued: ["Running", "Todo", "Cancelled"],
+  Running: ["In Review", "Interrupted", "Blocked", "Cancelled"],
+  Interrupted: ["Queued", "Running", "Blocked", "Cancelled"],
+  "In Review": ["Running", "Done", "Blocked", "Cancelled"],
+  Blocked: ["Queued", "Cancelled"],
+  Done: ["Todo", "Cancelled"],
+  Cancelled: ["Todo", "Queued"],
 };
 
 export function getIssueTransitions(state) {

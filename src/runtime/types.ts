@@ -2,7 +2,10 @@ export type JsonRecord = Record<string, unknown>;
 
 export type IssueState =
   | "Todo"
-  | "In Progress"
+  | "Queued"
+  | "Running"
+  | "In Progress"  // legacy alias for Running — normalized on load
+  | "Interrupted"
   | "In Review"
   | "Blocked"
   | "Done"

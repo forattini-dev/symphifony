@@ -73,6 +73,8 @@ export function clamp(value: number, min: number, max: number): number {
 
 export function normalizeState(value: unknown): IssueState {
   const raw = typeof value === "string" ? value.trim() : "";
+  // Legacy migration: "In Progress" → "Running"
+  if (raw === "In Progress") return "Running";
   if ((ALLOWED_STATES as readonly string[]).includes(raw)) {
     return raw as IssueState;
   }

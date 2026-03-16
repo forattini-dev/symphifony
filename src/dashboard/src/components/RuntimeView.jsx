@@ -4,7 +4,9 @@ import { formatDate, timeAgo } from "../utils.js";
 import { api } from "../api.js";
 
 const STATE_BADGE = {
-  "In Progress": "badge-primary",
+  Queued: "badge-info",
+  Running: "badge-primary",
+  Interrupted: "badge-accent",
   "In Review": "badge-secondary",
 };
 
@@ -102,7 +104,7 @@ function WorkerSlot({ index, issue }) {
 }
 
 function WorkerSlots({ issues, concurrency }) {
-  const executing = issues.filter((i) => i.state === "In Progress" || i.state === "In Review");
+  const executing = issues.filter((i) => i.state === "Running" || i.state === "In Review");
   const slots = [];
   for (let i = 0; i < concurrency; i++) {
     slots.push(executing[i] || null);

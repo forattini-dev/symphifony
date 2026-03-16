@@ -1,14 +1,18 @@
 import { useMemo } from "react";
 import { IssueCard } from "./IssueCard.jsx";
 import { EmptyState } from "./EmptyState.jsx";
-import { Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
+import { Plus, ListOrdered, Play, Pause, Eye, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 
-const STATES = ["Todo", "In Progress", "In Review", "Blocked", "Done", "Cancelled"];
+const STATES = ["Todo", "Queued", "Running", "Interrupted", "In Review", "Blocked", "Done", "Cancelled"];
 
+// Columns that only show when they have issues
+const COLLAPSIBLE = new Set(["Queued", "Interrupted"]);
 
 const STATE_BADGE = {
   Todo: "badge-warning",
-  "In Progress": "badge-primary",
+  Queued: "badge-info",
+  Running: "badge-primary",
+  Interrupted: "badge-accent",
   "In Review": "badge-secondary",
   Blocked: "badge-error",
   Done: "badge-success",
@@ -17,11 +21,13 @@ const STATE_BADGE = {
 
 const EMPTY_CONFIG = {
   Todo: { icon: Plus, desc: "Create an issue to get started" },
-  "In Progress": { icon: Play, desc: "Issues move here when agents start" },
-  "In Review": { icon: Eye, desc: "Completed work awaiting review" },
-  Blocked: { icon: AlertTriangle, desc: "Issues needing attention" },
-  Done: { icon: CheckCircle, desc: "Completed issues land here" },
-  Cancelled: { icon: XCircle, desc: "Cancelled issues" },
+  Queued: { icon: ListOrdered, desc: "Waiting for a worker slot" },
+  Running: { icon: Play, desc: "Agent is executing" },
+  Interrupted: { icon: Pause, desc: "Interrupted by restart" },
+  "In Review": { icon: Eye, desc: "Awaiting review" },
+  Blocked: { icon: AlertTriangle, desc: "Needs attention" },
+  Done: { icon: CheckCircle, desc: "Completed" },
+  Cancelled: { icon: XCircle, desc: "Cancelled" },
 };
 
 export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect }) {
@@ -36,7 +42,10 @@ export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect }
     return buckets;
   }, [issues]);
 
-  const visibleStates = STATES;
+  const visibleStates = useMemo(() =>
+    STATES.filter((s) => !COLLAPSIBLE.has(s) || grouped[s].length > 0),
+    [grouped],
+  );
 
   return (
     <div className="overflow-x-auto pb-2 flex-1 flex flex-col min-h-0">
@@ -44,7 +53,7 @@ export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect }
         className="grid gap-3 flex-1"
         style={{
           gridTemplateColumns: `repeat(${visibleStates.length}, minmax(0, 1fr))`,
-          minWidth: `${visibleStates.length * 180}px`,
+          minWidth: `${visibleStates.length * 160}px`,
         }}
       >
         {visibleStates.map((state) => {

@@ -86,7 +86,9 @@ export const DEBUG_BOOT = env.SYMPHIFONY_DEBUG_BOOT === "1";
 
 export const ALLOWED_STATES: IssueState[] = [
   "Todo",
-  "In Progress",
+  "Queued",
+  "Running",
+  "Interrupted",
   "In Review",
   "Blocked",
   "Done",
@@ -94,5 +96,6 @@ export const ALLOWED_STATES: IssueState[] = [
 ];
 
 export const TERMINAL_STATES = new Set<IssueState>(["Done", "Cancelled"]);
-export const EXECUTING_STATES = new Set<IssueState>(["In Progress", "In Review"]);
+export const EXECUTING_STATES = new Set<IssueState>(["Running", "In Review"]);
+export const ACTIVE_STATES = new Set<IssueState>(["Queued", "Running", "In Review"]);
 export const PERSIST_EVENTS_MAX = 500;

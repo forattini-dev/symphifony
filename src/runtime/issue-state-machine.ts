@@ -17,34 +17,52 @@ type IssueStateMachineDefinition = {
   states?: Record<string, { on?: Record<string, string> } | undefined>;
 };
 
-export const ISSUE_STATE_TRANSITIONS = {
-  Todo: ["In Progress", "Cancelled"],
-  "In Progress": ["In Review", "Blocked", "Cancelled"],
-  "In Review": ["In Progress", "Done", "Blocked", "Cancelled"],
-  Blocked: ["In Review", "In Progress", "Cancelled"],
-  Done: ["Cancelled", "Todo"],
-  Cancelled: ["Todo", "In Progress"],
-} as const satisfies Record<IssueState, readonly IssueState[]>;
+export const ISSUE_STATE_TRANSITIONS: Record<string, readonly string[]> = {
+  Todo: ["Queued", "Cancelled"],
+  Queued: ["Running", "Todo", "Cancelled"],
+  Running: ["In Review", "Interrupted", "Blocked", "Cancelled"],
+  Interrupted: ["Queued", "Running", "Blocked", "Cancelled"],
+  "In Review": ["Running", "Done", "Blocked", "Cancelled"],
+  Blocked: ["Queued", "Cancelled"],
+  Done: ["Todo", "Cancelled"],
+  Cancelled: ["Todo", "Queued"],
+};
 
 export const ISSUE_STATE_MACHINE_DEFINITION = {
   initialState: "Todo",
   states: {
     Todo: {
       on: {
-        "In Progress": "In Progress",
+        Queued: "Queued",
         Cancelled: "Cancelled",
       },
     },
-    "In Progress": {
+    Queued: {
+      on: {
+        Running: "Running",
+        Todo: "Todo",
+        Cancelled: "Cancelled",
+      },
+    },
+    Running: {
       on: {
         "In Review": "In Review",
+        Interrupted: "Interrupted",
+        Blocked: "Blocked",
+        Cancelled: "Cancelled",
+      },
+    },
+    Interrupted: {
+      on: {
+        Queued: "Queued",
+        Running: "Running",
         Blocked: "Blocked",
         Cancelled: "Cancelled",
       },
     },
     "In Review": {
       on: {
-        "In Progress": "In Progress",
+        Running: "Running",
         Done: "Done",
         Blocked: "Blocked",
         Cancelled: "Cancelled",
@@ -52,21 +70,20 @@ export const ISSUE_STATE_MACHINE_DEFINITION = {
     },
     Blocked: {
       on: {
-        "In Review": "In Review",
-        "In Progress": "In Progress",
+        Queued: "Queued",
         Cancelled: "Cancelled",
       },
     },
     Done: {
       on: {
-        Cancelled: "Cancelled",
         Todo: "Todo",
+        Cancelled: "Cancelled",
       },
     },
     Cancelled: {
       on: {
         Todo: "Todo",
-        "In Progress": "In Progress",
+        Queued: "Queued",
       },
     },
   },

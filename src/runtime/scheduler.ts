@@ -33,14 +33,33 @@ export function installGracefulShutdown(
   running: Set<string>,
 ): void {
   const handler = async (signal: string) => {
-    if (shuttingDown) return;
+    if (shuttingDown) {
+      logger.warn(`Received ${signal} again, forcing exit.`);
+      process.exit(1);
+    }
     shuttingDown = true;
-    logger.info(`Received ${signal}, persisting state and shutting down...`);
+    logger.info(`Received ${signal}, shutting down gracefully...`);
     addEvent(state, undefined, "info", `Graceful shutdown initiated (${signal}).`);
+
+    // Mark running issues as Interrupted so they resume on next boot
+    for (const issue of state.issues) {
+      if (running.has(issue.id) && (issue.state === "Running" || issue.state === "In Review")) {
+        issue.state = "Interrupted" as any;
+        issue.updatedAt = now();
+        issue.history.push(`[${issue.updatedAt}] Interrupted by ${signal} — will resume on next start.`);
+        addEvent(state, issue.id, "info", `Issue ${issue.identifier} interrupted by shutdown.`);
+      }
+    }
+
     state.updatedAt = now();
     state.metrics = computeMetrics(state.issues);
-    await persistState(state);
-    logger.info("State persisted. Exiting.");
+    try {
+      await persistState(state);
+      logger.info("State persisted.");
+    } catch (error) {
+      logger.error(`Failed to persist state during shutdown: ${String(error)}`);
+    }
+    logger.info("Goodbye.");
     process.exit(0);
   };
 

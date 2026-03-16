@@ -3,7 +3,9 @@ import { timeAgo } from "../utils.js";
 
 const STATE_BADGE = {
   Todo: "badge-warning",
-  "In Progress": "badge-primary",
+  Queued: "badge-info",
+  Running: "badge-primary",
+  Interrupted: "badge-accent",
   "In Review": "badge-secondary",
   Blocked: "badge-error",
   Done: "badge-success",

@@ -30,6 +30,7 @@ import type {
 } from "./types.ts";
 import {
   SOURCE_ROOT,
+  TERMINAL_STATES,
   WORKSPACE_ROOT,
 } from "./constants.ts";
 import {
@@ -152,10 +153,9 @@ function readAgentDirective(workspacePath: string, output: string, success: bool
 }
 
 export function canRunIssue(issue: IssueEntry, running: Set<string>, state: RuntimeState): boolean {
-  const TERMINAL = new Set(["Done", "Cancelled"]);
   if (!issue.assignedToWorker) return false;
   if (running.has(issue.id)) return false;
-  if (TERMINAL.has(issue.state)) return false;
+  if (TERMINAL_STATES.has(issue.state)) return false;
 
   if (issue.state === "Blocked") {
     if (!issue.nextRetryAt) return false;
@@ -165,8 +165,11 @@ export function canRunIssue(issue: IssueEntry, running: Set<string>, state: Runt
 
   if (!issueDepsResolved(issue, state.issues)) return false;
 
-  if (issue.state === "Todo" || issue.state === "Blocked") return true;
-  if (issue.state === "In Progress" && issueHasResumableSession(issue)) return true;
+  if (issue.state === "Todo") return true;
+  if (issue.state === "Queued") return true;
+  if (issue.state === "Blocked") return true;
+  if (issue.state === "Interrupted") return true;
+  if (issue.state === "Running" && issueHasResumableSession(issue)) return true;
   if (issue.state === "In Review") return true;
 
   return false;
@@ -187,17 +190,9 @@ function shouldSkipRoutingPath(relativePath: string): boolean {
     return true;
   }
   const base = parts.at(-1) ?? "";
-  return base === "symphifony-issue.json"
-    || base === "symphifony-prompt.md"
-    || base === "symphifony-result.json"
-    || base === "WORKFLOW.local.md"
+  return base === "WORKFLOW.local.md"
     || base === ".symphifony-env.sh"
-    || base.startsWith("symphifony-result-")
-    || base.startsWith("symphifony-turn-")
-    || base.startsWith("symphifony-session")
-    || base.startsWith("symphifony-pipeline")
-    || base.startsWith("symphifony-skills")
-    || base.startsWith("symphifony-review-")
+    || base.startsWith("symphifony-")
     || base.startsWith("symphifony_");
 }
 
@@ -342,7 +337,7 @@ async function persistAgentSessionState(
 }
 
 export function issueHasResumableSession(issue: IssueEntry): boolean {
-  return Boolean(issue.workspacePath) && issue.state === "In Progress";
+  return Boolean(issue.workspacePath) && (issue.state === "Running" || issue.state === "Interrupted");
 }
 
 function buildProviderSessionKey(issue: IssueEntry, attempt: number, provider: AgentProviderDefinition, cycle: number): string {
@@ -1069,7 +1064,7 @@ export async function runIssueOnce(
 ): Promise<void> {
   const startTs = Date.now();
   const isReview = issue.state === "In Review";
-  const resuming = issue.state === "In Progress";
+  const isResuming = issue.state === "Running" || issue.state === "Interrupted";
   running.add(issue.id);
   state.metrics.activeWorkers += 1;
   issue.startedAt = issue.startedAt ?? now();
@@ -1078,14 +1073,15 @@ export async function runIssueOnce(
     issue.updatedAt = now();
     issue.history.push(`[${issue.updatedAt}] Review stage started for ${issue.identifier}.`);
     addEvent(state, issue.id, "progress", `Review started for ${issue.identifier}.`);
-  } else if (resuming) {
-    issue.updatedAt = now();
-    issue.history.push(`[${issue.updatedAt}] Resuming persisted runner for ${issue.identifier}.`);
+  } else if (isResuming) {
+    await transitionIssueState(issue, "Running", `Resuming runner for ${issue.identifier}.`);
     addEvent(state, issue.id, "progress", `Runner resumed for ${issue.identifier}.`);
   } else {
-    await transitionIssueState(issue, "In Progress", `Starting local runner for ${issue.identifier}.`);
-    state.metrics.inProgress += 1;
-    state.metrics.queued = Math.max(state.metrics.queued - 1, 0);
+    // Todo / Queued / Blocked → Queued → Running
+    if (issue.state !== "Queued") {
+      await transitionIssueState(issue, "Queued", `Issue ${issue.identifier} queued for execution.`);
+    }
+    await transitionIssueState(issue, "Running", `Agent started for ${issue.identifier}.`);
     addEvent(state, issue.id, "progress", `Runner started for ${issue.identifier}.`);
   }
 
@@ -1151,8 +1147,8 @@ export async function runIssueOnce(
         issue.completedAt = now();
         issue.lastError = undefined;
       } else if (reviewResult.continueRequested) {
-        // Reviewer wants rework → back to In Progress
-        await transitionIssueState(issue, "In Progress", `Reviewer requested rework for ${issue.identifier}.`);
+        // Reviewer wants rework → back to Queued for re-execution
+        await transitionIssueState(issue, "Queued", `Reviewer requested rework for ${issue.identifier}.`);
         issue.nextRetryAt = new Date(Date.now() + 1000).toISOString();
         issue.lastError = undefined;
         addEvent(state, issue.id, "runner", `Issue ${issue.identifier} sent back for rework by reviewer.`);

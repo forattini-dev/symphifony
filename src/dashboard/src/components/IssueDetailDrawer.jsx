@@ -4,6 +4,7 @@ import {
   Folder, Layers, Gauge, History, Terminal, ArrowRight, Circle, CheckCircle2,
   PlayCircle, Eye, Ban, XCircle, Diff, Wrench, Copy, Check,
   Info, Code, Route, ClipboardCheck, ThumbsUp, ThumbsDown, MessageSquare,
+  Loader, Pause, ListOrdered,
 } from "lucide-react";
 import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate, formatDuration } from "../utils.js";
 import { api } from "../api.js";
@@ -11,23 +12,24 @@ import { api } from "../api.js";
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const STATE_ICON = {
-  Todo: Circle, "In Progress": PlayCircle, "In Review": Eye,
-  Blocked: AlertTriangle, Done: CheckCircle2, Cancelled: XCircle,
+  Todo: Circle, Queued: ListOrdered, Running: PlayCircle, Interrupted: Pause,
+  "In Review": Eye, Blocked: AlertTriangle, Done: CheckCircle2, Cancelled: XCircle,
 };
 const STATE_COLOR = {
-  Todo: "text-warning", "In Progress": "text-primary", "In Review": "text-secondary",
-  Blocked: "text-error", Done: "text-success", Cancelled: "text-neutral",
+  Todo: "text-warning", Queued: "text-info", Running: "text-primary", Interrupted: "text-accent",
+  "In Review": "text-secondary", Blocked: "text-error", Done: "text-success", Cancelled: "text-neutral",
 };
 const STATE_BTN = {
-  Todo: "btn-warning", "In Progress": "btn-primary", "In Review": "btn-secondary",
-  Blocked: "btn-error", Done: "btn-success", Cancelled: "btn-neutral",
+  Todo: "btn-warning", Queued: "btn-info", Running: "btn-primary", Interrupted: "btn-accent",
+  "In Review": "btn-secondary", Blocked: "btn-error", Done: "btn-success", Cancelled: "btn-neutral",
 };
 const STATE_BADGE = {
-  Todo: "badge-warning", "In Progress": "badge-primary", "In Review": "badge-secondary",
-  Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
+  Todo: "badge-warning", Queued: "badge-info", Running: "badge-primary", Interrupted: "badge-accent",
+  "In Review": "badge-secondary", Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
 };
 const STATE_BG = {
-  Todo: "bg-warning/10 border-warning/30", "In Progress": "bg-primary/10 border-primary/30",
+  Todo: "bg-warning/10 border-warning/30", Queued: "bg-info/10 border-info/30",
+  Running: "bg-primary/10 border-primary/30", Interrupted: "bg-accent/10 border-accent/30",
   "In Review": "bg-secondary/10 border-secondary/30", Blocked: "bg-error/10 border-error/30",
   Done: "bg-success/10 border-success/30", Cancelled: "bg-neutral/10 border-neutral/30",
 };
@@ -94,7 +96,7 @@ function CopyButton({ text }) {
 // formatDuration imported from utils.js
 
 function getStateMachineOrder(state) {
-  return { Todo: 0, "In Progress": 1, "In Review": 2, Blocked: 2, Done: 3, Cancelled: 3 }[state] ?? 0;
+  return { Todo: 0, Queued: 1, Running: 2, Interrupted: 2, "In Review": 3, Blocked: 3, Done: 4, Cancelled: 4 }[state] ?? 0;
 }
 
 // ── Tab: Overview ───────────────────────────────────────────────────────────
@@ -131,7 +133,7 @@ function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
           </div>
           <div className="flex items-center gap-2">
             <button className="btn btn-sm btn-soft gap-1" onClick={() => onRetry?.(issue.id)}
-              disabled={issue.state === "In Progress" || issue.state === "In Review"}>
+              disabled={issue.state === "Running" || issue.state === "In Review"}>
               <RotateCcw className="size-3" /> Retry
             </button>
             <button className="btn btn-sm btn-error btn-soft gap-1" onClick={() => onCancel?.(issue.id)}
@@ -240,7 +242,7 @@ function LiveMonitor({ issueId, running, startedAt }) {
 // ── Tab: Execution ──────────────────────────────────────────────────────────
 
 function ExecutionTab({ issue }) {
-  const isRunning = issue.state === "In Progress" || issue.state === "In Review";
+  const isRunning = issue.state === "Running" || issue.state === "In Review";
 
   return (
     <div className="space-y-5">
@@ -518,7 +520,7 @@ function ReviewTab({ issue, issueId, onStateChange }) {
   };
   const handleRework = () => {
     setVerdict("rework");
-    onStateChange?.(issue.id, "In Progress");
+    onStateChange?.(issue.id, "Queued");
   };
   const handleReject = () => {
     setVerdict("rejected");
