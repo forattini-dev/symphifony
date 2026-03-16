@@ -13,6 +13,8 @@ interface ModelInfo {
 }
 
 interface UsagePeriod {
+  inputTokens: number;
+  outputTokens: number;
   tokensUsed: number;
   sessions: number;
   since: string;
@@ -29,12 +31,53 @@ interface ProviderUsage {
     allTime: UsagePeriod;
   };
   resetInfo: string;
+  nextResetAt: string;
+  weeklyLimitEstimate: number | null;
+  percentUsed: number | null;
 }
 
 interface ProvidersUsageResult {
   providers: ProviderUsage[];
   collectedAt: string;
 }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function computeNextMonday(): Date {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  const next = new Date(now);
+  next.setDate(next.getDate() + daysUntilMonday);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function computeWeekStart(): Date {
+  const weekStart = new Date();
+  const dayOfWeek = weekStart.getDay();
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  weekStart.setDate(weekStart.getDate() - daysFromMonday);
+  weekStart.setHours(0, 0, 0, 0);
+  return weekStart;
+}
+
+function computeTodayStart(): Date {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  return todayStart;
+}
+
+function makePeriod(input: number, output: number, sessions: number, since: string): UsagePeriod {
+  return { inputTokens: input, outputTokens: output, tokensUsed: input + output, sessions, since };
+}
+
+// Known weekly token limits per plan (approximate, based on public info)
+const CLAUDE_PLAN_LIMITS: Record<string, number> = {
+  pro: 45_000_000,      // ~45M tokens/week (Pro plan estimate)
+  max: 135_000_000,     // ~135M tokens/week (Max plan)
+  max5x: 675_000_000,   // ~675M tokens/week (Max 5x plan)
+};
 
 // ── Claude usage (from JSONL session files) ──────────────────────────────────
 
@@ -62,17 +105,9 @@ function collectClaudeUsage(): ProviderUsage | null {
   let weekOutputTokens = 0;
   let weekSessions = 0;
 
-  const now = Date.now();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = computeTodayStart();
   const todayMs = todayStart.getTime();
-
-  // Week starts on Monday
-  const weekStart = new Date();
-  const dayOfWeek = weekStart.getDay();
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  weekStart.setDate(weekStart.getDate() - daysFromMonday);
-  weekStart.setHours(0, 0, 0, 0);
+  const weekStart = computeWeekStart();
   const weekMs = weekStart.getTime();
 
   if (existsSync(projectsDir)) {
@@ -110,9 +145,9 @@ function collectClaudeUsage(): ProviderUsage | null {
               if (entry.type !== "assistant" || !entry.message?.usage) continue;
 
               const usage = entry.message.usage;
+              // Only count actual billed tokens — cache reads are free/cheap
               const inputTokens = (usage.input_tokens || 0) +
-                (usage.cache_creation_input_tokens || 0) +
-                (usage.cache_read_input_tokens || 0);
+                (usage.cache_creation_input_tokens || 0);
               const outputTokens = usage.output_tokens || 0;
 
               totalInputTokens += inputTokens;
@@ -158,16 +193,23 @@ function collectClaudeUsage(): ProviderUsage | null {
   ];
 
   // Detect subscription type from settings
+  let plan = "pro";
   let resetInfo = "Weekly reset (every Monday 00:00 UTC)";
   const settingsPath = join(claudeDir, "settings.json");
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
       if (settings.plan === "max" || settings.plan === "max5x") {
-        resetInfo = `Plan: ${settings.plan.toUpperCase()} — Daily token limit resets at 00:00 UTC`;
+        plan = settings.plan;
+        resetInfo = `Plan: ${settings.plan.toUpperCase()} — Weekly token limit resets every Monday 00:00 UTC`;
       }
     } catch {}
   }
+
+  const nextResetAt = computeNextMonday().toISOString();
+  const weeklyLimit = CLAUDE_PLAN_LIMITS[plan] ?? null;
+  const weeklyUsed = weekInputTokens + weekOutputTokens;
+  const percentUsed = weeklyLimit ? Math.min(100, Math.round((weeklyUsed / weeklyLimit) * 100)) : null;
 
   return {
     name: "claude",
@@ -175,11 +217,14 @@ function collectClaudeUsage(): ProviderUsage | null {
     models,
     currentModel: "claude-opus-4-6",
     usage: {
-      today: { tokensUsed: todayInputTokens + todayOutputTokens, sessions: todaySessions, since: todayStart.toISOString() },
-      thisWeek: { tokensUsed: weekInputTokens + weekOutputTokens, sessions: weekSessions, since: weekStart.toISOString() },
-      allTime: { tokensUsed: totalInputTokens + totalOutputTokens, sessions: totalSessions, since: "" },
+      today: makePeriod(todayInputTokens, todayOutputTokens, todaySessions, todayStart.toISOString()),
+      thisWeek: makePeriod(weekInputTokens, weekOutputTokens, weekSessions, weekStart.toISOString()),
+      allTime: makePeriod(totalInputTokens, totalOutputTokens, totalSessions, ""),
     },
     resetInfo,
+    nextResetAt,
+    weeklyLimitEstimate: weeklyLimit,
+    percentUsed,
   };
 }
 
@@ -224,11 +269,17 @@ function collectCodexUsage(): ProviderUsage | null {
     } catch {}
   }
 
-  // Query SQLite for usage data
-  const dbPath = join(codexDir, "state_5.sqlite");
+  const todayStart = computeTodayStart();
+  const weekStart = computeWeekStart();
+  const nextResetAt = computeNextMonday().toISOString();
+
+  // Find the right SQLite file
+  let dbPath = join(codexDir, "state_5.sqlite");
   if (!existsSync(dbPath)) {
-    // Try older state files
-    const files = readdirSync(codexDir).filter((f) => f.startsWith("state_") && f.endsWith(".sqlite"));
+    const files = readdirSync(codexDir)
+      .filter((f) => f.startsWith("state_") && f.endsWith(".sqlite"))
+      .sort()
+      .reverse();
     if (files.length === 0) {
       return {
         name: "codex",
@@ -236,13 +287,17 @@ function collectCodexUsage(): ProviderUsage | null {
         models,
         currentModel,
         usage: {
-          today: { tokensUsed: 0, sessions: 0, since: new Date().toISOString() },
-          thisWeek: { tokensUsed: 0, sessions: 0, since: new Date().toISOString() },
-          allTime: { tokensUsed: 0, sessions: 0, since: "" },
+          today: makePeriod(0, 0, 0, todayStart.toISOString()),
+          thisWeek: makePeriod(0, 0, 0, weekStart.toISOString()),
+          allTime: makePeriod(0, 0, 0, ""),
         },
         resetInfo: "Weekly rate limit resets every Monday",
+        nextResetAt,
+        weeklyLimitEstimate: null,
+        percentUsed: null,
       };
     }
+    dbPath = join(codexDir, files[0]);
   }
 
   let allTimeTokens = 0;
@@ -252,15 +307,7 @@ function collectCodexUsage(): ProviderUsage | null {
   let weekTokens = 0;
   let weekSessions = 0;
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const todayUnix = Math.floor(todayStart.getTime() / 1000);
-
-  const weekStart = new Date();
-  const dayOfWeek = weekStart.getDay();
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  weekStart.setDate(weekStart.getDate() - daysFromMonday);
-  weekStart.setHours(0, 0, 0, 0);
   const weekUnix = Math.floor(weekStart.getTime() / 1000);
 
   try {
@@ -292,17 +339,21 @@ function collectCodexUsage(): ProviderUsage | null {
     logger.debug(`Failed to query Codex SQLite: ${String(err)}`);
   }
 
+  // Codex doesn't expose input/output split from SQLite, report all as input
   return {
     name: "codex",
     available,
     models,
     currentModel,
     usage: {
-      today: { tokensUsed: todayTokens, sessions: todaySessions, since: todayStart.toISOString() },
-      thisWeek: { tokensUsed: weekTokens, sessions: weekSessions, since: weekStart.toISOString() },
-      allTime: { tokensUsed: allTimeTokens, sessions: allTimeSessions, since: "" },
+      today: makePeriod(todayTokens, 0, todaySessions, todayStart.toISOString()),
+      thisWeek: makePeriod(weekTokens, 0, weekSessions, weekStart.toISOString()),
+      allTime: makePeriod(allTimeTokens, 0, allTimeSessions, ""),
     },
     resetInfo: "Weekly rate limit resets every Monday",
+    nextResetAt,
+    weeklyLimitEstimate: null,
+    percentUsed: null,
   };
 }
 

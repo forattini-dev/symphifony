@@ -1,16 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { RefreshCw, Cpu, Circle, PlayCircle, Eye, AlertTriangle, Clock, Terminal } from "lucide-react";
+import { RefreshCw, Cpu, Circle, AlertTriangle, Clock, Terminal } from "lucide-react";
 import { formatDate, timeAgo } from "../utils.js";
 import { api } from "../api.js";
 
-const STATE_ICON = {
-  "In Progress": PlayCircle,
-  "In Review": Eye,
-};
-
-const STATE_COLOR = {
-  "In Progress": "text-primary",
-  "In Review": "text-secondary",
+const STATE_BADGE = {
+  "In Progress": "badge-primary",
+  "In Review": "badge-secondary",
 };
 
 function SlotLiveInfo({ issueId }) {
@@ -31,7 +26,11 @@ function SlotLiveInfo({ issueId }) {
 
   if (!live) return null;
 
-  const elapsed = live.elapsed || 0;
+  const elapsed = Number.isFinite(Number(live.elapsed))
+    ? Number(live.elapsed)
+    : live.startedAt
+      ? Math.max(Date.now() - new Date(live.startedAt).getTime(), 0)
+      : 0;
   const mins = Math.floor(elapsed / 60000);
   const secs = Math.floor((elapsed % 60000) / 1000);
   const logKb = live.logSize ? (live.logSize / 1024).toFixed(1) : "0";
@@ -63,16 +62,27 @@ function WorkerSlot({ index, issue }) {
     );
   }
 
-  const Icon = STATE_ICON[issue.state] || PlayCircle;
-  const color = STATE_COLOR[issue.state] || "text-primary";
+  const issueClass = issue.capabilityCategory === "security"
+    ? "border-error/40 bg-error/5"
+    : issue.capabilityCategory === "frontend-ui"
+      ? "border-info/40 bg-info/5"
+      : issue.state === "In Review"
+        ? "border-secondary/40 bg-secondary/5"
+        : "border-primary/40 bg-primary/5";
+
+  const categoryTone = issue.capabilityCategory === "security"
+    ? "badge-error"
+    : issue.capabilityCategory === "frontend-ui"
+      ? "badge-info"
+      : "badge-ghost";
 
   return (
-    <div className={`border rounded-box p-4 space-y-2 ${issue.state === "In Review" ? "border-secondary/40 bg-secondary/5" : "border-primary/40 bg-primary/5"}`}>
+    <div className={`border rounded-box p-4 space-y-2 ${issueClass}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="loading loading-spinner loading-xs text-primary" />
           <span className="font-mono text-sm font-semibold">{issue.identifier}</span>
-          <span className={`badge badge-xs ${color.replace("text-", "badge-")}`}>{issue.state}</span>
+          <span className={`badge badge-xs ${STATE_BADGE[issue.state] || "badge-ghost"}`}>{issue.state}</span>
         </div>
         <span className="text-xs opacity-40">Slot {index + 1}</span>
       </div>
@@ -80,7 +90,7 @@ function WorkerSlot({ index, issue }) {
       <div className="text-sm truncate">{issue.title}</div>
 
       <div className="flex flex-wrap gap-2 text-xs opacity-50">
-        {issue.capabilityCategory && <span className="badge badge-xs badge-ghost">{issue.capabilityCategory}</span>}
+        {issue.capabilityCategory && <span className={`badge badge-xs ${categoryTone}`}>{issue.capabilityCategory}</span>}
         <span>P{issue.priority}</span>
         <span>Attempt {(issue.attempts || 0) + 1}/{issue.maxAttempts}</span>
         {issue.startedAt && <span>started {timeAgo(issue.startedAt)}</span>}
@@ -193,7 +203,7 @@ export function RuntimeView({ state, providers, parallelism, onRefresh, concurre
               {providers?.providers?.length ? (
                 providers.providers.map((p) => (
                   <span key={p.name} className={`badge badge-sm ${p.available ? "badge-success" : "badge-warning"}`}>
-                    {p.name} {p.path ? `(${p.path})` : ""}
+                    {p.name}{p.path ? ` (${p.path})` : ""}
                   </span>
                 ))
               ) : (

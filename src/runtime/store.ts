@@ -243,10 +243,20 @@ export async function persistState(state: RuntimeState): Promise<void> {
 
   if (issueStateResource) {
     for (const issue of state.issues) {
-      await issueStateResource.replace(issue.id, {
+      // s3db requires valid datetime or undefined — clean empty strings
+      const clean = {
         ...issue,
+        nextRetryAt: issue.nextRetryAt || undefined,
+        startedAt: issue.startedAt || undefined,
+        completedAt: issue.completedAt || undefined,
+        workspacePreparedAt: issue.workspacePreparedAt || undefined,
         commandExitCode: typeof issue.commandExitCode === "number" ? issue.commandExitCode : undefined,
-      } satisfies IssueRecord);
+      };
+      try {
+        await issueStateResource.replace(issue.id, clean satisfies IssueRecord);
+      } catch (error) {
+        logger.warn(`Failed to persist issue ${issue.id}: ${String(error)}`);
+      }
     }
   }
 

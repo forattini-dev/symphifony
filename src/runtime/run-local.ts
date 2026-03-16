@@ -112,13 +112,16 @@ async function main() {
     for (const err of configErrors) logger.warn(`Config validation: ${err}`);
   }
 
-  // Startup: clean workspaces and prune sessions for terminal issues
+  // Clean terminal workspaces in background (non-blocking boot)
   const terminalIssues = state.issues.filter((i) => i.state === "Done" || i.state === "Cancelled");
   if (terminalIssues.length > 0) {
-    logger.info(`Cleaning ${terminalIssues.length} terminal issue workspace(s)...`);
-    for (const issue of terminalIssues) {
-      await cleanWorkspace(issue.id, workflowDefinition);
-    }
+    logger.info(`Scheduling cleanup of ${terminalIssues.length} terminal workspace(s) in background...`);
+    setImmediate(async () => {
+      for (const issue of terminalIssues) {
+        try { await cleanWorkspace(issue.id, workflowDefinition); } catch {}
+      }
+      logger.info("Background workspace cleanup complete.");
+    });
   }
 
   state.metrics = computeMetrics(state.issues);

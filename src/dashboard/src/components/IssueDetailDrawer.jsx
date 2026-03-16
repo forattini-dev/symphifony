@@ -18,6 +18,14 @@ const STATE_COLOR = {
   Todo: "text-warning", "In Progress": "text-primary", "In Review": "text-secondary",
   Blocked: "text-error", Done: "text-success", Cancelled: "text-neutral",
 };
+const STATE_BTN = {
+  Todo: "btn-warning", "In Progress": "btn-primary", "In Review": "btn-secondary",
+  Blocked: "btn-error", Done: "btn-success", Cancelled: "btn-neutral",
+};
+const STATE_BADGE = {
+  Todo: "badge-warning", "In Progress": "badge-primary", "In Review": "badge-secondary",
+  Blocked: "badge-error", Done: "badge-success", Cancelled: "badge-neutral",
+};
 const STATE_BG = {
   Todo: "bg-warning/10 border-warning/30", "In Progress": "bg-primary/10 border-primary/30",
   "In Review": "bg-secondary/10 border-secondary/30", Blocked: "bg-error/10 border-error/30",
@@ -119,7 +127,7 @@ function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
               {nextStates.map((s) => {
                 const Icon = STATE_ICON[s] || Circle;
                 return (
-                  <button key={s} className={`btn btn-sm btn-soft gap-1.5 ${STATE_COLOR[s] || ""}`}
+                  <button key={s} className={`btn btn-sm btn-soft gap-1.5 ${STATE_BTN[s] || ""}`}
                     onClick={() => onStateChange?.(issue.id, s)}>
                     <Icon className="size-3.5" />{s}
                   </button>
@@ -188,7 +196,7 @@ function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
 
 // ── Live Monitor ────────────────────────────────────────────────────────────
 
-function LiveMonitor({ issueId, running }) {
+function LiveMonitor({ issueId, running, startedAt }) {
   const [live, setLive] = useState(null);
 
   const fetchLive = useCallback(async () => {
@@ -207,7 +215,11 @@ function LiveMonitor({ issueId, running }) {
 
   if (!running || !live) return null;
 
-  const elapsed = live.elapsed || 0;
+  const elapsed = Number.isFinite(Number(live.elapsed))
+    ? Number(live.elapsed)
+    : startedAt
+      ? Math.max(Date.now() - new Date(startedAt).getTime(), 0)
+      : 0;
   const mins = Math.floor(elapsed / 60000);
   const secs = Math.floor((elapsed % 60000) / 1000);
   const logKb = live.logSize ? (live.logSize / 1024).toFixed(1) : "0";
@@ -239,7 +251,7 @@ function ExecutionTab({ issue }) {
   return (
     <div className="space-y-5">
       {/* Live monitor */}
-      <LiveMonitor issueId={issue.id} running={isRunning} />
+      <LiveMonitor issueId={issue.id} running={isRunning} startedAt={issue.startedAt} />
 
       <Section title="Run Info" icon={Terminal}>
         <div className="space-y-0.5">
@@ -677,7 +689,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
             <div className="flex items-center gap-2 min-w-0">
               <FileText className="size-5 opacity-60 shrink-0" />
               <span className="font-mono text-sm opacity-60">{issue.identifier}</span>
-              <span className={`badge badge-sm ${STATE_COLOR[issue.state]?.replace("text-", "badge-") || "badge-ghost"}`}>{issue.state}</span>
+              <span className={`badge badge-sm ${STATE_BADGE[issue.state] || "badge-ghost"}`}>{issue.state}</span>
             </div>
             <button type="button" className="btn btn-sm btn-ghost btn-circle shrink-0" onClick={onClose} aria-label="Close">
               <X className="size-4" />

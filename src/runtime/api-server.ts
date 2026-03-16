@@ -402,6 +402,19 @@ export async function startApiServer(
         if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
         const issue = findIssue(issueId);
         if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
+
+        const parseStartedAt = (value: unknown): number | null => {
+          const valueText = typeof value === "string" ? value.trim() : "";
+          if (!valueText) return null;
+          const ts = Date.parse(valueText);
+          return Number.isFinite(ts) ? ts : null;
+        };
+
+        const startedAtText = toStringValue(issue.startedAt, "");
+        const updatedAtText = toStringValue(issue.updatedAt, "");
+        const startedAtTs = parseStartedAt(startedAtText) ?? parseStartedAt(updatedAtText);
+        const elapsed = startedAtTs ? Date.now() - startedAtTs : 0;
+
         const wp = issue.workspacePath;
         const liveLog = wp ? `${wp}/symphifony-live-output.log` : null;
         let logTail = "";
@@ -424,8 +437,8 @@ export async function startApiServer(
           issueId: issue.id,
           state: issue.state,
           running: issue.state === "In Progress" || issue.state === "In Review",
-          startedAt: issue.startedAt,
-          elapsed: issue.startedAt ? Date.now() - Date.parse(issue.startedAt) : 0,
+          startedAt: startedAtText || updatedAtText || now(),
+          elapsed: Number.isFinite(elapsed) ? elapsed : 0,
           logSize,
           logTail,
           outputTail: issue.commandOutputTail || "",
