@@ -101,41 +101,11 @@ export function resolveEffort(
   return globalEffort?.default;
 }
 
-const CLAUDE_RESULT_SCHEMA = JSON.stringify({
-  type: "object",
-  properties: {
-    status: { type: "string", enum: ["done", "continue", "blocked", "failed"] },
-    summary: { type: "string" },
-    nextPrompt: { type: "string" },
-  },
-  required: ["status"],
-});
+import { buildClaudeCommand, buildCodexCommand, CLAUDE_RESULT_SCHEMA } from "./adapters/commands.ts";
 
 export function getProviderDefaultCommand(provider: string, _reasoningEffort?: string, model?: string): string {
-  // Prompt is piped via stdin and also written to FIFONY_PROMPT_FILE.
-  // Use stdin redirection as primary for large prompts (avoids E2BIG).
-  // Note: reasoning effort is tracked as pipeline metadata but NOT passed as a CLI flag
-  // (Claude CLI does not support --reasoning-effort; Codex controls effort via model choice).
-
-  if (provider === "codex") {
-    const parts = ["codex", "exec", "--skip-git-repo-check"];
-    if (model && model !== "codex") parts.push(`--model ${model}`);
-    parts.push("< \"$FIFONY_PROMPT_FILE\"");
-    return parts.join(" ");
-  }
-  if (provider === "claude") {
-    const parts = [
-      "claude",
-      "--print",
-      "--dangerously-skip-permissions",
-      "--no-session-persistence",
-      "--output-format json",
-      `--json-schema '${CLAUDE_RESULT_SCHEMA}'`,
-    ];
-    if (model) parts.splice(2, 0, `--model ${model}`);
-    parts.push("< \"$FIFONY_PROMPT_FILE\"");
-    return parts.join(" ");
-  }
+  if (provider === "codex") return buildCodexCommand({ model });
+  if (provider === "claude") return buildClaudeCommand({ model, jsonSchema: CLAUDE_RESULT_SCHEMA });
   return "";
 }
 

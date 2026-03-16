@@ -8,6 +8,7 @@ import { detectAvailableProviders } from "./providers.ts";
 import { replacePersistedSetting, getSettingStateResource } from "./store.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
 import { logger } from "./logger.ts";
+import { buildClaudeCommand, buildCodexCommand } from "./adapters/commands.ts";
 import { renderPrompt } from "../prompting.ts";
 
 // ── Planning session persistence ────────────────────────────────────────────
@@ -134,26 +135,9 @@ async function buildPlanPrompt(title: string, description: string): Promise<stri
 
 // ── Provider command ─────────────────────────────────────────────────────────
 
-function getPlanCommand(provider: string, model?: string, effort?: string): string {
-  if (provider === "claude") {
-    const parts = [
-      "claude",
-      "--print",
-      "--dangerously-skip-permissions",
-      "--no-session-persistence",
-      "--output-format json",
-      `--json-schema '${PLAN_JSON_SCHEMA}'`,
-    ];
-    if (model) parts.splice(2, 0, `--model ${model}`);
-    parts.push("< \"$FIFONY_PROMPT_FILE\"");
-    return parts.join(" ");
-  }
-  if (provider === "codex") {
-    const parts = ["codex", "exec", "--skip-git-repo-check"];
-    if (model && model !== "codex") parts.push(`--model ${model}`);
-    parts.push("< \"$FIFONY_PROMPT_FILE\"");
-    return parts.join(" ");
-  }
+function getPlanCommand(provider: string, model?: string): string {
+  if (provider === "claude") return buildClaudeCommand({ model, jsonSchema: PLAN_JSON_SCHEMA });
+  if (provider === "codex") return buildCodexCommand({ model });
   return "";
 }
 
@@ -278,7 +262,7 @@ export async function generatePlan(
     : available.includes("claude") ? "claude" : available[0];
   if (!preferred) throw new Error("No AI provider available for planning.");
 
-  const command = getPlanCommand(preferred, planStageModel, planStageEffort);
+  const command = getPlanCommand(preferred, planStageModel);
   if (!command) throw new Error(`No command configured for provider ${preferred}.`);
 
   // Persist: planning started

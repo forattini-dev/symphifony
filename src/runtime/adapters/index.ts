@@ -1,26 +1,23 @@
-import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan, AgentTokenUsage } from "../types.ts";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, AgentTokenUsage } from "../types.ts";
 import { compileForClaude } from "./plan-to-claude.ts";
 import { compileForCodex } from "./plan-to-codex.ts";
-import { buildFullPlanPrompt, buildValidationSection, buildExecutionPayload } from "./shared.ts";
+import { buildFullPlanPrompt, buildExecutionPayload } from "./shared.ts";
 import type { ExecutionPayload } from "./shared.ts";
+import { buildClaudeCommand, buildCodexCommand, REVIEW_RESULT_SCHEMA } from "./commands.ts";
 import { renderPrompt } from "../../prompting.ts";
 
+// ── Types ────────────────────────────────────────────────────────────────────
+
 export type CompiledExecution = {
-  /** Enriched prompt with plan context, phases, risks, validation */
   prompt: string;
-  /** Fully resolved CLI command string */
   command: string;
-  /** Additional environment variables */
   env: Record<string, string>;
-  /** Shell commands to run before the agent */
   preHooks: string[];
-  /** Shell commands to run after the agent */
   postHooks: string[];
-  /** JSON schema for structured output (empty string if not applicable) */
   outputSchema: string;
-  /** Canonical structured input payload (source of truth for the task) */
   payload: ExecutionPayload | null;
-  /** Metadata for logging and audit */
   meta: {
     adapter: "claude" | "codex" | "passthrough";
     reasoningEffort: string;
@@ -32,9 +29,7 @@ export type CompiledExecution = {
 };
 
 export type CompiledReview = {
-  /** Rich review prompt with plan context, diff, and criteria */
   prompt: string;
-  /** Fully resolved CLI command string */
   command: string;
 };
 
@@ -53,13 +48,8 @@ export type ExecutionAudit = {
   completedAt: string;
 };
 
-/**
- * Compile an issue's plan into a provider-maximalist execution.
- * If no plan exists, returns null (caller falls back to default behavior).
- *
- * Generates a canonical ExecutionPayload (JSON source of truth) and
- * a provider-specific prompt (markdown frame that references the payload).
- */
+// ── Compile execution ────────────────────────────────────────────────────────
+
 export async function compileExecution(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
@@ -68,13 +58,11 @@ export async function compileExecution(
   skillContext: string,
 ): Promise<CompiledExecution | null> {
   const plan = issue.plan;
-  if (!plan?.steps?.length) return null; // No plan → use default behavior
+  if (!plan?.steps?.length) return null;
 
-  // Build canonical payload — same for all providers
   const payload = buildExecutionPayload(issue, provider, plan, workspacePath);
 
   let compiled: CompiledExecution | null = null;
-
   if (provider.provider === "claude") {
     compiled = await compileForClaude(issue, provider, plan, config, workspacePath, skillContext);
   } else if (provider.provider === "codex") {
@@ -88,9 +76,8 @@ export async function compileExecution(
   return compiled;
 }
 
-/**
- * Compile a rich review prompt using the original plan, diff context, and success criteria.
- */
+// ── Compile review ───────────────────────────────────────────────────────────
+
 export async function compileReview(
   issue: IssueEntry,
   reviewer: AgentProviderDefinition,
@@ -109,55 +96,21 @@ export async function compileReview(
     diffSummary,
   });
 
-  // Build the reviewer command with model injection
-  const REVIEW_RESULT_SCHEMA = JSON.stringify({
-    type: "object",
-    properties: {
-      status: { type: "string", enum: ["done", "continue", "blocked", "failed"] },
-      summary: { type: "string" },
-      nextPrompt: { type: "string" },
-      criteriaResults: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: { criterion: { type: "string" }, met: { type: "boolean" }, note: { type: "string" } },
-        },
-      },
-    },
-    required: ["status"],
-  });
-
+  // Build command using shared builder — single source of truth for CLI flags
   let command = reviewer.command;
-
-  // If command is default/empty, build one with model/effort
   if (!command.trim() || command.includes("$FIFONY_PROMPT_FILE")) {
     if (reviewer.provider === "claude") {
-      const effort = reviewer.reasoningEffort === "extra-high" ? "high" : reviewer.reasoningEffort;
-      const parts = [
-        "claude",
-        "--print",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "--output-format json",
-        `--json-schema '${REVIEW_RESULT_SCHEMA}'`,
-      ];
-      if (reviewer.model) parts.splice(2, 0, `--model ${reviewer.model}`);
-      parts.push("< \"$FIFONY_PROMPT_FILE\"");
-      command = parts.join(" ");
+      command = buildClaudeCommand({ model: reviewer.model, jsonSchema: REVIEW_RESULT_SCHEMA });
     } else if (reviewer.provider === "codex") {
-      const parts = ["codex", "exec", "--skip-git-repo-check"];
-      if (reviewer.model && reviewer.model !== "codex") parts.push(`--model ${reviewer.model}`);
-      parts.push("< \"$FIFONY_PROMPT_FILE\"");
-      command = parts.join(" ");
+      command = buildCodexCommand({ model: reviewer.model });
     }
   }
 
   return { prompt, command };
 }
 
-/**
- * Build a structured execution audit record.
- */
+// ── Audit ────────────────────────────────────────────────────────────────────
+
 export function buildExecutionAudit(
   provider: AgentProviderDefinition,
   compiled: CompiledExecution | null,
@@ -183,17 +136,9 @@ export function buildExecutionAudit(
   };
 }
 
-/**
- * Persist compilation artifacts to workspace for audit/debugging.
- * Writes both the metadata summary and the canonical execution payload.
- */
-export function persistCompilationArtifacts(
-  workspacePath: string,
-  compiled: CompiledExecution,
-): void {
-  const { writeFileSync } = require("node:fs");
-  const { join } = require("node:path");
+// ── Persistence ──────────────────────────────────────────────────────────────
 
+export function persistCompilationArtifacts(workspacePath: string, compiled: CompiledExecution): void {
   try {
     writeFileSync(
       join(workspacePath, "fifony-compiled-execution.json"),
@@ -214,11 +159,8 @@ export function persistCompilationArtifacts(
       }, null, 2),
       "utf8",
     );
-  } catch {
-    // Ignore write failures — this is optional audit data
-  }
+  } catch { /* optional audit data */ }
 
-  // Write the canonical execution payload as a separate file
   if (compiled.payload) {
     try {
       writeFileSync(
@@ -226,29 +168,16 @@ export function persistCompilationArtifacts(
         JSON.stringify(compiled.payload, null, 2),
         "utf8",
       );
-    } catch {
-      // Ignore — optional
-    }
+    } catch { /* optional */ }
   }
 }
 
-/**
- * Persist execution audit to workspace.
- */
-export function persistExecutionAudit(
-  workspacePath: string,
-  audit: ExecutionAudit,
-): void {
-  const { writeFileSync } = require("node:fs");
-  const { join } = require("node:path");
-
+export function persistExecutionAudit(workspacePath: string, audit: ExecutionAudit): void {
   try {
     writeFileSync(
       join(workspacePath, "fifony-execution-audit.json"),
       JSON.stringify(audit, null, 2),
       "utf8",
     );
-  } catch {
-    // Ignore write failures — this is optional audit data
-  }
+  } catch { /* optional audit data */ }
 }
