@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Symphifony Dashboard",
-  "short_name": "Symphifony",
-  "description": "Symphifony local orchestrator dashboard (React + PWA)",
+  "name": "Fifony Dashboard",
+  "short_name": "Fifony",
+  "description": "Fifony local orchestrator dashboard (React + PWA)",
   "lang": "en-US",
   "start_url": "/kanban",
   "scope": "/",

@@ -30,10 +30,10 @@ import {
 export function bootstrapSource(): void {
   if (existsSync(SOURCE_MARKER)) return;
 
-  logger.info("Creating local source snapshot for Symphifony (local-only runtime)...");
+  logger.info("Creating local source snapshot for Fifony (local-only runtime)...");
 
   const skipDirs = new Set([
-    ".git", ".symphifony", "node_modules", ".venv", "data",
+    ".git", ".fifony", "node_modules", ".venv", "data",
     "dist", "build", ".turbo", ".next", ".nuxt", ".tanstack",
     "coverage", "artifacts", "captures", "tmp", "temp",
   ]);
@@ -86,69 +86,34 @@ export function bootstrapSource(): void {
   writeFileSync(SOURCE_MARKER, `${now()}\n`, "utf8");
 }
 
+/**
+ * Returns an empty WorkflowDefinition.
+ * WORKFLOW.md is no longer supported — all configuration lives in s3db settings
+ * (Settings → Workflow in the dashboard).
+ */
 export function loadWorkflowDefinition(): WorkflowDefinition {
-  const template = WORKFLOW_TEMPLATE
-    ? readFileSync(WORKFLOW_TEMPLATE, "utf8")
-    : [
-        "---",
-        "tracker:",
-        "  kind: filesystem",
-        "workspace:",
-        `  root: "${WORKSPACE_ROOT}"`,
-        "agent:",
-        "  max_concurrent_agents: 2",
-        "  max_attempts: 3",
-        "codex:",
-        '  command: ""',
-        "---",
-        "",
-        "You are working on {{ issue.identifier }}.",
-        "",
-        "Title: {{ issue.title }}",
-        "Description:",
-        "{{ issue.description }}",
-      ].join("\n");
-
-  const { config, body } = parseFrontMatter(template);
-  const normalizedConfig: JsonRecord = {
-    ...config,
-    tracker: {
-      ...getNestedRecord(config, "tracker"),
-      kind: "filesystem",
-    },
-  };
-
-  const rendered = [
-    "---",
-    stringifyYaml(normalizedConfig).trim(),
-    "---",
+  const defaultPrompt = [
+    "You are working on {{ issue.identifier }}.",
     "",
-    body,
-    "",
+    "Title: {{ issue.title }}",
+    "Description:",
+    "{{ issue.description }}",
   ].join("\n");
 
-  const agentConfig = getNestedRecord(normalizedConfig, "agent");
-  const agentProvider = normalizeAgentProvider(getNestedString(agentConfig, "provider", "codex"));
-  const agentProfile = getNestedString(agentConfig, "profile");
-  const resolvedProfile = resolveAgentProfile(agentProfile);
-  const agentProviders = resolveWorkflowAgentProviders(normalizedConfig, agentProvider, agentProfile, "");
-
-  writeFileSync(WORKFLOW_RENDERED, rendered, "utf8");
-
   return {
-    workflowPath: WORKFLOW_TEMPLATE || WORKFLOW_RENDERED,
-    rendered,
-    config: normalizedConfig,
-    promptTemplate: body,
-    agentProvider,
-    agentProfile,
-    agentProfilePath: resolvedProfile.profilePath,
-    agentProfileInstructions: resolvedProfile.instructions,
-    agentProviders,
-    afterCreateHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "after_create"),
-    beforeRunHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "before_run"),
-    afterRunHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "after_run"),
-    beforeRemoveHook: getNestedString(getNestedRecord(normalizedConfig, "hooks"), "before_remove"),
+    workflowPath: "",
+    rendered: "",
+    config: {},
+    promptTemplate: defaultPrompt,
+    agentProvider: "codex",
+    agentProfile: "",
+    agentProfilePath: "",
+    agentProfileInstructions: "",
+    agentProviders: [],
+    afterCreateHook: "",
+    beforeRunHook: "",
+    afterRunHook: "",
+    beforeRemoveHook: "",
   };
 }
 
@@ -188,31 +153,14 @@ export function parsePort(args: string[]): number | undefined {
 
 let workflowWatcher: (() => void) | null = null;
 
+/**
+ * No-op — WORKFLOW.md watching is deprecated.
+ * Configuration is now managed via s3db settings.
+ */
 export function watchWorkflowFile(
-  onReload: (definition: WorkflowDefinition) => void,
+  _onReload: (definition: WorkflowDefinition) => void,
 ): void {
-  const filePath = WORKFLOW_TEMPLATE;
-  if (!filePath || !existsSync(filePath)) return;
-
-  // Unwatch previous if any
-  if (workflowWatcher) workflowWatcher();
-
-  watchFile(filePath, { interval: 2000 }, () => {
-    try {
-      const definition = loadWorkflowDefinition();
-      logger.info(`WORKFLOW.md reloaded: ${filePath}`);
-      onReload(definition);
-    } catch (error) {
-      logger.warn(`Failed to reload WORKFLOW.md: ${String(error)}. Keeping last known good config.`);
-    }
-  });
-
-  workflowWatcher = () => {
-    unwatchFile(filePath);
-    workflowWatcher = null;
-  };
-
-  logger.info(`Watching WORKFLOW.md for changes: ${filePath}`);
+  // No-op: WORKFLOW.md is no longer used
 }
 
 export function unwatchWorkflowFile(): void {

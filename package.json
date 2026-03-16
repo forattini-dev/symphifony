@@ -1,22 +1,22 @@
 {
-  "name": "symphifony",
+  "name": "fifony",
   "version": "0.1.11",
   "private": false,
   "type": "module",
-  "description": "Filesystem-backed local Symphifony orchestrator with a TypeScript CLI, MCP mode, and multi-agent Codex or Claude workflows.",
+  "description": "Filesystem-backed local Fifony orchestrator with a TypeScript CLI, MCP mode, and multi-agent Codex or Claude workflows.",
   "bin": {
-    "symphifony": "./bin/symphifony.js"
+    "fifony": "./bin/fifony.js"
   },
   "scripts": {
-    "start": "node ./bin/symphifony.js",
-    "dev": "node ./bin/symphifony.js --port 4000 --dev",
-    "dev:api": "node ./bin/symphifony.js --port 4000",
+    "start": "node ./bin/fifony.js",
+    "dev": "node ./bin/fifony.js --port 4000 --dev",
+    "dev:api": "node ./bin/fifony.js --port 4000",
     "dev:ui": "vite --config src/dashboard/vite.config.js",
     "build": "tsup && vite build --config src/dashboard/vite.config.js",
     "build:server": "tsup",
     "build:ui": "vite build --config src/dashboard/vite.config.js",
     "prepublishOnly": "pnpm build",
-    "mcp": "node ./bin/symphifony.js mcp"
+    "mcp": "node ./bin/fifony.js mcp"
   },
   "files": [
     "bin/",
@@ -24,20 +24,19 @@
     "src/dashboard/dist/",
     "src/dashboard/public/",
     "src/fixtures/",
-    "WORKFLOW.md",
     "README.md",
-    "SYMPHIFONY.md",
+    "FIFONY.md",
     "LICENSE",
     "NOTICE"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/forattini-dev/symphifony.git"
+    "url": "git+https://github.com/forattini-dev/fifony.git"
   },
   "bugs": {
-    "url": "https://github.com/forattini-dev/symphifony/issues"
+    "url": "https://github.com/forattini-dev/fifony/issues"
   },
-  "homepage": "https://github.com/forattini-dev/symphifony#readme",
+  "homepage": "https://github.com/forattini-dev/fifony#readme",
   "publishConfig": {
     "access": "public"
   },

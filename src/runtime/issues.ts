@@ -212,11 +212,11 @@ export function createIssueFromPayload(
 }
 
 export function deriveConfig(args: string[]): RuntimeConfig {
-  const parsedConcurrency = parsePositiveIntEnv("SYMPHIFONY_WORKER_CONCURRENCY", 2);
-  let pollIntervalMs = parseEnvNumber("SYMPHIFONY_POLL_INTERVAL_MS", 1200);
+  const parsedConcurrency = parsePositiveIntEnv("FIFONY_WORKER_CONCURRENCY", 2);
+  let pollIntervalMs = parseEnvNumber("FIFONY_POLL_INTERVAL_MS", 1200);
   let workerConcurrency = parsedConcurrency;
-  let maxAttemptsDefault = parseEnvNumber("SYMPHIFONY_MAX_ATTEMPTS", 3);
-  let commandTimeoutMs = parseEnvNumber("SYMPHIFONY_AGENT_TIMEOUT_MS", 1_800_000);
+  let maxAttemptsDefault = parseEnvNumber("FIFONY_MAX_ATTEMPTS", 3);
+  let commandTimeoutMs = parseEnvNumber("FIFONY_AGENT_TIMEOUT_MS", 1_800_000);
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -247,17 +247,17 @@ export function deriveConfig(args: string[]): RuntimeConfig {
     workerConcurrency: clamp(workerConcurrency, 1, 16),
     commandTimeoutMs: clamp(commandTimeoutMs, 1_000, 3_600_000),
     maxAttemptsDefault: clamp(maxAttemptsDefault, 1, 10),
-    maxTurns: clamp(parseEnvNumber("SYMPHIFONY_AGENT_MAX_TURNS", 4), 1, 16),
-    retryDelayMs: parseEnvNumber("SYMPHIFONY_RETRY_DELAY_MS", 3_000),
-    staleInProgressTimeoutMs: parseEnvNumber("SYMPHIFONY_STALE_IN_PROGRESS_MS", 2_400_000),
-    logLinesTail: parseEnvNumber("SYMPHIFONY_LOG_TAIL_CHARS", 12_000),
-    agentProvider: normalizeAgentProvider(env.SYMPHIFONY_AGENT_PROVIDER ?? "codex"),
-    agentCommand: toStringValue(env.SYMPHIFONY_AGENT_COMMAND, ""),
+    maxTurns: clamp(parseEnvNumber("FIFONY_AGENT_MAX_TURNS", 4), 1, 16),
+    retryDelayMs: parseEnvNumber("FIFONY_RETRY_DELAY_MS", 3_000),
+    staleInProgressTimeoutMs: parseEnvNumber("FIFONY_STALE_IN_PROGRESS_MS", 2_400_000),
+    logLinesTail: parseEnvNumber("FIFONY_LOG_TAIL_CHARS", 12_000),
+    agentProvider: normalizeAgentProvider(env.FIFONY_AGENT_PROVIDER ?? "codex"),
+    agentCommand: toStringValue(env.FIFONY_AGENT_COMMAND, ""),
     defaultEffort: {
-      default: (env.SYMPHIFONY_REASONING_EFFORT as any) || undefined,
-      planner: (env.SYMPHIFONY_PLANNER_EFFORT as any) || undefined,
-      executor: (env.SYMPHIFONY_EXECUTOR_EFFORT as any) || undefined,
-      reviewer: (env.SYMPHIFONY_REVIEWER_EFFORT as any) || undefined,
+      default: (env.FIFONY_REASONING_EFFORT as any) || undefined,
+      planner: (env.FIFONY_PLANNER_EFFORT as any) || undefined,
+      executor: (env.FIFONY_EXECUTOR_EFFORT as any) || undefined,
+      reviewer: (env.FIFONY_REVIEWER_EFFORT as any) || undefined,
     },
     maxConcurrentByState: {},
     runMode: "filesystem",
@@ -277,42 +277,18 @@ function parseMaxConcurrentByState(agentConfig: JsonRecord): Record<string, numb
   return result;
 }
 
+/**
+ * Apply workflow definition config to runtime config.
+ * WORKFLOW.md is deprecated — this is now a passthrough that only applies the port.
+ */
 export function applyWorkflowConfig(
   config: RuntimeConfig,
-  definition: WorkflowDefinition,
+  _definition: WorkflowDefinition,
   port: number | undefined,
 ): RuntimeConfig {
-  const pollConfig = getNestedRecord(definition.config, "poll");
-  const agentConfig = getNestedRecord(definition.config, "agent");
-  const codexConfig = getNestedRecord(definition.config, "codex");
-  const claudeConfig = getNestedRecord(definition.config, "claude");
-  const serverConfig = getNestedRecord(definition.config, "server");
-  const agentProvider = normalizeAgentProvider(
-    getNestedString(agentConfig, "provider", definition.agentProvider || config.agentProvider),
-  );
-  const codexCommand = getNestedString(codexConfig, "command");
-  const claudeCommand = getNestedString(claudeConfig, "command");
-
   return {
     ...config,
-    pollIntervalMs: clamp(getNestedNumber(pollConfig, "interval_ms", config.pollIntervalMs), 200, 10_000),
-    workerConcurrency: clamp(
-      getNestedNumber(agentConfig, "max_concurrent_agents", config.workerConcurrency),
-      1, 16,
-    ),
-    maxAttemptsDefault: clamp(getNestedNumber(agentConfig, "max_attempts", config.maxAttemptsDefault), 1, 10),
-    maxTurns: clamp(getNestedNumber(agentConfig, "max_turns", config.maxTurns), 1, 16),
-    commandTimeoutMs: clamp(
-      getNestedNumber(codexConfig, "timeout_ms", config.commandTimeoutMs),
-      1_000, 600_000,
-    ),
-    maxConcurrentByState: parseMaxConcurrentByState(agentConfig),
-    agentProvider,
-    agentCommand: resolveAgentCommand(agentProvider, config.agentCommand, codexCommand, claudeCommand),
-    dashboardPort: String(
-      port ?? (getNestedNumber(serverConfig, "port", Number.parseInt(config.dashboardPort ?? "0", 10) || 0) || 0),
-    ),
-    runMode: "filesystem",
+    dashboardPort: port ? String(port) : config.dashboardPort,
   };
 }
 

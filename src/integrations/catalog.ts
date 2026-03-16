@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export type SymphifonyIntegration = {
+export type FifonyIntegration = {
   id: "agency-agents" | "impeccable";
   kind: "agents" | "skills";
   installed: boolean;
@@ -40,7 +40,7 @@ function readSkillSummary(skillPath: string): string {
   }
 }
 
-export function discoverIntegrations(workspaceRoot: string): SymphifonyIntegration[] {
+export function discoverIntegrations(workspaceRoot: string): FifonyIntegration[] {
   const home = homedir();
   const agentLocations = [
     resolve(workspaceRoot, ".codex", "agents"),
@@ -129,13 +129,13 @@ export function buildIntegrationSnippet(integrationId: string, workspaceRoot: st
     return [
       "# Impeccable integration idea",
       "",
-      "Use impeccable-oriented skills as a frontend review layer around Symphifony issues.",
+      "Use impeccable-oriented skills as a frontend review layer around Fifony issues.",
       "",
       "Suggested pattern:",
       "",
       "1. Use `agency-senior-developer` or `codex` as executor.",
       "2. Route UI-heavy issues to a reviewer prompt that explicitly asks for impeccable-style critique.",
-      "3. Expose the resulting review through the Symphifony MCP prompts or as a follow-up review issue.",
+      "3. Expose the resulting review through the Fifony MCP prompts or as a follow-up review issue.",
       "",
       "Suggested labels:",
       "- frontend",

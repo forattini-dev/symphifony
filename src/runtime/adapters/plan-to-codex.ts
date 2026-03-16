@@ -97,6 +97,15 @@ export function compileForCodex(
     plan.validation.forEach((v) => sections.push(`- ${v}`));
   }
 
+  // Structured payload reference
+  sections.push(
+    "",
+    "## Structured Input",
+    "The file `fifony-execution-payload.json` in the workspace contains the canonical structured data for this task.",
+    "Use it as the source of truth for constraints, success criteria, execution intent, and plan details.",
+    "If there is any conflict between this prompt and the structured fields in the payload, prioritize the payload.",
+  );
+
   // Result contract (Codex doesn't have --json-schema)
   sections.push("", "## Output Format", "", CODEX_RESULT_CONTRACT);
 
@@ -105,25 +114,41 @@ export function compileForCodex(
   // ── Build command ────────────────────────────────────────────────────────
   const cmdParts = ["codex", "exec", "--skip-git-repo-check"];
 
-  // Codex doesn't support --reasoning-effort as a flag (effort is model selection)
-  // Add full-auto for medium+ complexity when executor role
-  if (provider.role === "executor" && (plan.estimatedComplexity === "medium" || plan.estimatedComplexity === "high")) {
-    // full-auto allows unrestricted workspace writes
+  // Inject --model from provider definition (set by WorkflowConfig)
+  if (provider.model && provider.model !== "codex") {
+    cmdParts.push(`--model ${provider.model}`);
   }
 
-  cmdParts.push("< \"$SYMPHIFONY_PROMPT_FILE\"");
+  // Inject --add-dir for relevant directories from the plan
+  if (plan.suggestedPaths?.length) {
+    const dirs = new Set<string>();
+    for (const p of plan.suggestedPaths) {
+      // Extract directory portion (e.g. "src/runtime/agent.ts" → "src/runtime")
+      const lastSlash = p.lastIndexOf("/");
+      if (lastSlash > 0) dirs.add(p.slice(0, lastSlash));
+      else if (!p.includes(".")) dirs.add(p); // bare directory name like "src"
+    }
+    for (const dir of dirs) {
+      cmdParts.push(`--add-dir ${dir}`);
+    }
+  }
+
+  cmdParts.push("< \"$FIFONY_PROMPT_FILE\"");
   const command = cmdParts.join(" ");
 
   // ── Env vars ─────────────────────────────────────────────────────────────
   const env: Record<string, string> = {
-    SYMPHIFONY_PLAN_COMPLEXITY: plan.estimatedComplexity,
-    SYMPHIFONY_PLAN_STEPS: String(plan.steps.length),
-    SYMPHIFONY_PLAN_PHASES: String(plan.phases?.length || 0),
+    FIFONY_PLAN_COMPLEXITY: plan.estimatedComplexity,
+    FIFONY_PLAN_STEPS: String(plan.steps.length),
+    FIFONY_PLAN_PHASES: String(plan.phases?.length || 0),
   };
-  if (plan.suggestedPaths?.length) env.SYMPHIFONY_PLAN_PATHS = plan.suggestedPaths.join(",");
+  if (plan.suggestedPaths?.length) env.FIFONY_PLAN_PATHS = plan.suggestedPaths.join(",");
 
   // ── Hooks ────────────────────────────────────────────────────────────────
   const { pre, post } = extractValidationCommands(plan);
+
+  // Point to payload file
+  env.FIFONY_EXECUTION_PAYLOAD_FILE = "fifony-execution-payload.json";
 
   return {
     prompt,
@@ -132,9 +157,11 @@ export function compileForCodex(
     preHooks: pre,
     postHooks: post,
     outputSchema: "",
+    payload: null, // Set by compileExecution() after adapter returns
     meta: {
       adapter: "codex",
       reasoningEffort: effort || "default",
+      model: provider.model || "default",
       skillsActivated: plan.toolingDecision?.skillsToUse?.map((s) => s.name) || [],
       subagentsRequested: [], // Codex doesn't have native subagents
       phasesCount: plan.phases?.length || 0,

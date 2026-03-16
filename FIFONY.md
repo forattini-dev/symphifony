@@ -1,6 +1,6 @@
-# Symphifony local runtime reference
+# Fifony local runtime reference
 
-This repository runs Symphifony as a pure TypeScript local orchestrator with no external tracker dependency.
+This repository runs Fifony as a pure TypeScript local orchestrator with no external tracker dependency.
 
 ## What this package provides
 
@@ -14,7 +14,7 @@ This repository runs Symphifony as a pure TypeScript local orchestrator with no 
 ## Relevant files
 
 - Workflow template: [WORKFLOW.md](./WORKFLOW.md)
-- Published entrypoint: [bin/symphifony.js](./bin/symphifony.js)
+- Published entrypoint: [bin/fifony.js](./bin/fifony.js)
 - CLI router: [src/cli.ts](./src/cli.ts)
 - Runtime engine: [src/runtime/run-local.ts](./src/runtime/run-local.ts)
 - Dashboard: [src/dashboard/index.html](./src/dashboard/index.html)
@@ -22,17 +22,17 @@ This repository runs Symphifony as a pure TypeScript local orchestrator with no 
 ## Environment variables
 
 ```bash
-export SYMPHIFONY_TRACKER_KIND=filesystem
-export SYMPHIFONY_WORKSPACE_ROOT=$PWD
-export SYMPHIFONY_PERSISTENCE=$PWD
-export SYMPHIFONY_AGENT_COMMAND='codex run --json "$SYMPHIFONY_ISSUE_JSON"'
-export SYMPHIFONY_AGENT_PROVIDER=codex
-export SYMPHIFONY_WORKER_CONCURRENCY=2
-export SYMPHIFONY_MAX_ATTEMPTS=3
-export SYMPHIFONY_AGENT_MAX_TURNS=4
+export FIFONY_TRACKER_KIND=filesystem
+export FIFONY_WORKSPACE_ROOT=$PWD
+export FIFONY_PERSISTENCE=$PWD
+export FIFONY_AGENT_COMMAND='codex run --json "$FIFONY_ISSUE_JSON"'
+export FIFONY_AGENT_PROVIDER=codex
+export FIFONY_WORKER_CONCURRENCY=2
+export FIFONY_MAX_ATTEMPTS=3
+export FIFONY_AGENT_MAX_TURNS=4
 ```
 
-`SYMPHIFONY_AGENT_COMMAND` is required unless `WORKFLOW.md` provides `codex.command` or `claude.command`.
+`FIFONY_AGENT_COMMAND` is required unless `WORKFLOW.md` provides `codex.command` or `claude.command`.
 
 Node requirement:
 
@@ -41,45 +41,45 @@ Node requirement:
 ## Start examples
 
 ```bash
-npx symphifony
+npx fifony
 ```
 
 Default state location:
 
 ```bash
-./.symphifony/
+./.fifony/
 ```
 
 Override the persistence root:
 
 ```bash
-npx symphifony --persistence /path/to/root
+npx fifony --persistence /path/to/root
 ```
 
 Run the MCP server:
 
 ```bash
-npx symphifony mcp
+npx fifony mcp
 ```
 
 Run a single cycle:
 
 ```bash
-npx symphifony --once
+npx fifony --once
 ```
 
 Run with the API and dashboard:
 
 ```bash
-npx symphifony --port 4040 --concurrency 2 --attempts 3
+npx fifony --port 4040 --concurrency 2 --attempts 3
 ```
 
 ## Runtime behavior
 
-- Local bootstrap creates a source snapshot under `./.symphifony/source`.
-- Workflow is rendered to `./.symphifony/WORKFLOW.local.md`.
-- Runtime state is stored under `./.symphifony/s3db/` by the `s3db.js` `FileSystemClient`.
-- Event log is stored in `./.symphifony/symphifony-local.log`.
+- Local bootstrap creates a source snapshot under `./.fifony/source`.
+- Workflow is rendered to `./.fifony/WORKFLOW.local.md`.
+- Runtime state is stored under `./.fifony/s3db/` by the `s3db.js` `FileSystemClient`.
+- Event log is stored in `./.fifony/fifony-local.log`.
 - `WORKFLOW.md` front matter and Markdown body define the execution contract when present.
 - `hooks.after_create` runs once for a new issue workspace; otherwise the runtime copies the local source snapshot.
 - `hooks.before_run` and `hooks.after_run` can wrap each agent turn.
@@ -91,55 +91,55 @@ npx symphifony --port 4040 --concurrency 2 --attempts 3
 - `routing.overrides[]` can override the automatic provider/profile selection for matching tasks.
 - `routing.overrides[].match.paths` can force routing based on target directories or files.
 - Issue payloads can carry `paths[]` so routing can use the real change surface, not only text and labels.
-- When `paths[]` is omitted, Symphifony infers routing hints from path-like text mentions and from files changed inside an existing persisted workspace.
-- Symphifony derives labels like `capability:<category>` and `overlay:<name>` from the routing result for queue triage and visibility.
-- The rendered prompt is written to `symphifony-prompt.md` and exported through `SYMPHIFONY_PROMPT` and `SYMPHIFONY_PROMPT_FILE`.
+- When `paths[]` is omitted, Fifony infers routing hints from path-like text mentions and from files changed inside an existing persisted workspace.
+- Fifony derives labels like `capability:<category>` and `overlay:<name>` from the routing result for queue triage and visibility.
+- The rendered prompt is written to `fifony-prompt.md` and exported through `FIFONY_PROMPT` and `FIFONY_PROMPT_FILE`.
 - Each issue runs as a multi-turn session controlled by `agent.max_turns`.
-- Each turn exports `SYMPHIFONY_AGENT_PROVIDER`, `SYMPHIFONY_AGENT_ROLE`, `SYMPHIFONY_AGENT_PROFILE`, `SYMPHIFONY_AGENT_PROFILE_FILE`, `SYMPHIFONY_AGENT_PROFILE_INSTRUCTIONS`, `SYMPHIFONY_SESSION_ID`, `SYMPHIFONY_SESSION_KEY`, `SYMPHIFONY_TURN_INDEX`, `SYMPHIFONY_MAX_TURNS`, `SYMPHIFONY_TURN_PROMPT`, `SYMPHIFONY_TURN_PROMPT_FILE`, `SYMPHIFONY_PREVIOUS_OUTPUT`, and `SYMPHIFONY_RESULT_FILE`.
-- The agent can continue, finish, block, or fail by printing `SYMPHIFONY_STATUS=...` or by writing `symphifony-result.json`.
+- Each turn exports `FIFONY_AGENT_PROVIDER`, `FIFONY_AGENT_ROLE`, `FIFONY_AGENT_PROFILE`, `FIFONY_AGENT_PROFILE_FILE`, `FIFONY_AGENT_PROFILE_INSTRUCTIONS`, `FIFONY_SESSION_ID`, `FIFONY_SESSION_KEY`, `FIFONY_TURN_INDEX`, `FIFONY_MAX_TURNS`, `FIFONY_TURN_PROMPT`, `FIFONY_TURN_PROMPT_FILE`, `FIFONY_PREVIOUS_OUTPUT`, and `FIFONY_RESULT_FILE`.
+- The agent can continue, finish, block, or fail by printing `FIFONY_STATUS=...` or by writing `fifony-result.json`.
 - Session and pipeline state are persisted in `s3db`.
 - Workspace JSON artifacts are temporary CLI handoff files, not the source of truth.
 - The `s3db` resources are partitioned for the main operational lookups (`state`, `capabilityCategory`, `issueId`, `kind`, `attempt`, `provider/role`).
 - The scheduler advances one turn per execution slot and resumes persisted `In Progress` work.
 - When issue priority ties, the scheduler prefers more critical capability categories first (`security`, `bugfix`, `backend`, `devops`, `frontend-ui`, `architecture`, `documentation`, `default`) unless `routing.priorities` overrides that order.
-- `npx symphifony mcp` keeps the scheduler alive even without the dashboard port.
-- `npx symphifony mcp` starts a stdio MCP server backed by the same durable `s3db` state as the runtime.
+- `npx fifony mcp` keeps the scheduler alive even without the dashboard port.
+- `npx fifony mcp` starts a stdio MCP server backed by the same durable `s3db` state as the runtime.
 - frontend-heavy tasks automatically carry stricter review overlays such as `impeccable` when matched by the capability resolver.
 
 ## MCP capabilities
 
 Resources:
 
-- `symphifony://guide/overview`
-- `symphifony://guide/runtime`
-- `symphifony://guide/integration`
-- `symphifony://state/summary`
-- `symphifony://issues`
-- `symphifony://workspace/workflow`
-- `symphifony://issue/<id>`
+- `fifony://guide/overview`
+- `fifony://guide/runtime`
+- `fifony://guide/integration`
+- `fifony://state/summary`
+- `fifony://issues`
+- `fifony://workspace/workflow`
+- `fifony://issue/<id>`
 
 Tools:
 
-- `symphifony.status`
-- `symphifony.list_issues`
-- `symphifony.create_issue`
-- `symphifony.update_issue_state`
-- `symphifony.integration_config`
+- `fifony.status`
+- `fifony.list_issues`
+- `fifony.create_issue`
+- `fifony.update_issue_state`
+- `fifony.integration_config`
 
 Prompts:
 
-- `symphifony-integrate-client`
-- `symphifony-plan-issue`
-- `symphifony-review-workflow`
+- `fifony-integrate-client`
+- `fifony-plan-issue`
+- `fifony-review-workflow`
 
 Recommended MCP client config:
 
 ```json
 {
   "mcpServers": {
-    "symphifony": {
+    "fifony": {
       "command": "npx",
-      "args": ["symphifony", "mcp", "--workspace", "/path/to/workspace", "--persistence", "/path/to/workspace"]
+      "args": ["fifony", "mcp", "--workspace", "/path/to/workspace", "--persistence", "/path/to/workspace"]
     }
   }
 }

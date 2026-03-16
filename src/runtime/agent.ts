@@ -27,6 +27,7 @@ import type {
   JsonRecord,
   RuntimeConfig,
   RuntimeState,
+  WorkflowConfig,
   WorkflowDefinition,
 } from "./types.ts";
 import {
@@ -68,6 +69,8 @@ import {
   resolveTaskCapabilities,
 } from "../routing/capability-resolver.ts";
 import { discoverSkills, buildSkillContext } from "./skills.ts";
+import { compileExecution, compileReview, persistCompilationArtifacts, buildExecutionAudit, persistExecutionAudit } from "./adapters/index.ts";
+import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
 
 function normalizeAgentDirectiveStatus(value: unknown, fallback: AgentDirectiveStatus): AgentDirectiveStatus {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -167,7 +170,7 @@ function tryParseJsonOutput(output: string): JsonRecord | null {
 
 function readAgentDirective(workspacePath: string, output: string, success: boolean): AgentDirective {
   const fallbackStatus: AgentDirectiveStatus = success ? "done" : "failed";
-  const resultFile = join(workspacePath, "symphifony-result.json");
+  const resultFile = join(workspacePath, "fifony-result.json");
   let resultPayload: JsonRecord = {};
 
   // 1. Try structured JSON from stdout (claude --output-format json --json-schema)
@@ -186,7 +189,7 @@ function readAgentDirective(workspacePath: string, output: string, success: bool
     };
   }
 
-  // 2. Try symphifony-result.json file
+  // 2. Try fifony-result.json file
   if (existsSync(resultFile)) {
     try {
       const parsed = JSON.parse(readFileSync(resultFile, "utf8")) as unknown;
@@ -194,19 +197,19 @@ function readAgentDirective(workspacePath: string, output: string, success: bool
         resultPayload = parsed as JsonRecord;
       }
     } catch (error) {
-      logger.warn(`Invalid symphifony-result.json in ${workspacePath}: ${String(error)}`);
+      logger.warn(`Invalid fifony-result.json in ${workspacePath}: ${String(error)}`);
     }
   }
 
   // 3. Fall back to file + output marker parsing
   const status = normalizeAgentDirectiveStatus(
-    resultPayload.status ?? extractOutputMarker(output, "SYMPHIFONY_STATUS"),
+    resultPayload.status ?? extractOutputMarker(output, "FIFONY_STATUS"),
     fallbackStatus,
   );
   const summary =
     toStringValue(resultPayload.summary)
     || toStringValue(resultPayload.message)
-    || extractOutputMarker(output, "SYMPHIFONY_SUMMARY");
+    || extractOutputMarker(output, "FIFONY_SUMMARY");
   const nextPrompt =
     toStringValue(resultPayload.nextPrompt)
     || toStringValue(resultPayload.next_prompt)
@@ -226,7 +229,7 @@ type AgentPidInfo = {
 
 /** Read PID file from workspace, returns null if missing/invalid. */
 export function readAgentPid(workspacePath: string): AgentPidInfo | null {
-  const pidFile = join(workspacePath, "symphifony-agent.pid");
+  const pidFile = join(workspacePath, "fifony-agent.pid");
   if (!existsSync(pidFile)) return null;
   try {
     const data = JSON.parse(readFileSync(pidFile, "utf8")) as AgentPidInfo;
@@ -261,7 +264,7 @@ export function cleanStalePidFile(workspacePath: string): void {
   const pidInfo = readAgentPid(workspacePath);
   if (!pidInfo) return;
   if (!isProcessAlive(pidInfo.pid)) {
-    try { rmSync(join(workspacePath, "symphifony-agent.pid"), { force: true }); } catch {}
+    try { rmSync(join(workspacePath, "fifony-agent.pid"), { force: true }); } catch {}
   }
 }
 
@@ -303,14 +306,14 @@ function issueDepsResolved(issue: IssueEntry, allIssues: IssueEntry[]): boolean 
 
 function shouldSkipRoutingPath(relativePath: string): boolean {
   const parts = relativePath.split("/");
-  if (parts.some((segment) => segment === ".git" || segment === "node_modules" || segment === ".symphifony")) {
+  if (parts.some((segment) => segment === ".git" || segment === "node_modules" || segment === ".fifony")) {
     return true;
   }
   const base = parts.at(-1) ?? "";
   return base === "WORKFLOW.local.md"
-    || base === ".symphifony-env.sh"
-    || base.startsWith("symphifony-")
-    || base.startsWith("symphifony_");
+    || base === ".fifony-env.sh"
+    || base.startsWith("fifony-")
+    || base.startsWith("fifony_");
 }
 
 function inferChangedWorkspacePaths(workspacePath: string, limit = 32): string[] {
@@ -366,8 +369,8 @@ export function computeDiffStats(issue: IssueEntry): void {
     const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
     const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
 
-    // Filter out symphifony internal files from the file count
-    const internalRe = /symphifony[-_]|\.symphifony-|WORKFLOW\.local/;
+    // Filter out fifony internal files from the file count
+    const internalRe = /fifony[-_]|\.fifony-|WORKFLOW\.local/;
     const fileLines = lines.slice(0, -1).filter((l) => {
       const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
       return !internalRe.test(name);
@@ -764,10 +767,10 @@ function buildTurnPrompt(
     "```",
     "",
     "Before exiting successfully, emit one of the following control markers:",
-    "- `SYMPHIFONY_STATUS=continue` if more turns are required.",
-    "- `SYMPHIFONY_STATUS=done` if the issue is complete.",
-    "- `SYMPHIFONY_STATUS=blocked` if manual intervention is required.",
-    'You may also write `symphifony-result.json` with `{ "status": "...", "summary": "...", "nextPrompt": "..." }`.',
+    "- `FIFONY_STATUS=continue` if more turns are required.",
+    "- `FIFONY_STATUS=done` if the issue is complete.",
+    "- `FIFONY_STATUS=blocked` if manual intervention is required.",
+    'You may also write `fifony-result.json` with `{ "status": "...", "summary": "...", "nextPrompt": "..." }`.',
   ].join("\n");
 }
 
@@ -788,8 +791,8 @@ function buildProviderBasePrompt(
       ? [
           "Role: reviewer.",
           "Inspect the workspace and review the current implementation critically.",
-          "If rework is required, emit `SYMPHIFONY_STATUS=continue` and provide actionable `nextPrompt` feedback.",
-          "Emit `SYMPHIFONY_STATUS=done` only when the work is acceptable.",
+          "If rework is required, emit `FIFONY_STATUS=continue` and provide actionable `nextPrompt` feedback.",
+          "Emit `FIFONY_STATUS=done` only when the work is acceptable.",
         ]
       : [
           "Role: executor.",
@@ -850,21 +853,21 @@ async function runCommandWithTimeout(
 ): Promise<{ success: boolean; code: number | null; output: string }> {
   return new Promise((resolve) => {
     const started = Date.now();
-    const resultFile = extraEnv.SYMPHIFONY_RESULT_FILE;
-    if (resultFile && extraEnv.SYMPHIFONY_PRESERVE_RESULT_FILE !== "1") {
+    const resultFile = extraEnv.FIFONY_RESULT_FILE;
+    if (resultFile && extraEnv.FIFONY_PRESERVE_RESULT_FILE !== "1") {
       rmSync(resultFile, { force: true });
     }
 
-    // Write all SYMPHIFONY_* vars to an env file and source it in the command.
+    // Write all FIFONY_* vars to an env file and source it in the command.
     // This avoids E2BIG: child inherits process.env naturally (no ...env spread),
     // and our custom vars are loaded from a file instead of argv/env.
     const allVars: Record<string, string> = {
-      SYMPHIFONY_ISSUE_ID: issue.id,
-      SYMPHIFONY_ISSUE_IDENTIFIER: issue.identifier,
-      SYMPHIFONY_ISSUE_TITLE: issue.title,
-      SYMPHIFONY_ISSUE_PRIORITY: String(issue.priority),
-      SYMPHIFONY_WORKSPACE_PATH: workspacePath,
-      SYMPHIFONY_PROMPT_FILE: promptFile,
+      FIFONY_ISSUE_ID: issue.id,
+      FIFONY_ISSUE_IDENTIFIER: issue.identifier,
+      FIFONY_ISSUE_TITLE: issue.title,
+      FIFONY_ISSUE_PRIORITY: String(issue.priority),
+      FIFONY_WORKSPACE_PATH: workspacePath,
+      FIFONY_PROMPT_FILE: promptFile,
     };
     for (const [key, value] of Object.entries(extraEnv)) {
       if (value.length > 4000) {
@@ -876,7 +879,7 @@ async function runCommandWithTimeout(
       }
     }
 
-    const envFilePath = join(workspacePath, ".symphifony-env.sh");
+    const envFilePath = join(workspacePath, ".fifony-env.sh");
     const envFileLines = Object.entries(allVars)
       .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
       .join("\n");
@@ -898,7 +901,7 @@ async function runCommandWithTimeout(
     }
 
     // Write PID file for recovery
-    const pidFile = join(workspacePath, "symphifony-agent.pid");
+    const pidFile = join(workspacePath, "fifony-agent.pid");
     const pid = child.pid;
     if (pid) {
       writeFileSync(pidFile, JSON.stringify({
@@ -912,7 +915,7 @@ async function runCommandWithTimeout(
     let output = "";
     let timedOut = false;
     let outputBytes = 0;
-    const liveLogFile = join(workspacePath, "symphifony-live-output.log");
+    const liveLogFile = join(workspacePath, "fifony-live-output.log");
     writeFileSync(liveLogFile, "", "utf8");
 
     const onChunk = (chunk: Buffer | string) => {
@@ -978,11 +981,11 @@ async function runHook(
     retryDelayMs: 0,
     staleInProgressTimeoutMs: 0,
     logLinesTail: 12_000,
-    agentProvider: normalizeAgentProvider(env.SYMPHIFONY_AGENT_PROVIDER ?? "codex"),
+    agentProvider: normalizeAgentProvider(env.FIFONY_AGENT_PROVIDER ?? "codex"),
     agentCommand: command,
     maxTurns: 1,
     runMode: "filesystem",
-  }, "", "", { SYMPHIFONY_HOOK_NAME: hookName, ...extraEnv });
+  }, "", "", { FIFONY_HOOK_NAME: hookName, ...extraEnv });
 
   if (!result.success) {
     throw new Error(`${hookName} hook failed: ${result.output}`);
@@ -1036,9 +1039,9 @@ async function prepareWorkspace(
     }
   }
 
-  const metaPath = join(workspaceRoot, "symphifony-issue.json");
+  const metaPath = join(workspaceRoot, "fifony-issue.json");
   const promptText = buildPrompt(issue, workflowDefinition);
-  const promptFile = join(workspaceRoot, "symphifony-prompt.md");
+  const promptFile = join(workspaceRoot, "fifony-prompt.md");
   writeFileSync(metaPath, JSON.stringify({ ...issue, runtimeSource: SOURCE_ROOT, bootstrapAt: now() }, null, 2), "utf8");
   writeFileSync(promptFile, `${promptText}\n`, "utf8");
 
@@ -1067,7 +1070,7 @@ async function runAgentSession(
   let nextPrompt = session.nextPrompt;
   let lastCode: number | null = session.lastCode;
   let lastOutput = session.lastOutput;
-  const resultFile = join(workspacePath, `symphifony-result-${provider.role}-${provider.provider}.json`);
+  const resultFile = join(workspacePath, `fifony-result-${provider.role}-${provider.provider}.json`);
 
   if (session.status === "done" && session.turns.length > 0) {
     return { success: true, blocked: false, continueRequested: false, code: session.lastCode, output: session.lastOutput, turns: session.turns.length };
@@ -1084,7 +1087,7 @@ async function runAgentSession(
   const turnPrompt = buildTurnPrompt(issue, basePromptText, previousOutput, turnIndex, maxTurns, nextPrompt);
   const turnPromptFile = turnIndex === 1
     ? basePromptFile
-    : join(workspacePath, `symphifony-turn-${String(turnIndex).padStart(2, "0")}.md`);
+    : join(workspacePath, `fifony-turn-${String(turnIndex).padStart(2, "0")}.md`);
 
   if (turnIndex > 1) writeFileSync(turnPromptFile, `${turnPrompt}\n`, "utf8");
 
@@ -1096,21 +1099,21 @@ async function runAgentSession(
 
   const turnStartedAt = now();
   const turnEnv = {
-    SYMPHIFONY_AGENT_PROVIDER: provider.provider,
-    SYMPHIFONY_AGENT_ROLE: provider.role,
-    SYMPHIFONY_REASONING_EFFORT: provider.reasoningEffort || "",
-    SYMPHIFONY_SESSION_KEY: sessionKey,
-    SYMPHIFONY_SESSION_ID: `${issue.id}-attempt-${attempt}`,
-    SYMPHIFONY_TURN_INDEX: String(turnIndex),
-    SYMPHIFONY_MAX_TURNS: String(maxTurns),
-    SYMPHIFONY_TURN_PROMPT: turnPrompt,
-    SYMPHIFONY_TURN_PROMPT_FILE: turnPromptFile,
-    SYMPHIFONY_CONTINUE: turnIndex > 1 ? "1" : "0",
-    SYMPHIFONY_PREVIOUS_OUTPUT: previousOutput,
-    SYMPHIFONY_RESULT_FILE: resultFile,
-    SYMPHIFONY_AGENT_PROFILE: provider.profile,
-    SYMPHIFONY_AGENT_PROFILE_FILE: provider.profilePath,
-    SYMPHIFONY_AGENT_PROFILE_INSTRUCTIONS: provider.profileInstructions,
+    FIFONY_AGENT_PROVIDER: provider.provider,
+    FIFONY_AGENT_ROLE: provider.role,
+    FIFONY_REASONING_EFFORT: provider.reasoningEffort || "",
+    FIFONY_SESSION_KEY: sessionKey,
+    FIFONY_SESSION_ID: `${issue.id}-attempt-${attempt}`,
+    FIFONY_TURN_INDEX: String(turnIndex),
+    FIFONY_MAX_TURNS: String(maxTurns),
+    FIFONY_TURN_PROMPT: turnPrompt,
+    FIFONY_TURN_PROMPT_FILE: turnPromptFile,
+    FIFONY_CONTINUE: turnIndex > 1 ? "1" : "0",
+    FIFONY_PREVIOUS_OUTPUT: previousOutput,
+    FIFONY_RESULT_FILE: resultFile,
+    FIFONY_AGENT_PROFILE: provider.profile,
+    FIFONY_AGENT_PROFILE_FILE: provider.profilePath,
+    FIFONY_AGENT_PROFILE_INSTRUCTIONS: provider.profileInstructions,
   };
 
   const workflowDefinition = state._workflowDefinition as WorkflowDefinition | null | undefined;
@@ -1125,9 +1128,9 @@ async function runAgentSession(
   if (workflowDefinition?.afterRunHook) {
     await runHook(workflowDefinition.afterRunHook, workspacePath, issue, "after_run", {
       ...turnEnv,
-      SYMPHIFONY_LAST_EXIT_CODE: String(turnResult.code ?? ""),
-      SYMPHIFONY_LAST_OUTPUT: turnResult.output,
-      SYMPHIFONY_PRESERVE_RESULT_FILE: "1",
+      FIFONY_LAST_EXIT_CODE: String(turnResult.code ?? ""),
+      FIFONY_LAST_OUTPUT: turnResult.output,
+      FIFONY_PRESERVE_RESULT_FILE: "1",
     });
   }
 
@@ -1196,8 +1199,9 @@ export async function runAgentPipeline(
   basePromptText: string,
   basePromptFile: string,
   workflowDefinition: WorkflowDefinition | null,
+  workflowConfig?: WorkflowConfig | null,
 ): Promise<AgentSessionResult> {
-  const providers = getEffectiveAgentProviders(state, issue, workflowDefinition);
+  const providers = getEffectiveAgentProviders(state, issue, workflowDefinition, workflowConfig);
   const attempt = issue.attempts + 1;
   const { pipeline, key: pipelineFile } = await loadAgentPipelineState(issue, attempt, providers);
   const activeProvider = providers[clamp(pipeline.activeIndex, 0, Math.max(0, providers.length - 1))];
@@ -1209,22 +1213,44 @@ export async function runAgentPipeline(
 
   // Write skills reference to workspace
   if (skillContext) {
-    writeFileSync(join(workspacePath, "symphifony-skills.md"), skillContext, "utf8");
+    writeFileSync(join(workspacePath, "fifony-skills.md"), skillContext, "utf8");
   }
 
-  const providerPrompt = buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext);
+  // Compile plan-aware execution if plan exists
+  const compiled = compileExecution(issue, activeProvider, state.config, workspacePath, skillContext);
 
-  if (!activeProvider.command.trim()) {
-    throw new Error(`No command configured for provider ${activeProvider.provider} (${activeProvider.role}).`);
+  let providerPrompt: string;
+  let effectiveProvider = activeProvider;
+
+  if (compiled) {
+    providerPrompt = compiled.prompt;
+    effectiveProvider = { ...activeProvider, command: compiled.command };
+    // Persist compilation artifacts for audit
+    persistCompilationArtifacts(workspacePath, compiled);
+    addEvent(state, issue.id, "info",
+      `Plan compiled for ${compiled.meta.adapter}: effort=${compiled.meta.reasoningEffort}, skills=[${compiled.meta.skillsActivated.join(",")}], subagents=[${compiled.meta.subagentsRequested.join(",")}].`);
+
+    // Merge compiled env into issue env file
+    if (Object.keys(compiled.env).length > 0) {
+      const envFile = join(workspacePath, ".fifony-compiled-env.sh");
+      const envLines = Object.entries(compiled.env).map(([k, v]) => `export ${k}=${JSON.stringify(v)}`).join("\n");
+      writeFileSync(envFile, envLines, "utf8");
+    }
+  } else {
+    providerPrompt = buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext);
   }
 
-  pipeline.history.push(`[${now()}] Running ${activeProvider.role}:${activeProvider.provider} in cycle ${pipeline.cycle}.`);
+  if (!effectiveProvider.command.trim()) {
+    throw new Error(`No command configured for provider ${effectiveProvider.provider} (${effectiveProvider.role}).`);
+  }
+
+  pipeline.history.push(`[${now()}] Running ${effectiveProvider.role}:${effectiveProvider.provider} in cycle ${pipeline.cycle}${compiled ? ` [${compiled.meta.adapter} adapter]` : ""}.`);
   await persistAgentPipelineState(pipelineFile, pipeline);
 
   // Attach workflowDefinition to state for session hooks
   (state as any)._workflowDefinition = workflowDefinition;
 
-  const result = await runAgentSession(state, issue, activeProvider, pipeline.cycle, workspacePath, providerPrompt, basePromptFile);
+  const result = await runAgentSession(state, issue, effectiveProvider, pipeline.cycle, workspacePath, providerPrompt, basePromptFile);
 
   if (result.success) {
     if (pipeline.activeIndex < providers.length - 1) {
@@ -1276,6 +1302,15 @@ export async function runIssueOnce(
   state.metrics.activeWorkers += 1;
   issue.startedAt = issue.startedAt ?? now();
 
+  // Load WorkflowConfig from settings (user's Settings → Workflow configuration)
+  let workflowConfig: WorkflowConfig | null = null;
+  try {
+    const settings = await loadRuntimeSettings();
+    workflowConfig = getWorkflowConfig(settings);
+  } catch {
+    // Fall through — use defaults
+  }
+
   if (isReview) {
     issue.updatedAt = now();
     issue.history.push(`[${issue.updatedAt}] Review stage started for ${issue.identifier}.`);
@@ -1308,7 +1343,7 @@ export async function runIssueOnce(
     const { workspacePath, promptText, promptFile } = await prepareWorkspace(issue, workflowDefinition);
     addEvent(state, issue.id, "info", `Workspace ready at ${workspacePath}.`);
 
-    const routedProviders = getEffectiveAgentProviders(state, issue, workflowDefinition);
+    const routedProviders = getEffectiveAgentProviders(state, issue, workflowDefinition, workflowConfig);
 
     if (isReview) {
       // ── Review stage: run only the reviewer provider ──────────────────
@@ -1322,31 +1357,37 @@ export async function runIssueOnce(
         return;
       }
 
-      addEvent(state, issue.id, "info", `Review provider: ${reviewer.role}:${reviewer.provider}${reviewer.profile ? `:${reviewer.profile}` : ""}.`);
+      addEvent(state, issue.id, "info", `Review provider: ${reviewer.role}:${reviewer.provider}${reviewer.model ? `/${reviewer.model}` : ""}${reviewer.profile ? `:${reviewer.profile}` : ""}.`);
 
-      const reviewPrompt = [
-        `Review the work done for ${issue.identifier}.`,
-        "",
-        "Title: " + issue.title,
-        "Description: " + (issue.description || "(none)"),
-        "",
-        `Workspace: ${workspacePath}`,
-        "",
-        "Inspect all changes in the workspace and determine if the issue is properly resolved.",
-        "If the work is acceptable, emit SYMPHIFONY_STATUS=done.",
-        "If rework is needed, emit SYMPHIFONY_STATUS=continue and provide actionable feedback in nextPrompt.",
-        "If the work is fundamentally broken, emit SYMPHIFONY_STATUS=blocked.",
-      ].join("\n");
+      // Get diff summary for the review prompt
+      let diffSummary = "";
+      try {
+        const diffResult = execSync(
+          `git diff --no-index --stat -- "${SOURCE_ROOT}" "${workspacePath}" 2>/dev/null`,
+          { encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+        );
+        diffSummary = diffResult.trim();
+      } catch (err: any) {
+        diffSummary = (err.stdout || "").trim();
+      }
 
-      const reviewPromptFile = join(workspacePath, "symphifony-review-prompt.md");
-      writeFileSync(reviewPromptFile, `${reviewPrompt}\n`, "utf8");
+      // Compile a rich review prompt with plan context, diff, and criteria
+      const compiled = compileReview(issue, reviewer, workspacePath, diffSummary);
+      const effectiveReviewer = { ...reviewer, command: compiled.command || reviewer.command };
+
+      const reviewPromptFile = join(workspacePath, "fifony-review-prompt.md");
+      writeFileSync(reviewPromptFile, `${compiled.prompt}\n`, "utf8");
 
       (state as any)._workflowDefinition = workflowDefinition;
-      const reviewResult = await runAgentSession(state, issue, reviewer, 1, workspacePath, reviewPrompt, reviewPromptFile);
+      const reviewResult = await runAgentSession(state, issue, effectiveReviewer, 1, workspacePath, compiled.prompt, reviewPromptFile);
 
       issue.durationMs = (issue.durationMs ?? 0) + (Date.now() - startTs);
       issue.commandExitCode = reviewResult.code;
       issue.commandOutputTail = reviewResult.output;
+
+      // Persist review audit
+      const reviewAudit = buildExecutionAudit(effectiveReviewer, null, issue, Date.now() - startTs, reviewResult.success ? "approved" : reviewResult.continueRequested ? "rework" : "rejected");
+      persistExecutionAudit(workspacePath, reviewAudit);
 
       if (reviewResult.success) {
         await transitionIssueState(issue, "Done", `Reviewer approved ${issue.identifier} in ${reviewResult.turns} turn(s).`);
@@ -1377,14 +1418,14 @@ export async function runIssueOnce(
 
     // ── Normal execution (Todo / In Progress / Blocked) ───────────────
     addEvent(state, issue.id, "info",
-      `Capability routing selected ${routedProviders.map((p) => `${p.role}:${p.provider}${p.profile ? `:${p.profile}` : ""}${p.reasoningEffort ? ` [${p.reasoningEffort}]` : ""}`).join(", ")}.`);
+      `Capability routing selected ${routedProviders.map((p) => `${p.role}:${p.provider}${p.model ? `/${p.model}` : ""}${p.profile ? `:${p.profile}` : ""}${p.reasoningEffort ? ` [${p.reasoningEffort}]` : ""}`).join(", ")}.`);
 
     const routingSignals = describeRoutingSignals(issue, workspaceDerivedPaths);
     if (routingSignals) {
       addEvent(state, issue.id, "info", `Capability routing signals: ${routingSignals}.`);
     }
 
-    const runResult = await runAgentPipeline(state, issue, workspacePath, promptText, promptFile, workflowDefinition);
+    const runResult = await runAgentPipeline(state, issue, workspacePath, promptText, promptFile, workflowDefinition, workflowConfig);
 
     issue.durationMs = Date.now() - startTs;
     issue.commandExitCode = runResult.code;
@@ -1396,6 +1437,14 @@ export async function runIssueOnce(
       if (issue.filesChanged) {
         addEvent(state, issue.id, "info", `Diff: ${issue.filesChanged} files, +${issue.linesAdded || 0} -${issue.linesRemoved || 0} lines.`);
       }
+
+      // Persist execution audit
+      const executor = routedProviders.find((p) => p.role === "executor") || routedProviders[0];
+      if (executor && workspacePath) {
+        const audit = buildExecutionAudit(executor, null, issue, Date.now() - startTs, "success");
+        persistExecutionAudit(workspacePath, audit);
+      }
+
       // Move to In Review — the reviewer will run as a separate scheduler pick
       await transitionIssueState(issue, "In Review", `Agent execution finished in ${runResult.turns} turn(s) for ${issue.identifier}. Awaiting review.`);
       issue.lastError = undefined;

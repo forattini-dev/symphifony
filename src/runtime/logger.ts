@@ -2,8 +2,8 @@ import pino from "pino";
 import { env, stdout } from "node:process";
 import { join } from "node:path";
 
-const level = env.SYMPHIFONY_LOG_LEVEL ?? "info";
-const pretty = env.SYMPHIFONY_LOG_PRETTY === "1" || (env.SYMPHIFONY_LOG_PRETTY !== "0" && stdout.isTTY);
+const level = env.FIFONY_LOG_LEVEL ?? "info";
+const pretty = env.FIFONY_LOG_PRETTY === "1" || (env.FIFONY_LOG_PRETTY !== "0" && stdout.isTTY);
 
 // Propagate pretty preference to s3db.js internal logger
 // so its pino output matches ours (must be set before s3db loads)
@@ -46,14 +46,14 @@ let _logger: pino.Logger | null = null;
 let _logPath: string | undefined;
 
 export function initLogger(stateRoot?: string): pino.Logger {
-  _logPath = stateRoot ? join(stateRoot, "symphifony-local.log") : undefined;
-  _logger = pino({ name: "symphifony", level }, createTransports(_logPath));
+  _logPath = stateRoot ? join(stateRoot, "fifony-local.log") : undefined;
+  _logger = pino({ name: "fifony", level }, createTransports(_logPath));
   return _logger;
 }
 
 export function getLogger(): pino.Logger {
   if (!_logger) {
-    _logger = pino({ name: "symphifony", level }, createTransports());
+    _logger = pino({ name: "fifony", level }, createTransports());
   }
   return _logger;
 }

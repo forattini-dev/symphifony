@@ -1,5 +1,5 @@
-const CORE_CACHE = "symphifony-core-v2";
-const ASSET_CACHE = "symphifony-assets-v2";
+const CORE_CACHE = "fifony-core-v2";
+const ASSET_CACHE = "fifony-assets-v2";
 const APP_SHELL_ROUTES = ["/kanban", "/issues", "/agents", "/providers", "/settings"];
 const APP_SHELL_FILES = ["/offline.html", "/manifest.webmanifest", "/icon.svg", "/icon-maskable.svg"];
 const API_PREFIXES = ["/api/", "/docs", "/ws"];

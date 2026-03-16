@@ -164,12 +164,12 @@ export function getNestedNumber(source: unknown, key: string, fallback: number):
 }
 
 export function appendLog(logPath: string, entry: string): void {
-  appendFileSync(logPath, `${now()} [symphifony-local-ts] ${entry}\n`, "utf8");
+  appendFileSync(logPath, `${now()} [fifony-local-ts] ${entry}\n`, "utf8");
 }
 
 export function debugBoot(message: string): void {
   if (!DEBUG_BOOT) return;
-  console.error(`[SYMPHIFONY_DEBUG_BOOT] ${message}`);
+  console.error(`[FIFONY_DEBUG_BOOT] ${message}`);
 }
 
 export function fail(message: string): never {

@@ -56,13 +56,13 @@ type S3dbModule = {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const WORKSPACE_ROOT = env.SYMPHIFONY_WORKSPACE_ROOT ?? process.cwd();
-const PERSISTENCE_ROOT = env.SYMPHIFONY_PERSISTENCE ?? WORKSPACE_ROOT;
+const WORKSPACE_ROOT = env.FIFONY_WORKSPACE_ROOT ?? process.cwd();
+const PERSISTENCE_ROOT = env.FIFONY_PERSISTENCE ?? WORKSPACE_ROOT;
 const STATE_ROOT = resolvePersistenceRoot(PERSISTENCE_ROOT);
 const DATABASE_PATH = join(STATE_ROOT, "s3db");
-const STORAGE_BUCKET = env.SYMPHIFONY_STORAGE_BUCKET ?? "symphifony";
-const STORAGE_KEY_PREFIX = env.SYMPHIFONY_STORAGE_KEY_PREFIX ?? "state";
-const DEBUG_BOOT = env.SYMPHIFONY_DEBUG_BOOT === "1";
+const STORAGE_BUCKET = env.FIFONY_STORAGE_BUCKET ?? "fifony";
+const STORAGE_KEY_PREFIX = env.FIFONY_STORAGE_KEY_PREFIX ?? "state";
+const DEBUG_BOOT = env.FIFONY_DEBUG_BOOT === "1";
 
 function resolvePersistenceRoot(value: string): string {
   const resolved = value.startsWith("file://")
@@ -71,7 +71,7 @@ function resolvePersistenceRoot(value: string): string {
       ? resolve(homedir(), value.slice(2))
       : resolve(value);
 
-  return basename(resolved) === ".symphifony" ? resolved : join(resolved, ".symphifony");
+  return basename(resolved) === ".fifony" ? resolved : join(resolved, ".fifony");
 }
 
 export const RUNTIME_RESOURCE = "runtime_state";
@@ -103,7 +103,7 @@ export function getDatabase(): S3dbDatabase | null {
 
 function debugBoot(message: string): void {
   if (!DEBUG_BOOT) return;
-  process.stderr.write(`[SYMPHIFONY_DEBUG_BOOT] ${message}\n`);
+  process.stderr.write(`[FIFONY_DEBUG_BOOT] ${message}\n`);
 }
 
 export function nowIso(): string {

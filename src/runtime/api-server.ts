@@ -55,10 +55,13 @@ import { enhanceIssueField } from "./issue-enhancer.ts";
 import { generatePlan, loadPlanningSession, savePlanningInput, clearPlanningSession } from "./issue-planner.ts";
 import {
   applyPersistedSettings,
+  buildDefaultWorkflowConfig,
+  getWorkflowConfig,
   inferSettingScope,
   loadRuntimeSettings,
   persistSetting,
   persistWorkerConcurrencySetting,
+  persistWorkflowConfig,
   RUNTIME_CONFIG_SETTING_IDS,
 } from "./settings.ts";
 import { scanProjectFiles, analyzeProjectWithCli } from "./project-scanner.ts";
@@ -237,7 +240,7 @@ export async function startApiServer(
   for (const item of existingResources || []) {
     if (
       typeof item?.name === "string" &&
-      item.name.startsWith("symphifony_") &&
+      item.name.startsWith("fifony_") &&
       !nativeResourceNames.has(item.name)
     ) {
       resourceConfigs[item.name] = { enabled: false };
@@ -329,7 +332,7 @@ export async function startApiServer(
       pwa: false,
       config: { etag: true },
     }],
-    docs: { enabled: true, title: "Symphifony API", version: "1.0.0", description: "Local orchestration API for Symphifony" },
+    docs: { enabled: true, title: "Fifony API", version: "1.0.0", description: "Local orchestration API for Fifony" },
     cors: { enabled: true, origin: "*" },
     security: { enabled: false },
     logging: { enabled: true, excludePaths: ["/health", "/status", "/**/*.js", "/**/*.css", "/**/*.svg"] },
@@ -355,6 +358,7 @@ export async function startApiServer(
       "GET /settings": () => serveAppShell(),
       "GET /settings/general": () => serveAppShell(),
       "GET /settings/notifications": () => serveAppShell(),
+      "GET /settings/workflow": () => serveAppShell(),
       "GET /settings/providers": () => serveAppShell(),
       "GET /api/state": async (c: any) => {
         const showAll = c.req.query("all") === "1";
@@ -461,6 +465,27 @@ export async function startApiServer(
         await persistWorkerConcurrencySetting(state.config.workerConcurrency);
         await persistState(state);
         return c.json({ ok: true, workerConcurrency: state.config.workerConcurrency });
+      },
+      "GET /api/config/workflow": async (c: any) => {
+        const settings = await loadRuntimeSettings();
+        const saved = getWorkflowConfig(settings);
+        const providers = detectAvailableProviders();
+        const defaultConfig = buildDefaultWorkflowConfig(providers);
+        return c.json({ ok: true, workflow: saved || defaultConfig, isDefault: !saved, providers });
+      },
+      "POST /api/config/workflow": async (c: any) => {
+        try {
+          const payload = await c.req.json() as JsonRecord;
+          const workflow = payload.workflow as any;
+          if (!workflow?.plan?.provider || !workflow?.execute?.provider || !workflow?.review?.provider) {
+            return c.json({ ok: false, error: "Invalid workflow config. Each stage needs provider, model, and effort." }, 400);
+          }
+          await persistWorkflowConfig(workflow);
+          addEvent(state, undefined, "manual", `Workflow config updated: plan=${workflow.plan.provider}/${workflow.plan.model}, execute=${workflow.execute.provider}/${workflow.execute.model}, review=${workflow.review.provider}/${workflow.review.model}.`);
+          return c.json({ ok: true, workflow });
+        } catch (error) {
+          return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
       },
       "GET /api/planning/session": async (c: any) => {
         const session = await loadPlanningSession();
@@ -637,7 +662,7 @@ export async function startApiServer(
           const elapsed = startedAtTs ? Date.now() - startedAtTs : 0;
 
           const wp = issue.workspacePath;
-          const liveLog = wp ? `${wp}/symphifony-live-output.log` : null;
+          const liveLog = wp ? `${wp}/fifony-live-output.log` : null;
           let logTail = "";
           let logSize = 0;
           if (liveLog && existsSync(liveLog)) {
@@ -710,7 +735,7 @@ export async function startApiServer(
             .replace(new RegExp(esc(sourcePrefix), "g"), "a/");
 
           // Split into per-file chunks and filter internals
-          const internalRe = /^(symphifony[-_]|\.symphifony-|WORKFLOW\.local)/;
+          const internalRe = /^(fifony[-_]|\.fifony-|WORKFLOW\.local)/;
           const chunks = cleaned.split(/(?=^diff --git )/m);
           const filtered = chunks.filter((chunk) => {
             const m = chunk.match(/^diff --git a\/(.+?) b\//);

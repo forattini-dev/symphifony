@@ -2,11 +2,13 @@ import type {
   DetectedProvider,
   EffortConfig,
   JsonRecord,
+  PipelineStageConfig,
   ReasoningEffort,
   RuntimeConfig,
   RuntimeSettingRecord,
   RuntimeSettingScope,
   RuntimeSettingSource,
+  WorkflowConfig,
 } from "./types.ts";
 import { clamp, now } from "./helpers.ts";
 import { loadPersistedSettings, replacePersistedSetting } from "./store.ts";
@@ -27,6 +29,7 @@ export const SETTING_ID_DEFAULT_EFFORT = "runtime.defaultEffort";
 export const SETTING_ID_DETECTED_PROVIDERS = "providers.detected";
 export const SETTING_ID_UI_THEME = "ui.theme";
 export const SETTING_ID_UI_NOTIFICATIONS_ENABLED = "ui.notifications.enabled";
+export const SETTING_ID_WORKFLOW_CONFIG = "runtime.workflowConfig";
 
 export async function loadRuntimeSettings(): Promise<RuntimeSettingRecord[]> {
   return loadPersistedSettings();
@@ -302,4 +305,54 @@ export async function syncRuntimeConfigSettings(
       });
     }),
   );
+}
+
+// ── Workflow Config (pipeline stage configuration) ────────────────────────
+
+function isValidStage(v: unknown): v is PipelineStageConfig {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  return typeof s.provider === "string" && typeof s.model === "string" && typeof s.effort === "string";
+}
+
+/** Build a default workflow config from detected providers */
+export function buildDefaultWorkflowConfig(detectedProviders: DetectedProvider[]): WorkflowConfig {
+  const available = detectedProviders.filter((p) => p.available);
+  const hasClaude = available.some((p) => p.name === "claude");
+  const hasCodex = available.some((p) => p.name === "codex");
+
+  const claudeDefault: PipelineStageConfig = { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" };
+  const codexDefault: PipelineStageConfig = { provider: "codex", model: "codex", effort: "medium" };
+
+  // Default: claude for plan+review (better reasoning), codex for execute (better code)
+  if (hasClaude && hasCodex) {
+    return {
+      plan: { provider: "claude", model: "claude-sonnet-4-6", effort: "high" },
+      execute: { provider: "codex", model: "codex", effort: "medium" },
+      review: { provider: "claude", model: "claude-sonnet-4-6", effort: "medium" },
+    };
+  }
+  if (hasClaude) {
+    return { plan: { ...claudeDefault, effort: "high" }, execute: claudeDefault, review: claudeDefault };
+  }
+  if (hasCodex) {
+    return { plan: { ...codexDefault, effort: "high" }, execute: codexDefault, review: codexDefault };
+  }
+  return { plan: claudeDefault, execute: codexDefault, review: claudeDefault };
+}
+
+/** Load workflow config from settings */
+export function getWorkflowConfig(settings: RuntimeSettingRecord[]): WorkflowConfig | null {
+  const setting = settings.find((s) => s.id === SETTING_ID_WORKFLOW_CONFIG);
+  if (!setting?.value || typeof setting.value !== "object") return null;
+  const wf = setting.value as Record<string, unknown>;
+  if (isValidStage(wf.plan) && isValidStage(wf.execute) && isValidStage(wf.review)) {
+    return wf as unknown as WorkflowConfig;
+  }
+  return null;
+}
+
+/** Persist workflow config */
+export async function persistWorkflowConfig(config: WorkflowConfig): Promise<void> {
+  await persistSetting(SETTING_ID_WORKFLOW_CONFIG, config, { scope: "runtime", source: "user" });
 }

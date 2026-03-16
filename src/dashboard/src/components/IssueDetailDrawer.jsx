@@ -439,7 +439,7 @@ function DiffTab({ issueId }) {
 
 // ── Tab: Routing ────────────────────────────────────────────────────────────
 
-const INTERNAL_PATH_RE = /^(\.symphifony|symphifony[-_]|WORKFLOW\.local)/;
+const INTERNAL_PATH_RE = /^(\.fifony|fifony[-_]|WORKFLOW\.local)/;
 function filterPaths(arr) {
   return (Array.isArray(arr) ? arr : []).filter((p) => !INTERNAL_PATH_RE.test(p));
 }

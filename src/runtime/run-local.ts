@@ -43,7 +43,7 @@ function usage() {
 async function main() {
   debugBoot("main:start");
   if (TRACKER_KIND !== "filesystem") {
-    logger.warn(`Detected SYMPHIFONY_TRACKER_KIND=${TRACKER_KIND}; forcing local filesystem tracker mode for this fork.`);
+    logger.warn(`Detected FIFONY_TRACKER_KIND=${TRACKER_KIND}; forcing local filesystem tracker mode for this fork.`);
   }
 
   const args = CLI_ARGS;
@@ -61,7 +61,7 @@ async function main() {
     logger.info(`Provider ${p.name}: ${p.available ? `available at ${p.path}` : "not found"}`);
   }
 
-  const interfaceMode = (env.SYMPHIFONY_INTERFACE ?? "cli").trim().toLowerCase();
+  const interfaceMode = (env.FIFONY_INTERFACE ?? "cli").trim().toLowerCase();
   const runOnce = args.includes("--once");
   const devMode = args.includes("--dev") || env.NODE_ENV === "development";
 
@@ -116,8 +116,8 @@ async function main() {
     const available = detectedProviders.filter((p) => p.available).map((p) => p.name);
     fail(
       available.length === 0
-        ? "No agent command configured and no providers (claude, codex) found in PATH.\nInstall claude or codex, or set SYMPHIFONY_AGENT_COMMAND / configure codex.command or claude.command in WORKFLOW.md."
-        : "No agent command configured. Set SYMPHIFONY_AGENT_COMMAND or configure codex.command / claude.command in WORKFLOW.md.",
+        ? "No agent command configured and no providers (claude, codex) found in PATH.\nInstall claude or codex, or set FIFONY_AGENT_COMMAND / configure codex.command or claude.command in WORKFLOW.md."
+        : "No agent command configured. Set FIFONY_AGENT_COMMAND or configure codex.command / claude.command in WORKFLOW.md.",
     );
   }
 

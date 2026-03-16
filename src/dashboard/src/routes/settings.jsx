@@ -1,8 +1,9 @@
 import { createFileRoute, Outlet, Link, useRouterState } from "@tanstack/react-router";
-import { Palette, Cpu, Bell } from "lucide-react";
+import { Palette, Cpu, Bell, GitBranch } from "lucide-react";
 
 const TABS = [
   { to: "/settings/general", label: "General", icon: Palette },
+  { to: "/settings/workflow", label: "Workflow", icon: GitBranch },
   { to: "/settings/notifications", label: "Notifications", icon: Bell },
   { to: "/settings/providers", label: "Providers", icon: Cpu },
 ];

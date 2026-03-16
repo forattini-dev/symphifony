@@ -203,23 +203,23 @@ async function runProviderCommand(
   field: EnhancementField,
   timeoutMs: number,
 ): Promise<string> {
-  const tempDir = mkdtempSync(join(tmpdir(), "symphifony-enhance-"));
-  const promptFile = join(tempDir, "symphifony-enhance-prompt.md");
-  const issuePayloadFile = join(tempDir, "symphifony-issue.json");
-  const resultFile = join(tempDir, "symphifony-result.txt");
-  const envFile = join(tempDir, "symphifony-enhance-env.sh");
+  const tempDir = mkdtempSync(join(tmpdir(), "fifony-enhance-"));
+  const promptFile = join(tempDir, "fifony-enhance-prompt.md");
+  const issuePayloadFile = join(tempDir, "fifony-issue.json");
+  const resultFile = join(tempDir, "fifony-result.txt");
+  const envFile = join(tempDir, "fifony-enhance-env.sh");
   writeFileSync(promptFile, `${prompt}\n`, "utf8");
   writeFileSync(issuePayloadFile, JSON.stringify({ title, description, field }, null, 2), "utf8");
 
   const envLines = [
-    `export SYMPHIFONY_ISSUE_TITLE=${JSON.stringify(title)}`,
-    `export SYMPHIFONY_ISSUE_DESCRIPTION=${JSON.stringify(description)}`,
-    `export SYMPHIFONY_ENHANCE_FIELD=${JSON.stringify(field)}`,
-    "export SYMPHIFONY_PROMPT_FILE=" + JSON.stringify(promptFile),
-    "export SYMPHIFONY_PROMPT=" + JSON.stringify(prompt),
-    "export SYMPHIFONY_ISSUE_JSON=" + JSON.stringify(issuePayloadFile),
-    "export SYMPHIFONY_AGENT_PROVIDER=" + JSON.stringify(provider),
-    "export SYMPHIFONY_RESULT_FILE=" + JSON.stringify(resultFile),
+    `export FIFONY_ISSUE_TITLE=${JSON.stringify(title)}`,
+    `export FIFONY_ISSUE_DESCRIPTION=${JSON.stringify(description)}`,
+    `export FIFONY_ENHANCE_FIELD=${JSON.stringify(field)}`,
+    "export FIFONY_PROMPT_FILE=" + JSON.stringify(promptFile),
+    "export FIFONY_PROMPT=" + JSON.stringify(prompt),
+    "export FIFONY_ISSUE_JSON=" + JSON.stringify(issuePayloadFile),
+    "export FIFONY_AGENT_PROVIDER=" + JSON.stringify(provider),
+    "export FIFONY_RESULT_FILE=" + JSON.stringify(resultFile),
   ];
 
   const processEnv = Object.entries(env)

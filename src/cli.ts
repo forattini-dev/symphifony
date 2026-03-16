@@ -121,7 +121,7 @@ function buildRuntimeArgs(result: CommandParseResult): string[] {
 
 async function runRuntime(mode: "cli" | "mcp", result: CommandParseResult): Promise<void> {
   const workspace = getStringOption(result, "workspace");
-  const workspaceRoot = resolve(workspace ?? env.SYMPHIFONY_WORKSPACE_ROOT ?? cwd());
+  const workspaceRoot = resolve(workspace ?? env.FIFONY_WORKSPACE_ROOT ?? cwd());
   const runtimeArgs = buildRuntimeArgs(result);
 
   const outcome = await new Promise<{ code?: number | null; signal?: NodeJS.Signals | null }>((resolvePromise, rejectPromise) => {
@@ -131,8 +131,8 @@ async function runRuntime(mode: "cli" | "mcp", result: CommandParseResult): Prom
       stdio: "inherit",
       env: {
         ...env,
-        SYMPHIFONY_INTERFACE: mode,
-        SYMPHIFONY_WORKSPACE_ROOT: workspaceRoot,
+        FIFONY_INTERFACE: mode,
+        FIFONY_WORKSPACE_ROOT: workspaceRoot,
       },
     });
 
@@ -158,8 +158,8 @@ async function runRuntime(mode: "cli" | "mcp", result: CommandParseResult): Prom
 async function runMcpServer(result: CommandParseResult): Promise<void> {
   const workspace = getStringOption(result, "workspace");
   const persistence = getStringOption(result, "persistence");
-  const workspaceRoot = resolve(workspace ?? env.SYMPHIFONY_WORKSPACE_ROOT ?? cwd());
-  const persistenceRoot = resolve(persistence ?? env.SYMPHIFONY_PERSISTENCE ?? workspaceRoot);
+  const workspaceRoot = resolve(workspace ?? env.FIFONY_WORKSPACE_ROOT ?? cwd());
+  const persistenceRoot = resolve(persistence ?? env.FIFONY_PERSISTENCE ?? workspaceRoot);
 
   const outcome = await new Promise<{ code?: number | null; signal?: NodeJS.Signals | null }>((resolvePromise, rejectPromise) => {
     const mcpArgs = useCompiled ? [mcpScript] : [tsxCli!, mcpScript];
@@ -168,8 +168,8 @@ async function runMcpServer(result: CommandParseResult): Promise<void> {
       stdio: "inherit",
       env: {
         ...env,
-        SYMPHIFONY_WORKSPACE_ROOT: workspaceRoot,
-        SYMPHIFONY_PERSISTENCE: persistenceRoot,
+        FIFONY_WORKSPACE_ROOT: workspaceRoot,
+        FIFONY_PERSISTENCE: persistenceRoot,
       },
     });
 
@@ -193,17 +193,17 @@ async function runMcpServer(result: CommandParseResult): Promise<void> {
 }
 
 const cli = createCLI({
-  name: packageJson.name ?? "symphifony",
+  name: packageJson.name ?? "fifony",
   version: packageJson.version ?? "0.0.0",
   description: packageJson.description ?? "Filesystem-backed local multi-agent orchestrator.",
   commands: {
     run: {
-      description: "Run the local Symphifony runtime with the dashboard/API enabled when --port is provided.",
+      description: "Run the local Fifony runtime with the dashboard/API enabled when --port is provided.",
       options: commonOptions,
       handler: (result) => runRuntime("cli", result),
     },
     mcp: {
-      description: "Run a Symphifony MCP server over stdio with resources, tools, and prompts backed by the local durable store.",
+      description: "Run a Fifony MCP server over stdio with resources, tools, and prompts backed by the local durable store.",
       options: commonOptions,
       handler: (result) => runMcpServer(result),
     },
@@ -230,6 +230,6 @@ function normalizeArgs(rawArgs: string[]): string[] {
 const args = normalizeArgs(process.argv.slice(2));
 
 cli.run(args).catch((error) => {
-  console.error(`Failed to start symphifony CLI: ${String(error)}`);
+  console.error(`Failed to start fifony CLI: ${String(error)}`);
   exit(1);
 });

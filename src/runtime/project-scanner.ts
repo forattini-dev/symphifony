@@ -307,8 +307,8 @@ export async function analyzeProjectWithCli(
     return buildFallbackAnalysis(targetRoot);
   }
 
-  const tempDir = mkdtempSync(join(tmpdir(), "symphifony-scan-"));
-  const promptFile = join(tempDir, "symphifony-scan-prompt.txt");
+  const tempDir = mkdtempSync(join(tmpdir(), "fifony-scan-"));
+  const promptFile = join(tempDir, "fifony-scan-prompt.txt");
   writeFileSync(promptFile, ANALYSIS_PROMPT, "utf8");
 
   // Build environment with prompt file path
@@ -316,7 +316,7 @@ export async function analyzeProjectWithCli(
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === "string") processEnv[key] = value;
   }
-  processEnv.SYMPHIFONY_PROMPT_FILE = promptFile;
+  processEnv.FIFONY_PROMPT_FILE = promptFile;
 
   try {
     const output = await new Promise<string>((resolve, reject) => {

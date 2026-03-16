@@ -1,24 +1,14 @@
 <div align="center">
 
-# 🎻 Symphifony
+# 🎻 Fifony
 
 ### AI agents that actually ship code. You just watch.
 
-Point at a repo. Open the dashboard. Claude plans, Codex builds, Claude reviews.
-<br>
-Mixed-agent pipelines with durable state. Zero config to start.
-<br>
+Point at a repo. Open the dashboard. AI plans, builds, and reviews — you approve.
+
 One command. Full orchestra.
 
-**Local-first runtime. Browser dashboard. MCP server. All batteries included.**
-
-[![npm version](https://img.shields.io/npm/v/symphifony.svg?style=flat-square&color=8b5cf6)](https://www.npmjs.com/package/symphifony)
-[![npm downloads](https://img.shields.io/npm/dm/symphifony.svg?style=flat-square&color=34C759)](https://www.npmjs.com/package/symphifony)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-23+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/npm/l/symphifony.svg?style=flat-square&color=007AFF)](LICENSE)
-
-[🚀 Quick Start](#quick-start) · [🎯 Highlights](#highlights) · [🖥️ Dashboard](#dashboard) · [🔌 MCP](#mcp-server) · [📖 API Docs](#api-docs)
+> Local-first runtime. Browser dashboard. MCP server. All batteries included.
 
 </div>
 
@@ -27,101 +17,40 @@ One command. Full orchestra.
 ## Quick Start
 
 ```bash
-npx -y symphifony --port 4040
+npx -y fifony --port 4040
 ```
 
-Done. Open `http://localhost:4040` — you have a full dashboard.
-<br>
-Open `http://localhost:4040/docs` — you have interactive API docs.
+Done. Open **http://localhost:4040** — you have a full dashboard.
 
-Current directory = workspace. State lives in `.symphifony/`. No setup, no config, no accounts.
+Current directory = workspace. State lives in `.fifony/`. No setup, no config, no accounts.
 
 ---
 
-## Highlights
+## How It Works
 
-### 🎭 Mixed-Agent Pipelines
+### 1. Create an Issue
+Open the dashboard, click "+", type what you want done. The issue starts in **Planning**.
 
-The whole point: **chain different AI providers in a single pipeline**.
+### 2. AI Plans It
+Click "Generate Plan" — an AI analyzes your codebase and creates a structured execution plan with steps, risks, file paths, complexity estimate, and tooling decisions.
 
-```yaml
-# WORKFLOW.md
-agent:
-  providers:
-    - provider: claude
-      role: planner
-    - provider: codex
-      role: executor
-    - provider: claude
-      role: reviewer
+### 3. You Approve
+Review the plan. Approve it → the issue moves to **Todo** and agents pick it up automatically.
+
+### 4. Agents Execute
+The configured executor agent (Claude or Codex) implements the changes in an isolated workspace. You can watch live output in the Agents tab.
+
+### 5. Automated Review
+A reviewer agent inspects the diff and either approves (→ Done), requests rework (→ back to execution), or blocks for human intervention.
+
+### 6. You Ship
+Review the diff in the dashboard, merge the changes.
+
 ```
-
-Claude thinks. Codex builds. Claude reviews. Each agent gets a hydrated profile, structured handoff, and full session context. Retries are automatic.
-
-### 🧠 Smart Routing
-
-Symphifony reads your issue's labels, file paths, and description to automatically pick the best providers and agent profiles.
-
-```yaml
-routing:
-  priorities:
-    security: 0
-    bugfix: 1
-    frontend: 2
-  overrides:
-    - match:
-        labels: ["frontend", "design"]
-        paths: ["src/dashboard"]
-      providers:
-        - provider: claude
-          role: planner
-          profile: agency-ui-designer
-        - provider: codex
-          role: executor
-          profile: agency-frontend-developer
-        - provider: claude
-          role: reviewer
-          profile: agency-accessibility-auditor
+Planning → Todo → Queued → Running → In Review → Done
+    ↑                                      ↓
+    └──── Blocked ←── Rework ──────────────┘
 ```
-
-Frontend issue? Gets routed to design-savvy agents. Security bug? Jumps the queue.
-
-### ⚡ Create Issues From Anywhere
-
-Dashboard, curl, or MCP — your choice:
-
-```bash
-curl -X POST http://localhost:4040/issues/create \
-  -H 'content-type: application/json' \
-  -d '{
-    "title": "Harden websocket reconnect flow",
-    "labels": ["backend", "protocol"],
-    "paths": ["src/protocol/session.ts"]
-  }'
-```
-
-### 🔮 Project Scanner
-
-Symphifony can scan your codebase and auto-generate issues based on TODOs, tech debt, missing tests, and improvement opportunities:
-
-```bash
-curl http://localhost:4040/scan
-```
-
----
-
-## What's Inside
-
-| Category | What you get |
-|:---------|:-------------|
-| **Runtime** | Issue scheduler with retries, concurrency control, graceful shutdown, durable `s3db.js` state |
-| **Agents** | Runs `claude` and `codex` with profile hydration, multi-turn sessions, structured results |
-| **Routing** | Label + path + overlay matching, priority queues, capability-aware provider selection |
-| **Dashboard** | Kanban board, issue detail, event timeline, session inspector, runtime health, provider stats |
-| **API** | Full REST + WebSocket surface with auto-generated OpenAPI docs via `s3db.js` ApiPlugin |
-| **MCP** | 6 tools + 7 resources + 3 prompts for Claude Code, Cursor, Windsurf, or any MCP client |
-| **Scanner** | Codebase analysis and automatic issue generation |
-| **Settings** | Runtime configuration, provider management, notification preferences |
 
 ---
 
@@ -129,109 +58,75 @@ curl http://localhost:4040/scan
 
 Start with `--port` and get a full browser UI:
 
-```bash
-npx -y symphifony --port 4040
-```
+| Page | What you see |
+|------|-------------|
+| **Kanban** | Issues flowing through the pipeline. Stats bar with token usage sparkline. |
+| **Issues** | Searchable grid with engineering metrics: cycle time, lead time, tokens, cost, diff stats. |
+| **Agents** | Live cockpit: active worker slots with real-time output, queue, recently completed. |
+| **Settings** | Workflow config (provider + model + effort per stage), theme, notifications, providers. |
 
-**What you see:**
+### Workflow Configuration
 
-- **Kanban board** — issues flowing through `open → queued → running → review → done`
-- **Issue detail** — full pipeline view, session history, agent output, event timeline
-- **Runtime view** — scheduler state, worker count, uptime, provider availability
-- **Stats bar** — issue counts by state, capability breakdown, agent session metrics
-- **Settings** — provider config, notification preferences, runtime tuning
-- **PWA** — install it, works offline, push notifications
+In **Settings → Workflow**, configure what runs at each pipeline stage:
+
+| Stage | Default | What it does |
+|-------|---------|-------------|
+| **Plan** | Claude Sonnet (high effort) | Generates structured execution plan |
+| **Execute** | Codex (medium effort) | Implements the code changes |
+| **Review** | Claude Sonnet (medium effort) | Reviews the diff and decides pass/rework |
+
+Each stage lets you pick: **provider** (Claude or Codex), **model**, and **reasoning effort** (low → extra-high).
+
+### PWA
+
+Install it as a desktop app. Works offline. Desktop notifications when issues change state.
 
 ---
 
 ## MCP Server
 
-Turn Symphifony into tools for your editor:
+Turn Fifony into tools for your editor:
 
 ```bash
-npx -y symphifony mcp
+npx -y fifony mcp
 ```
 
 ```json
 {
   "mcpServers": {
-    "symphifony": {
+    "fifony": {
       "command": "npx",
-      "args": ["-y", "symphifony", "mcp", "--workspace", "/path/to/repo"]
+      "args": ["-y", "fifony", "mcp", "--workspace", "/path/to/repo"]
     }
   }
 }
 ```
 
-**Tools:** `symphifony.status` `symphifony.list_issues` `symphifony.create_issue` `symphifony.update_issue_state` `symphifony.integration_config` `symphifony.resolve_capabilities`
-
-**Resources:** `symphifony://guide/overview` `symphifony://state/summary` `symphifony://issues` `symphifony://issue/<id>` `symphifony://workspace/workflow`
-
-**Prompts:** `symphifony-integrate-client` `symphifony-plan-issue` `symphifony-review-workflow`
-
 Create issues, check status, review workflows — all without leaving the editor.
 
 ---
 
-## API Docs
+## API
 
-The API documentation at `/docs` is **auto-generated** from the `s3db.js` `ApiPlugin` resource definitions. It's always in sync with the actual routes and schemas. No hand-maintained OpenAPI spec to go stale.
+Full REST + WebSocket API with auto-generated OpenAPI docs:
 
-```bash
-npx -y symphifony --port 4040
-open http://localhost:4040/docs
+```
+http://localhost:4040/docs
 ```
 
-Native `s3db` resources powering the API:
+Key endpoints:
 
-| Resource | Partitions |
-|:---------|:-----------|
-| `issues` | `byState` · `byCapabilityCategory` · `byStateAndCapability` |
-| `events` | `byIssueId` · `byKind` · `byIssueIdAndKind` |
-| `agent_sessions` | `byIssueId` · `byIssueAttempt` · `byProviderRole` |
-| `agent_pipelines` | `byIssueId` · `byIssueAttempt` |
-| `runtime_state` | singleton runtime snapshot |
-
----
-
-## WORKFLOW.md
-
-Drop one file in your repo and Symphifony knows exactly how to run:
-
-```yaml
----
-agent:
-  providers:
-    - provider: claude
-      role: planner
-    - provider: codex
-      role: executor
-    - provider: claude
-      role: reviewer
-  max_concurrent_agents: 2
-  max_attempts: 3
-  max_turns: 4
-
-routing:
-  priorities:
-    security: 0
-    bugfix: 1
-    backend: 2
-
-server:
-  port: 4040
-
-hooks:
-  after_create: "./scripts/notify.sh"
----
-
-You are an expert engineer working on this codebase.
-Follow the existing patterns and write tests for everything.
-```
-
-The YAML frontmatter configures the runtime. The Markdown body becomes the system prompt for every agent, available via `SYMPHIFONY_PROMPT`.
-
-No `WORKFLOW.md`? No problem — Symphifony auto-detects providers and uses sensible defaults.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/state` | Full runtime state with issues, metrics, config |
+| `POST /api/issues/create` | Create a new issue |
+| `POST /api/issues/:id/plan` | Generate AI plan for an issue |
+| `POST /api/issues/:id/approve` | Approve plan and start execution |
+| `GET /api/live/:id` | Live agent output (PID, log tail, elapsed) |
+| `GET /api/diff/:id` | Git diff of workspace changes |
+| `GET /api/config/workflow` | Get/set pipeline workflow config |
+| `GET /api/analytics/tokens` | Token usage analytics |
+| `/ws` | WebSocket for real-time state updates |
 
 ---
 
@@ -239,23 +134,42 @@ No `WORKFLOW.md`? No problem — Symphifony auto-detects providers and uses sens
 
 ```bash
 # Full experience — dashboard + API + scheduler
-npx -y symphifony --port 4040
+npx -y fifony --port 4040
+
+# Dev mode — Vite HMR on port+1
+npx -y fifony --port 4040 --dev
 
 # Headless — just the scheduler, no UI
-npx -y symphifony
+npx -y fifony
 
 # MCP server — stdio for editor integration
-npx -y symphifony mcp
+npx -y fifony mcp
 
-# Custom state directory
-npx -y symphifony --persistence /path/to/state
-
-# Dev mode — hot reload, verbose logging
-npx -y symphifony --port 4040 --dev
+# Custom workspace
+npx -y fifony --workspace /path/to/repo --port 4040
 ```
+
+---
+
+## Architecture
+
+```
+.fifony/           ← all state lives here (gitignore it)
+  s3db/                ← durable database (issues, events, sessions, settings)
+  source/              ← snapshot of your codebase
+  workspaces/          ← one per issue (isolated agent workspace)
+```
+
+**Persistence**: [s3db.js](https://github.com/forattini-dev/s3db.js) with FileSystemClient. Issues, events, settings, agent sessions — all persisted and recoverable.
+
+**State Machine**: `Planning → Todo → Queued → Running → Interrupted → In Review → Blocked → Done → Cancelled`
+
+**Agent Protection**: Detached child processes survive server restarts. PID tracking for recovery. Graceful shutdown marks running issues as Interrupted.
+
+**Token Analytics**: EventualConsistency plugin tracks token usage per model with daily/weekly rollups.
 
 ---
 
 ## License
 
-MIT © [Forattini](https://github.com/filipeforattini)
+MIT

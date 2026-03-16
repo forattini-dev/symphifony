@@ -79,7 +79,7 @@ export function Header({ issueCount, sourceRepo, updatedAt, onToggleEvents, even
   return (
     <div className="navbar bg-base-100 shadow-sm px-4">
       <div className="flex-1 gap-2">
-        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight">Symphifony</Link>
+        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight">Fifony</Link>
         <span className="text-xs opacity-40 hidden lg:inline">{sourceRepo || "local workspace"}</span>
       </div>
 

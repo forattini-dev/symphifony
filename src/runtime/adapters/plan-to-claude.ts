@@ -87,6 +87,15 @@ export function compileForClaude(
     `Description: ${issue.description || "(none)"}`,
   );
 
+  // Structured payload reference
+  sections.push(
+    "",
+    "## Structured Input",
+    "The file `fifony-execution-payload.json` in the workspace contains the canonical structured data for this task.",
+    "Use it as the source of truth for constraints, success criteria, execution intent, and plan details.",
+    "If there is any conflict between this prompt and the structured fields in the payload, prioritize the payload.",
+  );
+
   // Enforcement
   if (plan.validation?.length) {
     sections.push("", "## Pre-completion enforcement");
@@ -107,22 +116,27 @@ export function compileForClaude(
   ];
 
   if (claudeEffort) cmdParts.splice(2, 0, `--reasoning-effort ${claudeEffort}`);
-  cmdParts.push("< \"$SYMPHIFONY_PROMPT_FILE\"");
+  // Inject --model from provider definition (set by WorkflowConfig)
+  if (provider.model) cmdParts.splice(2, 0, `--model ${provider.model}`);
+  cmdParts.push("< \"$FIFONY_PROMPT_FILE\"");
 
   const command = cmdParts.join(" ");
 
   // ── Env vars ─────────────────────────────────────────────────────────────
   const env: Record<string, string> = {
-    SYMPHIFONY_PLAN_COMPLEXITY: plan.estimatedComplexity,
-    SYMPHIFONY_PLAN_STEPS: String(plan.steps.length),
+    FIFONY_PLAN_COMPLEXITY: plan.estimatedComplexity,
+    FIFONY_PLAN_STEPS: String(plan.steps.length),
   };
-  if (plan.suggestedPaths?.length) env.SYMPHIFONY_PLAN_PATHS = plan.suggestedPaths.join(",");
+  if (plan.suggestedPaths?.length) env.FIFONY_PLAN_PATHS = plan.suggestedPaths.join(",");
   if (plan.toolingDecision?.skillsToUse?.length) {
-    env.SYMPHIFONY_PLAN_SKILLS = plan.toolingDecision.skillsToUse.map((s) => s.name).join(",");
+    env.FIFONY_PLAN_SKILLS = plan.toolingDecision.skillsToUse.map((s) => s.name).join(",");
   }
 
   // ── Hooks ────────────────────────────────────────────────────────────────
   const { pre, post } = extractValidationCommands(plan);
+
+  // Point to payload file
+  env.FIFONY_EXECUTION_PAYLOAD_FILE = "fifony-execution-payload.json";
 
   return {
     prompt,
@@ -131,9 +145,11 @@ export function compileForClaude(
     preHooks: pre,
     postHooks: post,
     outputSchema: CLAUDE_RESULT_SCHEMA,
+    payload: null, // Set by compileExecution() after adapter returns
     meta: {
       adapter: "claude",
       reasoningEffort: claudeEffort || "default",
+      model: provider.model || "default",
       skillsActivated: plan.toolingDecision?.skillsToUse?.map((s) => s.name) || [],
       subagentsRequested: plan.toolingDecision?.subagentsToUse?.map((a) => a.name) || [],
       phasesCount: plan.phases?.length || 0,

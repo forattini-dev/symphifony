@@ -7,7 +7,7 @@ import { cwd, env, exit, argv } from "node:process";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const packageRoot = resolve(__dirname, "..");
-const workspaceRoot = env.SYMPHIFONY_WORKSPACE_ROOT ?? cwd();
+const workspaceRoot = env.FIFONY_WORKSPACE_ROOT ?? cwd();
 
 const distCli = resolve(packageRoot, "dist", "cli.js");
 const srcCli = resolve(packageRoot, "src", "cli.ts");
@@ -16,9 +16,9 @@ const useCompiled = !forceSource && existsSync(distCli);
 
 if (useCompiled) {
   // Production: run compiled JS directly
-  process.env.SYMPHIFONY_WORKSPACE_ROOT = workspaceRoot;
+  process.env.FIFONY_WORKSPACE_ROOT = workspaceRoot;
   import(distCli).catch((error) => {
-    console.error(`Failed to start symphifony: ${String(error)}`);
+    console.error(`Failed to start fifony: ${String(error)}`);
     exit(1);
   });
 } else {
@@ -39,7 +39,7 @@ if (useCompiled) {
   const child = spawn(execPath, [tsxCli, srcCli, ...argv.slice(2)], {
     cwd: workspaceRoot,
     stdio: "inherit",
-    env: { ...env, SYMPHIFONY_WORKSPACE_ROOT: workspaceRoot },
+    env: { ...env, FIFONY_WORKSPACE_ROOT: workspaceRoot },
   });
 
   child.on("exit", (code, signal) => {
@@ -48,7 +48,7 @@ if (useCompiled) {
   });
 
   child.on("error", (error) => {
-    console.error(`Failed to start symphifony CLI: ${String(error)}`);
+    console.error(`Failed to start fifony CLI: ${String(error)}`);
     exit(1);
   });
 }

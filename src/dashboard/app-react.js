@@ -167,7 +167,7 @@ function useParallelism(enabledPoll) { return useQuery({ queryKey: ["parallelism
 function Header({ status, wsStatus, theme, onThemeChange, issueCount, sourceRepo, updatedAt }) {
   return h("div", { className: "navbar bg-base-200 rounded-box mb-4 px-4 gap-2" }, [
     h("div", { className: "flex-1" }, [
-      h("span", { className: "text-lg font-bold" }, "Symphifony"),
+      h("span", { className: "text-lg font-bold" }, "Fifony"),
       h("span", { className: "text-xs opacity-60 ml-2 hidden sm:inline" }, sourceRepo || "local"),
     ]),
     h("div", { className: "flex items-center gap-2 flex-wrap" }, [
@@ -529,7 +529,7 @@ function Filters({ query, setQuery, stateFilter, setStateFilter, categoryFilter,
 }
 
 function AppShell() {
-  const [theme, setTheme] = useState(() => normalizeTheme(localStorage.getItem("symphifony-theme") || "auto"));
+  const [theme, setTheme] = useState(() => normalizeTheme(localStorage.getItem("fifony-theme") || "auto"));
   const [view, setViewState] = useState(() => readViewFromLocation());
   const [issueView, setIssueViewState] = useState(() => readIssueLayoutFromLocation());
   const [stateFilter, setStateFilter] = useState("all");
@@ -582,7 +582,7 @@ function AppShell() {
   const refreshMut = useMutation({ mutationFn: () => api.post("/refresh", {}), onSuccess: () => qc.invalidateQueries(), onError: (e) => showToast(e.message) });
   const saveConcMut = useMutation({ mutationFn: () => api.post("/config/concurrency", { concurrency: parseInt(concurrency, 10) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["runtime-state"] }); showToast("Updated"); }, onError: (e) => showToast(e.message) });
 
-  useEffect(() => { document.documentElement.setAttribute("data-theme", resolveTheme(theme)); localStorage.setItem("symphifony-theme", theme); }, [theme]);
+  useEffect(() => { document.documentElement.setAttribute("data-theme", resolveTheme(theme)); localStorage.setItem("fifony-theme", theme); }, [theme]);
   useEffect(() => { const fn = () => { if (theme === "auto") setTheme("auto"); }; SYSTEM_THEME_QUERY.addEventListener?.("change", fn); return () => SYSTEM_THEME_QUERY.removeEventListener?.("change", fn); }, [theme]);
   useEffect(() => { navigator?.serviceWorker?.register?.("/service-worker.js").catch(() => {}); }, []);
   useEffect(() => { if (data.config?.workerConcurrency) setConcurrency(String(data.config.workerConcurrency)); }, [data.config?.workerConcurrency]);

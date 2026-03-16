@@ -19,7 +19,7 @@ function sendNotification(title, body, tag) {
   try {
     new Notification(title, {
       body,
-      tag: `symphifony-${tag}`,
+      tag: `fifony-${tag}`,
       icon: "/icon.svg",
       badge: "/icon.svg",
       silent: false,

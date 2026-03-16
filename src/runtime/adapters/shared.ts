@@ -1,4 +1,4 @@
-import type { IssuePlan, IssuePlanStep, EffortConfig, AgentProviderRole } from "../types.ts";
+import type { IssuePlan, IssuePlanStep, IssueEntry, AgentProviderDefinition, EffortConfig, AgentProviderRole } from "../types.ts";
 
 /** Render plan context (summary, assumptions, constraints, unknowns) */
 export function buildPlanContextSection(plan: IssuePlan): string {
@@ -168,4 +168,191 @@ export function extractValidationCommands(plan: IssuePlan): { pre: string[]; pos
 
   // Deduplicate
   return { pre: [...new Set(pre)], post: [...new Set(post)] };
+}
+
+// ── Execution Payload ─────────────────────────────────────────────────────────
+
+/**
+ * Canonical structured input for CLI execution.
+ * This is the single source of truth that the prompt references.
+ * The prompt provides the markdown frame (instructions, role, strategy);
+ * the payload carries the structured data (plan, constraints, criteria).
+ */
+export type ExecutionPayload = {
+  /** Schema version for forward compat */
+  version: 1;
+
+  /** Issue identity */
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    description: string;
+    priority: number;
+    labels: string[];
+    paths: string[];
+  };
+
+  /** Provider context */
+  provider: {
+    name: string;
+    role: AgentProviderRole;
+    model: string;
+    effort: string;
+    capabilityCategory: string;
+    overlays: string[];
+  };
+
+  /** Execution intent — what to do and how */
+  executionIntent: {
+    complexity: string;
+    approach: string;
+    rationale: string;
+    workPattern: "sequential" | "phased" | "parallel_subtasks";
+  };
+
+  /** Structured plan data */
+  plan: {
+    summary: string;
+    steps: Array<{
+      step: number;
+      action: string;
+      files: string[];
+      ownerType: string;
+      doneWhen: string;
+    }>;
+    phases: Array<{
+      name: string;
+      goal: string;
+      tasks: number[];
+      dependencies: string[];
+      outputs: string[];
+    }>;
+  };
+
+  /** Constraints the agent must respect */
+  constraints: string[];
+
+  /** Success criteria — each must be met for "done" */
+  successCriteria: string[];
+
+  /** Validation commands to run before reporting done */
+  validation: string[];
+
+  /** Expected deliverables */
+  deliverables: string[];
+
+  /** Assumptions the plan is built on */
+  assumptions: string[];
+
+  /** Unknowns that may need resolution */
+  unknowns: Array<{ question: string; whyItMatters: string; howToResolve: string }>;
+
+  /** Risks with impact and mitigation */
+  risks: Array<{ risk: string; impact: string; mitigation: string }>;
+
+  /** Tooling decisions */
+  tooling: {
+    skills: Array<{ name: string; why: string }>;
+    subagents: Array<{ name: string; role: string; why: string }>;
+  };
+
+  /** Target paths for focused changes */
+  targetPaths: string[];
+
+  /** Workspace location */
+  workspacePath: string;
+
+  /** Timestamp */
+  createdAt: string;
+};
+
+/**
+ * Build the canonical execution payload from issue + plan + provider context.
+ */
+export function buildExecutionPayload(
+  issue: IssueEntry,
+  provider: AgentProviderDefinition,
+  plan: IssuePlan,
+  workspacePath: string,
+): ExecutionPayload {
+  const strategy = plan.executionStrategy;
+  const hasPhases = Boolean(plan.phases?.length);
+
+  return {
+    version: 1,
+
+    issue: {
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      description: issue.description || "",
+      priority: issue.priority,
+      labels: issue.labels || [],
+      paths: issue.paths || [],
+    },
+
+    provider: {
+      name: provider.provider,
+      role: provider.role,
+      model: provider.model || "default",
+      effort: provider.reasoningEffort || "medium",
+      capabilityCategory: provider.capabilityCategory || "",
+      overlays: provider.overlays || [],
+    },
+
+    executionIntent: {
+      complexity: plan.estimatedComplexity,
+      approach: strategy?.approach || "",
+      rationale: strategy?.whyThisApproach || "",
+      workPattern: hasPhases
+        ? "phased"
+        : plan.toolingDecision?.shouldUseSubagents
+          ? "parallel_subtasks"
+          : "sequential",
+    },
+
+    plan: {
+      summary: plan.summary,
+      steps: plan.steps.map((s) => ({
+        step: s.step,
+        action: s.action,
+        files: s.files || [],
+        ownerType: s.ownerType || "agent",
+        doneWhen: s.doneWhen || "",
+      })),
+      phases: (plan.phases || []).map((p) => ({
+        name: p.phaseName,
+        goal: p.goal,
+        tasks: p.tasks.map((t) => t.step),
+        dependencies: p.dependencies || [],
+        outputs: p.outputs || [],
+      })),
+    },
+
+    constraints: plan.constraints || [],
+    successCriteria: plan.successCriteria || [],
+    validation: plan.validation || [],
+    deliverables: plan.deliverables || [],
+    assumptions: plan.assumptions || [],
+    unknowns: (plan.unknowns || []).map((u) => ({
+      question: u.question,
+      whyItMatters: u.whyItMatters || "",
+      howToResolve: u.howToResolve || "",
+    })),
+    risks: (plan.risks || []).map((r) => ({
+      risk: r.risk,
+      impact: r.impact || "",
+      mitigation: r.mitigation || "",
+    })),
+
+    tooling: {
+      skills: plan.toolingDecision?.skillsToUse || [],
+      subagents: plan.toolingDecision?.subagentsToUse || [],
+    },
+
+    targetPaths: plan.suggestedPaths || [],
+    workspacePath,
+    createdAt: new Date().toISOString(),
+  };
 }

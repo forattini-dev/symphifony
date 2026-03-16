@@ -24,11 +24,16 @@ const EFFORT_OPTIONS = [
   { value: "high", label: "High", icon: Brain, description: "Thorough -- deeper analysis, takes more time", color: "text-warning" },
   { value: "extra-high", label: "Extra High", icon: Flame, description: "Maximum depth -- most thorough, slowest", color: "text-error" },
 ];
-const ROLE_EFFORT_OPTIONS = {
-  planner: EFFORT_OPTIONS.filter((option) => option.value !== "extra-high"),
-  executor: EFFORT_OPTIONS,
-  reviewer: EFFORT_OPTIONS.filter((option) => option.value !== "extra-high"),
+// Effort availability depends on the CLI: codex supports extra-high, claude does not
+const PROVIDER_EFFORT_SUPPORT = {
+  codex: EFFORT_OPTIONS,
+  claude: EFFORT_OPTIONS.filter((option) => option.value !== "extra-high"),
 };
+
+function getEffortOptionsForRole(role, pipeline) {
+  const provider = pipeline?.[role] || "claude";
+  return PROVIDER_EFFORT_SUPPORT[provider] || EFFORT_OPTIONS;
+}
 
 const DOMAIN_GROUPS = [
   {
@@ -104,7 +109,7 @@ function normalizeRoleEfforts(value) {
 // ── Step indicator ──────────────────────────────────────────────────────────
 
 const STEPPER_LABELS = [
-  "Providers", "Scan", "Domains", "Agents",
+  "Pipeline", "Scan", "Domains", "Agents",
   "Effort", "Workers & Theme", "Launch",
 ];
 
@@ -151,7 +156,7 @@ function WelcomeStep({ workspacePath }) {
         <Music className="size-16 sm:size-20 text-primary mx-auto" />
       </div>
       <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-        Welcome to <span className="text-primary">Symphifony</span>
+        Welcome to <span className="text-primary">Fifony</span>
       </h1>
       <p className="text-base-content/60 text-lg max-w-md">
         Let's set up your AI orchestration workspace in just a few steps.
@@ -166,67 +171,112 @@ function WelcomeStep({ workspacePath }) {
   );
 }
 
-// ── Step 2: Detect Providers ────────────────────────────────────────────────
+// ── Step 1: Pipeline ─────────────────────────────────────────────────────────
 
-function ProvidersStep({ providers, providersLoading, selectedProvider, setSelectedProvider }) {
+const PIPELINE_ROLES = [
+  {
+    role: "planner",
+    label: "Planner",
+    description: "Scopes the issue, breaks it into steps, and decides the approach",
+    icon: Brain,
+    color: "text-info",
+  },
+  {
+    role: "executor",
+    label: "Executor",
+    description: "Implements the plan — writes code, edits files, runs commands",
+    icon: Zap,
+    color: "text-primary",
+  },
+  {
+    role: "reviewer",
+    label: "Reviewer",
+    description: "Validates the result — checks correctness, scope, and quality",
+    icon: Search,
+    color: "text-secondary",
+  },
+];
+
+function PipelineStep({ providers, providersLoading, pipeline, setPipeline }) {
   const providerList = Array.isArray(providers) ? providers : [];
+  const availableProviders = providerList.filter((p) => p.available !== false);
 
   return (
     <div className="flex flex-col gap-6 stagger-children">
       <div className="text-center">
-        <Search className="size-10 text-primary mx-auto mb-3" />
-        <h2 className="text-2xl font-bold">Detect Providers</h2>
-        <p className="text-base-content/60 mt-1">Select which AI provider to use as default</p>
+        <Rocket className="size-10 text-primary mx-auto mb-3" />
+        <h2 className="text-2xl font-bold">Agent Pipeline</h2>
+        <p className="text-base-content/60 mt-1">Choose which CLI runs each stage of the pipeline</p>
       </div>
 
       {providersLoading ? (
         <div className="flex flex-col items-center gap-3 py-8">
           <Loader2 className="size-8 text-primary animate-spin" />
-          <p className="text-sm text-base-content/50">Scanning for available providers...</p>
+          <p className="text-sm text-base-content/50">Detecting available CLIs...</p>
+        </div>
+      ) : availableProviders.length === 0 ? (
+        <div className="alert alert-warning text-sm">
+          No providers detected. Make sure claude or codex CLI is installed.
         </div>
       ) : (
-        <div className="grid gap-3">
-          {providerList.length === 0 && (
-            <div className="alert alert-warning text-sm">
-              No providers detected. Make sure claude or codex CLI is installed.
-            </div>
-          )}
-          {providerList.map((prov) => {
-            const name = prov.id || prov.name || prov;
-            const available = prov.available !== false;
-            const isSelected = selectedProvider === name;
-            return (
-              <button
-                key={name}
-                className={`card card-interactive bg-base-200 cursor-pointer transition-all ${
-                  isSelected ? "ring-2 ring-primary ring-offset-2 ring-offset-base-100" : ""
-                } ${!available ? "opacity-50" : ""}`}
-                onClick={() => available && setSelectedProvider(name)}
-                disabled={!available}
-              >
-                <div className="card-body p-4 flex-row items-center gap-4">
-                  <div className={`size-10 rounded-full flex items-center justify-center text-lg font-bold ${
-                    isSelected ? "bg-primary text-primary-content" : "bg-base-300"
-                  }`}>
-                    {name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="font-semibold capitalize">{name}</div>
-                    {prov.path && <div className="text-xs text-base-content/50 font-mono">{prov.path}</div>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {available ? (
-                      <span className="badge badge-sm badge-success gap-1"><CircleCheck className="size-3" /> Available</span>
-                    ) : (
-                      <span className="badge badge-sm badge-error gap-1"><CircleX className="size-3" /> Not found</span>
-                    )}
-                    {isSelected && <Check className="size-5 text-primary" />}
+        <>
+          {/* Provider status */}
+          <div className="flex flex-wrap gap-2 justify-center">
+            {providerList.map((prov) => {
+              const name = prov.id || prov.name || prov;
+              const available = prov.available !== false;
+              return (
+                <span key={name} className={`badge badge-lg gap-2 ${available ? "badge-success" : "badge-ghost opacity-50"}`}>
+                  {available ? <CircleCheck className="size-3.5" /> : <CircleX className="size-3.5" />}
+                  {name}
+                  {prov.path && <span className="font-mono text-[10px] opacity-60 hidden sm:inline">{prov.path}</span>}
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Pipeline flow */}
+          <div className="flex flex-col items-center gap-2">
+            {PIPELINE_ROLES.map((r, i) => {
+              const Icon = r.icon;
+              const selected = pipeline[r.role] || availableProviders[0]?.name || "";
+              return (
+                <div key={r.role} className="w-full">
+                  {i > 0 && (
+                    <div className="flex justify-center py-1">
+                      <ChevronRight className="size-5 rotate-90 opacity-30" />
+                    </div>
+                  )}
+                  <div className="card bg-base-200">
+                    <div className="card-body p-4 flex-row items-center gap-4">
+                      <div className={`size-10 rounded-full flex items-center justify-center bg-base-300 ${r.color}`}>
+                        <Icon className="size-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold">{r.label}</div>
+                        <p className="text-xs text-base-content/50">{r.description}</p>
+                      </div>
+                      <select
+                        className="select select-bordered select-sm w-32"
+                        value={selected}
+                        onChange={(e) => setPipeline((prev) => ({ ...prev, [r.role]: e.target.value }))}
+                      >
+                        {availableProviders.map((p) => {
+                          const name = p.id || p.name || p;
+                          return <option key={name} value={name}>{name}</option>;
+                        })}
+                      </select>
+                    </div>
                   </div>
                 </div>
-              </button>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+
+          <p className="text-xs text-base-content/40 text-center max-w-md mx-auto">
+            Each stage can use a different CLI. The pipeline flows top to bottom: plan, then execute, then review.
+          </p>
+        </>
       )}
     </div>
   );
@@ -665,13 +715,18 @@ function AgentsSkillsStep({
 
 // ── Step 5: Configure Effort ────────────────────────────────────────────────
 
-function RoleEffortSelector({ role, title, description, value, onChange, options }) {
+function RoleEffortSelector({ role, title, description, providerName, value, onChange, options }) {
   return (
     <div className="card bg-base-200">
       <div className="card-body p-5 gap-3">
-        <div>
-          <h3 className="font-semibold">{title}</h3>
-          <p className="text-xs text-base-content/60 mt-1">{description}</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold">{title}</h3>
+            <p className="text-xs text-base-content/60 mt-1">{description}</p>
+          </div>
+          {providerName && (
+            <span className="badge badge-sm badge-soft badge-primary capitalize">{providerName}</span>
+          )}
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {options.map((opt) => {
@@ -702,38 +757,52 @@ function RoleEffortSelector({ role, title, description, value, onChange, options
   );
 }
 
-function EffortStep({ efforts, setEfforts }) {
+function EffortStep({ efforts, setEfforts, pipeline }) {
+  // Auto-clamp effort if user changed pipeline and current effort is unsupported
+  useEffect(() => {
+    for (const role of ["planner", "executor", "reviewer"]) {
+      const options = getEffortOptionsForRole(role, pipeline);
+      const currentValue = efforts[role];
+      if (currentValue && !options.some((o) => o.value === currentValue)) {
+        setEfforts((prev) => ({ ...prev, [role]: "high" })); // downgrade to max supported
+      }
+    }
+  }, [pipeline, efforts, setEfforts]);
+
   return (
     <div className="flex flex-col gap-6 stagger-children">
       <div className="text-center">
         <Gauge className="size-10 text-primary mx-auto mb-3" />
         <h2 className="text-2xl font-bold">Reasoning Effort By Stage</h2>
-        <p className="text-base-content/60 mt-1">Choose the depth for planning, execution, and review separately.</p>
+        <p className="text-base-content/60 mt-1">Choose the depth for each pipeline stage. Options depend on the CLI selected.</p>
       </div>
 
       <RoleEffortSelector
         role="planner"
         title="Planning"
-        description="Used when scoping the issue and deciding the overall approach."
+        description="Scopes the issue and decides the overall approach."
+        providerName={pipeline?.planner}
         value={efforts.planner}
         onChange={(value) => setEfforts((current) => ({ ...current, planner: value }))}
-        options={ROLE_EFFORT_OPTIONS.planner}
+        options={getEffortOptionsForRole("planner", pipeline)}
       />
       <RoleEffortSelector
         role="executor"
         title="Execution"
-        description="Used during implementation. This is the only stage that supports extra-high."
+        description="Implements the plan — writes code, edits files."
+        providerName={pipeline?.executor}
         value={efforts.executor}
         onChange={(value) => setEfforts((current) => ({ ...current, executor: value }))}
-        options={ROLE_EFFORT_OPTIONS.executor}
+        options={getEffortOptionsForRole("executor", pipeline)}
       />
       <RoleEffortSelector
         role="reviewer"
         title="Review"
-        description="Used during validation before an issue is approved as done."
+        description="Validates the result before approving."
+        providerName={pipeline?.reviewer}
         value={efforts.reviewer}
         onChange={(value) => setEfforts((current) => ({ ...current, reviewer: value }))}
-        options={ROLE_EFFORT_OPTIONS.reviewer}
+        options={getEffortOptionsForRole("reviewer", pipeline)}
       />
     </div>
   );
@@ -820,8 +889,10 @@ function CompleteStep({ config, launching }) {
       <div className="card bg-base-200 w-full max-w-sm">
         <div className="card-body p-4 gap-2 text-sm text-left">
           <div className="flex justify-between">
-            <span className="text-base-content/60">Provider</span>
-            <span className="font-semibold capitalize">{config.provider || "auto"}</span>
+            <span className="text-base-content/60">Pipeline</span>
+            <span className="font-semibold capitalize text-xs font-mono">
+              {config.pipeline?.planner || "?"} → {config.pipeline?.executor || "?"} → {config.pipeline?.reviewer || "?"}
+            </span>
           </div>
           <div className="divider my-0" />
           <div className="flex justify-between">
@@ -893,7 +964,8 @@ export default function OnboardingWizard({ onComplete }) {
   const hydratedRef = useRef(false);
 
   // Config state
-  const [selectedProvider, setSelectedProvider] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState(""); // legacy, kept for scan/analyze
+  const [pipeline, setPipeline] = useState({ planner: "", executor: "", reviewer: "" });
   const [efforts, setEfforts] = useState(() => normalizeRoleEfforts(null));
   const [concurrency, setConcurrency] = useState(2);
   const [selectedTheme, setSelectedTheme] = useState("auto");
@@ -952,11 +1024,21 @@ export default function OnboardingWizard({ onComplete }) {
       api.get("/providers").then((data) => {
         const list = Array.isArray(data) ? data : data?.providers || [];
         setProviders(list);
-        // Auto-select first available
-        const firstAvailable = list.find((p) => p.available !== false);
-        if (firstAvailable && !selectedProvider) {
-          setSelectedProvider(firstAvailable.id || firstAvailable.name || firstAvailable);
+        // Auto-select first available + set default pipeline
+        const available = list.filter((p) => p.available !== false);
+        const firstName = available[0]?.id || available[0]?.name || "";
+        if (firstName && !selectedProvider) {
+          setSelectedProvider(firstName);
         }
+        // Default pipeline: claude plans + reviews, first available executes
+        const claudeAvailable = available.find((p) => (p.id || p.name) === "claude");
+        const defaultCli = firstName;
+        const planReviewCli = claudeAvailable ? "claude" : defaultCli;
+        setPipeline((prev) => ({
+          planner: prev.planner || planReviewCli,
+          executor: prev.executor || defaultCli,
+          reviewer: prev.reviewer || planReviewCli,
+        }));
       }).catch(() => {
         setProviders([]);
       }).finally(() => {
@@ -973,17 +1055,31 @@ export default function OnboardingWizard({ onComplete }) {
     document.documentElement.setAttribute("data-theme", resolved);
   }, [selectedTheme]);
 
+  // Derive selectedProvider from pipeline (executor is the "main" provider)
+  useEffect(() => {
+    if (pipeline.executor && pipeline.executor !== selectedProvider) {
+      setSelectedProvider(pipeline.executor);
+    }
+  }, [pipeline.executor]);
+
   // Save settings progressively as user advances
   const saveStepSettings = useCallback((currentStep) => {
-    if (currentStep === 1 && selectedProvider) {
-      saveSetting("runtime.agentProvider", selectedProvider, "runtime").catch(() => {});
+    if (currentStep === 1) {
+      // Save pipeline as providers array + primary provider
+      const pipelineProviders = [
+        { provider: pipeline.planner, role: "planner" },
+        { provider: pipeline.executor, role: "executor" },
+        { provider: pipeline.reviewer, role: "reviewer" },
+      ];
+      saveSetting("runtime.agentProvider", pipeline.executor, "runtime").catch(() => {});
+      saveSetting("runtime.pipeline", pipelineProviders, "runtime").catch(() => {});
     } else if (currentStep === 5) {
       saveSetting("runtime.defaultEffort", efforts, "runtime").catch(() => {});
     } else if (currentStep === 6) {
       saveSetting("ui.theme", selectedTheme, "ui").catch(() => {});
       api.post("/config/concurrency", { concurrency }).catch(() => {});
     }
-  }, [selectedProvider, efforts, concurrency, selectedTheme]);
+  }, [pipeline, efforts, concurrency, selectedTheme]);
 
   const goNext = useCallback(() => {
     if (step < STEP_COUNT - 1) {
@@ -1009,9 +1105,14 @@ export default function OnboardingWizard({ onComplete }) {
         saveSetting("ui.onboarding.completed", true, "ui"),
       ];
 
-      if (selectedProvider) {
-        saves.push(saveSetting("runtime.agentProvider", selectedProvider, "runtime"));
-      }
+      // Save pipeline configuration
+      const pipelineProviders = [
+        { provider: pipeline.planner, role: "planner" },
+        { provider: pipeline.executor, role: "executor" },
+        { provider: pipeline.reviewer, role: "reviewer" },
+      ];
+      saves.push(saveSetting("runtime.agentProvider", pipeline.executor, "runtime"));
+      saves.push(saveSetting("runtime.pipeline", pipelineProviders, "runtime"));
 
       saves.push(saveSetting("runtime.defaultEffort", efforts, "runtime"));
       saves.push(api.post("/config/concurrency", { concurrency }));
@@ -1045,7 +1146,7 @@ export default function OnboardingWizard({ onComplete }) {
   // Can proceed from step
   const canProceed =
     step === 0 ||                                                // Welcome
-    (step === 1 && (selectedProvider || providersLoading)) ||    // Providers
+    (step === 1 && (pipeline.executor || providersLoading)) ||   // Pipeline
     step === 2 ||                                                // Scan Project
     step === 3 ||                                                // Domains
     step === 4 ||                                                // Agents & Skills
@@ -1057,7 +1158,7 @@ export default function OnboardingWizard({ onComplete }) {
   const existingSkills = (scanResult?.existingSkills || []).map((s) => typeof s === "string" ? { name: s } : s);
 
   const config = {
-    provider: selectedProvider,
+    pipeline,
     efforts,
     concurrency,
     theme: selectedTheme,
@@ -1086,11 +1187,11 @@ export default function OnboardingWizard({ onComplete }) {
         <StepContent direction={direction} stepKey={step} center={step === 0 || step === 1 || step === 7}>
           {step === 0 && <WelcomeStep workspacePath={workspacePath} />}
           {step === 1 && (
-            <ProvidersStep
+            <PipelineStep
               providers={providers || []}
               providersLoading={providersLoading}
-              selectedProvider={selectedProvider}
-              setSelectedProvider={setSelectedProvider}
+              pipeline={pipeline}
+              setPipeline={setPipeline}
             />
           )}
           {step === 2 && (
@@ -1124,7 +1225,7 @@ export default function OnboardingWizard({ onComplete }) {
               existingSkills={existingSkills}
             />
           )}
-          {step === 5 && <EffortStep efforts={efforts} setEfforts={setEfforts} />}
+          {step === 5 && <EffortStep efforts={efforts} setEfforts={setEfforts} pipeline={pipeline} />}
           {step === 6 && (
             <WorkersThemeStep
               concurrency={concurrency}
@@ -1171,7 +1272,7 @@ export default function OnboardingWizard({ onComplete }) {
               </>
             ) : (
               <>
-                <Rocket className="size-5" /> Launch Symphifony
+                <Rocket className="size-5" /> Launch Fifony
               </>
             )}
           </button>

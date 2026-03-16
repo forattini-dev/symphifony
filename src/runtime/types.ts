@@ -192,6 +192,20 @@ export type RuntimeStateRecord = {
 export type AgentProviderRole = "planner" | "executor" | "reviewer";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra-high";
 
+/** Configuration for a single pipeline stage (plan, execute, review) */
+export type PipelineStageConfig = {
+  provider: string;    // "claude" | "codex"
+  model: string;       // "claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", etc.
+  effort: ReasoningEffort;
+};
+
+/** Full workflow config: what to use at each stage */
+export type WorkflowConfig = {
+  plan: PipelineStageConfig;
+  execute: PipelineStageConfig;
+  review: PipelineStageConfig;
+};
+
 export type EffortConfig = {
   default?: ReasoningEffort;
   planner?: ReasoningEffort;
@@ -203,6 +217,7 @@ export type AgentProviderDefinition = {
   provider: string;
   role: AgentProviderRole;
   command: string;
+  model?: string;
   profile: string;
   profilePath: string;
   profileInstructions: string;

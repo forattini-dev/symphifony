@@ -9,8 +9,10 @@ import type {
   EffortConfig,
   IssueEntry,
   JsonRecord,
+  PipelineStageConfig,
   ReasoningEffort,
   RuntimeState,
+  WorkflowConfig,
   WorkflowDefinition,
 } from "./types.ts";
 import { TARGET_ROOT } from "./constants.ts";
@@ -109,14 +111,15 @@ const CLAUDE_RESULT_SCHEMA = JSON.stringify({
   required: ["status"],
 });
 
-export function getProviderDefaultCommand(provider: string, reasoningEffort?: string): string {
-  // Prompt is piped via stdin and also written to SYMPHIFONY_PROMPT_FILE.
+export function getProviderDefaultCommand(provider: string, reasoningEffort?: string, model?: string): string {
+  // Prompt is piped via stdin and also written to FIFONY_PROMPT_FILE.
   // Use stdin redirection as primary for large prompts (avoids E2BIG).
-  const effortFlag = reasoningEffort ? `--reasoning-effort ${reasoningEffort}` : "";
 
   if (provider === "codex") {
-    // Codex does not support --reasoning-effort flag; effort is controlled via model choice
-    return `codex exec --skip-git-repo-check < "$SYMPHIFONY_PROMPT_FILE"`;
+    const parts = ["codex", "exec", "--skip-git-repo-check"];
+    if (model && model !== "codex") parts.push(`--model ${model}`);
+    parts.push("< \"$FIFONY_PROMPT_FILE\"");
+    return parts.join(" ");
   }
   if (provider === "claude") {
     // Claude supports: low, medium, high (extra-high maps to high)
@@ -130,7 +133,8 @@ export function getProviderDefaultCommand(provider: string, reasoningEffort?: st
       `--json-schema '${CLAUDE_RESULT_SCHEMA}'`,
     ];
     if (claudeEffort) parts.splice(2, 0, `--reasoning-effort ${claudeEffort}`);
-    parts.push("< \"$SYMPHIFONY_PROMPT_FILE\"");
+    if (model) parts.splice(2, 0, `--model ${model}`);
+    parts.push("< \"$FIFONY_PROMPT_FILE\"");
     return parts.join(" ");
   }
   return "";
@@ -324,10 +328,52 @@ export function applyCapabilityMetadata(
   issue.labels = [...new Set([...baseLabels, ...derivedLabels])];
 }
 
+/** Map AgentProviderRole to WorkflowConfig stage key */
+function roleToStageKey(role: AgentProviderRole): keyof WorkflowConfig {
+  switch (role) {
+    case "planner": return "plan";
+    case "executor": return "execute";
+    case "reviewer": return "review";
+  }
+}
+
+/**
+ * Apply user's WorkflowConfig (from Settings → Workflow) to provider definitions.
+ * Overrides provider, model, and effort for each role when a WorkflowConfig is present.
+ */
+export function applyWorkflowConfigToProviders(
+  providers: AgentProviderDefinition[],
+  workflowConfig: WorkflowConfig | null,
+): AgentProviderDefinition[] {
+  if (!workflowConfig) return providers;
+
+  return providers.map((provider) => {
+    const stageKey = roleToStageKey(provider.role);
+    const stageConfig: PipelineStageConfig | undefined = workflowConfig[stageKey];
+    if (!stageConfig) return provider;
+
+    const newProvider = stageConfig.provider || provider.provider;
+    const newModel = stageConfig.model || undefined;
+    const newEffort = stageConfig.effort || provider.reasoningEffort;
+
+    // Rebuild command with the configured provider, model, and effort
+    const command = getProviderDefaultCommand(newProvider, newEffort, newModel);
+
+    return {
+      ...provider,
+      provider: newProvider,
+      model: newModel,
+      command: command || provider.command,
+      reasoningEffort: newEffort,
+    };
+  });
+}
+
 export function getEffectiveAgentProviders(
   state: RuntimeState,
   issue: IssueEntry,
   workflowDefinition: WorkflowDefinition | null,
+  workflowConfig?: WorkflowConfig | null,
 ): AgentProviderDefinition[] {
   const baseProviders = getBaseAgentProviders(state, workflowDefinition);
   const resolution = resolveTaskCapabilities(
@@ -343,7 +389,7 @@ export function getEffectiveAgentProviders(
   );
   applyCapabilityMetadata(issue, resolution);
 
-  return mergeCapabilityProviders(baseProviders, resolution).map((provider) => {
+  const merged = mergeCapabilityProviders(baseProviders, resolution).map((provider) => {
     const resolvedProfile = resolveAgentProfile(provider.profile ?? "");
     const suggestion = resolution.providers.find(
       (entry) => entry.provider === provider.provider && entry.role === provider.role,
@@ -368,4 +414,7 @@ export function getEffectiveAgentProviders(
       reasoningEffort: effort,
     };
   });
+
+  // Apply user's WorkflowConfig overrides (Settings → Workflow)
+  return applyWorkflowConfigToProviders(merged, workflowConfig ?? null);
 }

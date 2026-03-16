@@ -2,10 +2,11 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { IssuePlan, RuntimeConfig, WorkflowDefinition } from "./types.ts";
+import type { IssuePlan, RuntimeConfig, WorkflowConfig, WorkflowDefinition } from "./types.ts";
 import { appendFileTail, now } from "./helpers.ts";
 import { detectAvailableProviders } from "./providers.ts";
 import { replacePersistedSetting, getSettingStateResource } from "./store.ts";
+import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
 import { logger } from "./logger.ts";
 
 // ── Planning session persistence ────────────────────────────────────────────
@@ -164,20 +165,27 @@ function buildPlanPrompt(title: string, description: string): string {
 
 // ── Provider command ─────────────────────────────────────────────────────────
 
-function getPlanCommand(provider: string): string {
+function getPlanCommand(provider: string, model?: string, effort?: string): string {
   if (provider === "claude") {
-    return [
+    const claudeEffort = effort === "extra-high" ? "high" : effort;
+    const parts = [
       "claude",
       "--print",
       "--dangerously-skip-permissions",
       "--no-session-persistence",
       "--output-format json",
       `--json-schema '${PLAN_JSON_SCHEMA}'`,
-      "< \"$SYMPHIFONY_PROMPT_FILE\"",
-    ].join(" ");
+    ];
+    if (claudeEffort) parts.splice(2, 0, `--reasoning-effort ${claudeEffort}`);
+    if (model) parts.splice(2, 0, `--model ${model}`);
+    parts.push("< \"$FIFONY_PROMPT_FILE\"");
+    return parts.join(" ");
   }
   if (provider === "codex") {
-    return "codex exec --skip-git-repo-check < \"$SYMPHIFONY_PROMPT_FILE\"";
+    const parts = ["codex", "exec", "--skip-git-repo-check"];
+    if (model && model !== "codex") parts.push(`--model ${model}`);
+    parts.push("< \"$FIFONY_PROMPT_FILE\"");
+    return parts.join(" ");
   }
   return "";
 }
@@ -315,10 +323,29 @@ export async function generatePlan(
   const providers = detectAvailableProviders();
   const available = providers.filter((p) => p.available).map((p) => p.name);
 
-  const preferred = available.includes("claude") ? "claude" : available[0];
+  // Load WorkflowConfig from settings to use the plan stage configuration
+  let planStageProvider: string | undefined;
+  let planStageModel: string | undefined;
+  let planStageEffort: string | undefined;
+  try {
+    const settings = await loadRuntimeSettings();
+    const workflowConfig = getWorkflowConfig(settings);
+    if (workflowConfig?.plan) {
+      planStageProvider = workflowConfig.plan.provider;
+      planStageModel = workflowConfig.plan.model;
+      planStageEffort = workflowConfig.plan.effort;
+    }
+  } catch {
+    // Fall through to default provider selection
+  }
+
+  // Use configured plan provider if available, otherwise fall back to detection
+  const preferred = planStageProvider && available.includes(planStageProvider)
+    ? planStageProvider
+    : available.includes("claude") ? "claude" : available[0];
   if (!preferred) throw new Error("No AI provider available for planning.");
 
-  const command = getPlanCommand(preferred);
+  const command = getPlanCommand(preferred, planStageModel, planStageEffort);
   if (!command) throw new Error(`No command configured for provider ${preferred}.`);
 
   // Persist: planning started
@@ -330,15 +357,15 @@ export async function generatePlan(
   await persistSession(session);
 
   const prompt = buildPlanPrompt(title, description);
-  const tempDir = mkdtempSync(join(tmpdir(), "symphifony-plan-"));
-  const promptFile = join(tempDir, "symphifony-plan-prompt.md");
-  const envFile = join(tempDir, "symphifony-plan-env.sh");
+  const tempDir = mkdtempSync(join(tmpdir(), "fifony-plan-"));
+  const promptFile = join(tempDir, "fifony-plan-prompt.md");
+  const envFile = join(tempDir, "fifony-plan-env.sh");
 
   writeFileSync(promptFile, `${prompt}\n`, "utf8");
   writeFileSync(envFile, [
-    `export SYMPHIFONY_PROMPT_FILE=${JSON.stringify(promptFile)}`,
-    `export SYMPHIFONY_PROMPT=${JSON.stringify(prompt)}`,
-    `export SYMPHIFONY_AGENT_PROVIDER=${JSON.stringify(preferred)}`,
+    `export FIFONY_PROMPT_FILE=${JSON.stringify(promptFile)}`,
+    `export FIFONY_PROMPT=${JSON.stringify(prompt)}`,
+    `export FIFONY_AGENT_PROVIDER=${JSON.stringify(preferred)}`,
   ].join("\n"), "utf8");
 
   const wrappedCommand = `. "${envFile}" && ${command}`;
@@ -394,7 +421,7 @@ export async function generatePlan(
     throw new Error(session.error);
   }
 
-  plan.provider = preferred;
+  plan.provider = planStageModel ? `${preferred}/${planStageModel}` : preferred;
 
   // Persist: done with plan
   session.status = "done";
@@ -404,6 +431,6 @@ export async function generatePlan(
   session.error = null;
   await persistSession(session);
 
-  logger.info(`Plan generated for "${title}" via ${preferred}: ${plan.steps.length} steps, complexity: ${plan.estimatedComplexity}`);
+  logger.info(`Plan generated for "${title}" via ${preferred}${planStageModel ? `/${planStageModel}` : ""}${planStageEffort ? ` [${planStageEffort}]` : ""}: ${plan.steps.length} steps, complexity: ${plan.estimatedComplexity}`);
   return plan;
 }

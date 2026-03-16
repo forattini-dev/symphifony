@@ -1,4 +1,4 @@
-name: Symphifony CI/CD
+name: Fifony CI/CD
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: symphifony-${{ github.workflow }}-${{ github.ref }}
+  group: fifony-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -44,8 +44,8 @@ jobs:
         run: |
           node -e "
             const pkg = require('./package.json');
-            if (!pkg.name || pkg.name !== 'symphifony') throw new Error('package name must be symphifony');
-            if (!pkg.bin || !pkg.bin.symphifony) throw new Error('bin.symphifony is required');
+            if (!pkg.name || pkg.name !== 'fifony') throw new Error('package name must be fifony');
+            if (!pkg.bin || !pkg.bin.fifony) throw new Error('bin.fifony is required');
             if (!pkg.publishConfig || pkg.publishConfig.access !== 'public') throw new Error('publishConfig.access must be public');
             console.log('package metadata OK');
           "
@@ -54,7 +54,7 @@ jobs:
         run: |
           node <<'JS'
           const { spawn } = require('node:child_process');
-          const child = spawn('node', ['./bin/symphifony.js', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = spawn('node', ['./bin/fifony.js', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
           let stdout = '';
           let stderr = '';
           child.stdout.on('data', (chunk) => stdout += chunk.toString());
@@ -82,7 +82,7 @@ jobs:
             return `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
           }
 
-          const child = spawn('node', ['./bin/symphifony.js', 'mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });
+          const child = spawn('node', ['./bin/fifony.js', 'mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });
           let buffer = Buffer.alloc(0);
           let responses = [];
           let stderr = '';
@@ -133,12 +133,12 @@ jobs:
               process.exit(1);
             }
 
-            if (!toolResponse?.result?.tools?.some((tool) => tool.name === 'symphifony.create_issue')) {
+            if (!toolResponse?.result?.tools?.some((tool) => tool.name === 'fifony.create_issue')) {
               console.error(toolResponse);
               process.exit(1);
             }
 
-            if (!promptResponse?.result?.prompts?.some((prompt) => prompt.name === 'symphifony-integrate-client')) {
+            if (!promptResponse?.result?.prompts?.some((prompt) => prompt.name === 'fifony-integrate-client')) {
               console.error(promptResponse);
               process.exit(1);
             }
@@ -164,7 +164,7 @@ jobs:
 
       - name: Smoke packed tarball
         run: |
-          TARBALL=$(find .artifacts -maxdepth 1 -name 'symphifony-*.tgz' | head -n 1)
+          TARBALL=$(find .artifacts -maxdepth 1 -name 'fifony-*.tgz' | head -n 1)
           test -n "$TARBALL"
           TMPDIR=$(mktemp -d)
           cd "$TMPDIR"
@@ -172,7 +172,7 @@ jobs:
           npm install "$GITHUB_WORKSPACE/$TARBALL" >/dev/null 2>&1
           node <<'JS'
           const { spawn } = require('node:child_process');
-          const child = spawn('./node_modules/.bin/symphifony', ['--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = spawn('./node_modules/.bin/fifony', ['--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
           let stderr = '';
           child.stderr.on('data', (chunk) => stderr += chunk.toString());
           child.on('exit', (code) => {
@@ -251,7 +251,7 @@ jobs:
           sleep 20
           node <<'JS'
           const { spawn } = require('node:child_process');
-          const child = spawn('npx', ['-y', 'symphifony@next', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = spawn('npx', ['-y', 'fifony@next', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
           let stderr = '';
           child.stderr.on('data', (chunk) => stderr += chunk.toString());
           child.on('exit', (code) => {
@@ -268,9 +268,9 @@ jobs:
         run: |
           echo "## Next release published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Package: \`symphifony@${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Package: \`fifony@${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Channel: \`next\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Install: \`npm install symphifony@next\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Install: \`npm install fifony@next\`" >> "$GITHUB_STEP_SUMMARY"
 
   release-stable:
     name: Release Stable
@@ -317,7 +317,7 @@ jobs:
           sleep 20
           node <<'JS'
           const { spawn } = require('node:child_process');
-          const child = spawn('npx', ['-y', 'symphifony', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = spawn('npx', ['-y', 'fifony', '--once'], { stdio: ['ignore', 'pipe', 'pipe'] });
           let stderr = '';
           child.stderr.on('data', (chunk) => stderr += chunk.toString());
           child.on('exit', (code) => {
@@ -342,6 +342,6 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "## Stable release published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Package: \`symphifony@$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Package: \`fifony@$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Channel: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Install: \`npm install symphifony\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Install: \`npm install fifony\`" >> "$GITHUB_STEP_SUMMARY"

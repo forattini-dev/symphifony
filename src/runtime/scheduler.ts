@@ -208,7 +208,7 @@ function validateDispatchConfig(state: RuntimeState): string | null {
         return null;
       }
     }
-    return "No agent command configured. Install claude or codex, or set SYMPHIFONY_AGENT_COMMAND.";
+    return "No agent command configured. Install claude or codex, or set FIFONY_AGENT_COMMAND.";
   }
   if (state.config.workerConcurrency < 1) {
     return "Worker concurrency must be >= 1.";
