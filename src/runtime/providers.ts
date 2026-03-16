@@ -244,46 +244,72 @@ async function fetchCodexModels(): Promise<DiscoveredModel[]> {
 }
 
 /**
- * Fetch models from the Anthropic /v1/models API.
- * Falls back to well-known model IDs if API key is not set (Claude Code uses OAuth).
+ * Discover Claude models from multiple sources (no hardcoding):
+ *
+ * 1. Anthropic API /v1/models (if ANTHROPIC_API_KEY is set)
+ * 2. Extract model IDs embedded in the Claude CLI binary via `strings`
+ *    — the binary contains all supported model IDs as string literals
+ * 3. Parallel CLI probe as last resort (slow but works with OAuth)
  */
 async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
+  // 1. Try Anthropic API (fast, authoritative — but requires API key)
   const apiKey = process.env.ANTHROPIC_API_KEY;
-
   if (apiKey) {
     try {
       const res = await fetch("https://api.anthropic.com/v1/models", {
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {
-        const data = (await res.json()) as { data?: Array<{ id: string; display_name?: string }> };
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
         if (Array.isArray(data.data) && data.data.length > 0) {
-          return data.data
-            .map((m) => m.id)
-            .filter((id) => /^claude-/i.test(id))
-            .sort()
-            .map((id) => {
-              let tier = "Standard";
-              if (/opus/i.test(id)) tier = "Most capable";
-              else if (/sonnet/i.test(id)) tier = "Balanced";
-              else if (/haiku/i.test(id)) tier = "Fast";
-              return { id, provider: "claude", label: id, tier };
-            });
+          const models = extractClaudeModels(data.data.map((m) => m.id));
+          if (models.length > 0) return models;
         }
       }
-    } catch {
-      // Fall through to fallback
-    }
+    } catch { /* fall through */ }
   }
 
-  // Fallback: Claude Code authenticates via OAuth — no API key available.
-  // Probe all aliases in parallel via the CLI to resolve real model IDs.
+  // 2. Extract from Claude CLI binary (fast, no network, no tokens)
+  //    The compiled binary embeds model IDs as string literals.
+  //    `strings <binary> | grep claude-` extracts them.
   try {
-    const aliases: Array<{ alias: string; tier: string }> = [
+    const claudePath = existsSync("/home/cyber/.local/share/claude")
+      ? readFileSync(join(homedir(), ".local", "bin", "claude"), "utf8").trim()
+      : "";
+    // Resolve the real binary path (symlink → actual file)
+    const binaryPath = execFileSync("readlink", ["-f", execFileSync("which", ["claude"], { encoding: "utf8", timeout: 3000 }).trim()], {
+      encoding: "utf8",
+      timeout: 3000,
+    }).trim();
+
+    if (binaryPath && existsSync(binaryPath)) {
+      const stringsOutput = execFileSync("strings", [binaryPath], {
+        encoding: "utf8",
+        timeout: 10_000,
+        maxBuffer: 50_000_000,
+      });
+
+      // Extract model IDs matching "claude-{family}-{version}" pattern
+      const modelIds = new Set<string>();
+      for (const line of stringsOutput.split("\n")) {
+        const trimmed = line.trim();
+        // Match exact model IDs: claude-{opus|sonnet|haiku}-{version}
+        if (/^claude-(opus|sonnet|haiku)-\d+-\d+$/.test(trimmed)) {
+          modelIds.add(trimmed);
+        }
+      }
+
+      const models = extractClaudeModels([...modelIds]);
+      if (models.length > 0) return models;
+    }
+  } catch {
+    // strings not available or binary not readable — fall through
+  }
+
+  // 3. Last resort: parallel CLI probe (slow ~15s, burns minimal tokens)
+  try {
+    const aliases = [
       { alias: "opus", tier: "Most capable" },
       { alias: "sonnet", tier: "Balanced" },
       { alias: "haiku", tier: "Fast" },
@@ -294,8 +320,7 @@ async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
         try {
           const child = spawn("claude", [
             "--print", "--output-format", "json", "--model", alias,
-            "--max-turns", "1", "--no-session-persistence",
-            "reply ok",
+            "--max-turns", "1", "--no-session-persistence", "reply ok",
           ], { stdio: ["pipe", "pipe", "pipe"], timeout: 20_000 });
           let stdout = "";
           child.stdout?.on("data", (chunk: Buffer) => { stdout += String(chunk); });
@@ -317,11 +342,57 @@ async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
 
     const discovered = results.filter((m): m is DiscoveredModel => m !== null);
     if (discovered.length > 0) return discovered;
-  } catch {
-    // CLI not available
-  }
+  } catch { /* CLI not available */ }
 
   return [];
+}
+
+/**
+ * Filter and classify Claude model IDs into a sorted, deduplicated list.
+ * Keeps only the latest version of each family (opus, sonnet, haiku).
+ */
+function extractClaudeModels(ids: string[]): DiscoveredModel[] {
+  // Group by family, keep highest version
+  const families = new Map<string, { id: string; version: number }>();
+
+  for (const id of ids) {
+    if (!id.startsWith("claude-")) continue;
+    // Skip dated snapshots and @-versioned variants
+    if (/@/.test(id) || /\[\d+m\]/.test(id)) continue;
+    if (/\d{8}$/.test(id)) continue; // e.g. claude-opus-4-20250514
+
+    let family = "unknown";
+    if (/opus/i.test(id)) family = "opus";
+    else if (/sonnet/i.test(id)) family = "sonnet";
+    else if (/haiku/i.test(id)) family = "haiku";
+    else continue;
+
+    // Extract version: claude-opus-4-6 → 4.6, claude-sonnet-4 → 4.0
+    const versionMatch = id.match(/(\d+)(?:-(\d+))?$/);
+    const version = versionMatch
+      ? parseFloat(`${versionMatch[1]}.${versionMatch[2] || "0"}`)
+      : 0;
+
+    const existing = families.get(family);
+    if (!existing || version > existing.version) {
+      families.set(family, { id, version });
+    }
+  }
+
+  const tierMap: Record<string, string> = {
+    opus: "Most capable",
+    sonnet: "Balanced",
+    haiku: "Fast",
+  };
+
+  // Sort: opus first (most capable), then sonnet, then haiku
+  const order = ["opus", "sonnet", "haiku"];
+  return order
+    .filter((f) => families.has(f))
+    .map((f) => {
+      const { id } = families.get(f)!;
+      return { id, provider: "claude", label: id, tier: tierMap[f] || "Standard" };
+    });
 }
 
 /**
