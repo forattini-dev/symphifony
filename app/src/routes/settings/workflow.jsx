@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
+import { SETTINGS_QUERY_KEY, upsertSettingPayload } from "../../hooks.js";
 import {
   Lightbulb,
   Play,
@@ -174,6 +176,7 @@ export const Route = createFileRoute("/settings/workflow")({
 });
 
 function WorkflowSettings() {
+  const qc = useQueryClient();
   const [workflow, setWorkflow] = useState(null);
   const [providers, setProviders] = useState([]);
   const [modelsByProvider, setModelsByProvider] = useState({});
@@ -182,10 +185,25 @@ function WorkflowSettings() {
   const [restoring, setRestoring] = useState(false);
   const saveTimer = useRef(null);
 
+  const syncWorkflowSettingCache = useCallback((nextWorkflow) => {
+    qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, {
+      id: "runtime.workflowConfig",
+      scope: "runtime",
+      value: nextWorkflow,
+      source: "user",
+      updatedAt: new Date().toISOString(),
+    }));
+    qc.setQueryData(["workflow-config"], {
+      ok: true,
+      workflow: nextWorkflow,
+      isDefault: false,
+    });
+  }, [qc]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/config/workflow");
+      const res = await api.get("/config/workflow?details=1");
       setWorkflow(res.workflow);
       setProviders(res.providers || []);
       // Models come from the same endpoint (discovered server-side, never hardcoded)
@@ -202,13 +220,14 @@ function WorkflowSettings() {
     saveTimer.current = setTimeout(async () => {
       try {
         await api.post("/config/workflow", { workflow: newWorkflow });
+        syncWorkflowSettingCache(newWorkflow);
         setSavingStage(changedStage);
         setTimeout(() => setSavingStage(null), 1500);
       } catch {
         // silent fail — the user will see the stale state on next load
       }
     }, 600);
-  }, []);
+  }, [syncWorkflowSettingCache]);
 
   const handleStageChange = useCallback((stageKey, newConfig) => {
     setWorkflow((prev) => {
@@ -222,7 +241,7 @@ function WorkflowSettings() {
     setRestoring(true);
     try {
       // Fetch fresh defaults from the server (server discovers models, builds defaults — never hardcoded)
-      const res = await api.get("/config/workflow");
+      const res = await api.get("/config/workflow?details=1");
       // The server returns isDefault=true defaults with discovered models
       // We need to get the default config by asking the server
       const freshProviders = res.providers || [];
@@ -245,11 +264,12 @@ function WorkflowSettings() {
 
       setWorkflow(defaults);
       await api.post("/config/workflow", { workflow: defaults });
+      syncWorkflowSettingCache(defaults);
       setSavingStage("all");
       setTimeout(() => setSavingStage(null), 1500);
     } catch {}
     setRestoring(false);
-  }, []);
+  }, [syncWorkflowSettingCache]);
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);

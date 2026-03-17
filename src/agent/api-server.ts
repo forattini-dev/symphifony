@@ -226,7 +226,7 @@ export async function startApiServer(
       inputTokens: prev.inputTokens + usage.inputTokens,
       outputTokens: prev.outputTokens + usage.outputTokens,
       totalTokens: prev.totalTokens + usage.totalTokens,
-      model: usage.model,
+      model: usage.model || prev.model,
     };
     if (!issue.tokensByPhase) issue.tokensByPhase = {} as any;
     const prevPlanner = issue.tokensByPhase.planner ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -234,7 +234,7 @@ export async function startApiServer(
       inputTokens: prevPlanner.inputTokens + usage.inputTokens,
       outputTokens: prevPlanner.outputTokens + usage.outputTokens,
       totalTokens: prevPlanner.totalTokens + usage.totalTokens,
-      model: usage.model,
+      model: usage.model || prevPlanner.model,
     };
     if (!issue.tokensByModel) issue.tokensByModel = {};
     const model = usage.model || "unknown";
@@ -526,6 +526,12 @@ export async function startApiServer(
       "GET /api/config/workflow": async (c: any) => {
         const settings = await loadRuntimeSettings();
         const saved = getWorkflowConfig(settings);
+        const includeDetails = c.req.query("details") === "1";
+        if (!includeDetails) {
+          const providers = detectAvailableProviders();
+          const workflow = saved || buildDefaultWorkflowConfig(providers);
+          return c.json({ ok: true, workflow, isDefault: !saved });
+        }
         const providers = detectAvailableProviders();
         const models = await discoverModels(providers);
         const defaultConfig = buildDefaultWorkflowConfig(providers, models);

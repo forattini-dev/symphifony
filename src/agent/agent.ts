@@ -132,17 +132,39 @@ function extractOutputMarker(output: string, name: string): string {
 }
 
 function extractTokenUsage(output: string, jsonObj?: JsonRecord | null): AgentTokenUsage | undefined {
-  // 1. Claude --output-format json: { usage: { input_tokens, output_tokens }, cost_usd, model }
   if (jsonObj) {
+    // 1a. Claude --output-format json: modelUsage field (richer — includes cache tokens, per-model breakdown)
+    const modelUsage = jsonObj.modelUsage as Record<string, Record<string, unknown>> | undefined;
+    if (modelUsage && typeof modelUsage === "object") {
+      let totalInput = 0, totalOutput = 0, primaryModel = "", maxTokens = 0;
+      for (const [model, data] of Object.entries(modelUsage)) {
+        const inp = Number(data?.inputTokens || 0) + Number(data?.cacheReadInputTokens || 0) + Number(data?.cacheCreationInputTokens || 0);
+        const out = Number(data?.outputTokens || 0);
+        totalInput += inp;
+        totalOutput += out;
+        if (inp + out > maxTokens) { maxTokens = inp + out; primaryModel = model; }
+      }
+      if (totalInput > 0 || totalOutput > 0) {
+        return {
+          inputTokens: totalInput,
+          outputTokens: totalOutput,
+          totalTokens: totalInput + totalOutput,
+          costUsd: typeof jsonObj.cost_usd === "number" ? jsonObj.cost_usd : undefined,
+          model: primaryModel || (typeof jsonObj.model === "string" ? jsonObj.model : undefined),
+        };
+      }
+    }
+
+    // 1b. Claude --output-format json: usage field (aggregate totals)
     const usage = jsonObj.usage as Record<string, unknown> | undefined;
     if (usage && typeof usage === "object") {
-      const input = Number(usage.input_tokens) || 0;
-      const output = Number(usage.output_tokens) || 0;
-      if (input > 0 || output > 0) {
+      const inp = Number(usage.input_tokens) || 0;
+      const out = Number(usage.output_tokens) || 0;
+      if (inp > 0 || out > 0) {
         return {
-          inputTokens: input,
-          outputTokens: output,
-          totalTokens: input + output,
+          inputTokens: inp,
+          outputTokens: out,
+          totalTokens: inp + out,
           costUsd: typeof jsonObj.cost_usd === "number" ? jsonObj.cost_usd : undefined,
           model: typeof jsonObj.model === "string" ? jsonObj.model : undefined,
         };
@@ -1284,6 +1306,9 @@ async function runAgentSession(
   lastOutput = turnResult.output;
   previousOutput = turnResult.output;
   nextPrompt = directive.nextPrompt;
+  if (!directive.tokenUsage) {
+    logger.warn({ issueId: issue.id, identifier: issue.identifier, turn: turnIndex, role: provider.role, outputBytes: turnResult.output.length }, "[Agent] Token extraction failed — no usage data in CLI output");
+  }
   addTokenUsage(issue, directive.tokenUsage, provider.role);
   if (directive.tokenUsage) recordTokens(issue, directive.tokenUsage, provider.role);
 

@@ -1502,45 +1502,14 @@ function ReviewTab({ issue, issueId, onStateChange }) {
 // ── Drawer Footer ───────────────────────────────────────────────────────────
 
 function DrawerFooter({ issue, onStateChange }) {
-  const [approving, setApproving] = useState(false);
-
   const footerStyle = { paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" };
-
-  const handleQuickApprove = async () => {
-    setApproving(true);
-    try {
-      await api.post(`/issues/${encodeURIComponent(issue.id)}/approve`);
-    } catch {
-      // error handled elsewhere
-    } finally {
-      setApproving(false);
-    }
-  };
 
   const isPlanning = issue.state === "Planning";
   const isRunning = issue.state === "Running" || issue.state === "Queued";
   const isInReview = issue.state === "In Review";
-  const hasPlan = !!issue.plan;
-  const isPlanBusy = issue.planningStatus === "planning" || issue.planningStatus === "refining";
 
-  // Planning with a plan ready: quick approve
-  if (isPlanning && hasPlan && !isPlanBusy) {
-    return (
-      <div className="px-6 py-3 border-t border-base-300 shrink-0 flex items-center gap-2" style={footerStyle}>
-        <button
-          className="btn btn-primary btn-sm gap-1.5 flex-1"
-          onClick={handleQuickApprove}
-          disabled={approving}
-        >
-          {approving ? (
-            <><Loader className="size-3.5 animate-spin" /> Approving...</>
-          ) : (
-            <><CheckCircle2 className="size-4" /> Approve & Start</>
-          )}
-        </button>
-      </div>
-    );
-  }
+  // Planning: approve button lives inside PlanningTab, nothing to show here
+  if (isPlanning) return null;
 
   // Running: show watching status
   if (isRunning) {
