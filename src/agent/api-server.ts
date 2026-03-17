@@ -267,10 +267,15 @@ export async function startApiServer(
       return c.json({ ok: false, error: "Issue not found" }, 404);
     }
 
-    await updater(issue);
-    await persistState(state);
-    wakeScheduler();
-    return c.json({ ok: true, issue });
+    try {
+      await updater(issue);
+      await persistState(state);
+      wakeScheduler();
+      return c.json({ ok: true, issue });
+    } catch (error) {
+      logger.error({ err: error, issueId }, "[API] mutateIssueState failed");
+      return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
   };
 
   const resourceConfigs: Record<string, Record<string, unknown>> = Object.fromEntries(
