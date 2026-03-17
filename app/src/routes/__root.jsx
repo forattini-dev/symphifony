@@ -57,27 +57,9 @@ function RootLayout() {
 
   useKeyboardShortcuts(shortcuts);
 
-  if (ctx.runtime.isLoading && !ctx.runtime.data) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <div className="navbar bg-base-100 shadow-sm px-4">
-          <div className="flex-1"><div className="skeleton-line h-6 w-32" /></div>
-          <div className="flex gap-2">
-            <div className="skeleton-line h-8 w-20 rounded-btn" />
-            <div className="skeleton-line h-8 w-20 rounded-btn" />
-            <div className="skeleton-line h-8 w-20 rounded-btn" />
-          </div>
-        </div>
-        <div className="container mx-auto px-4 py-6 space-y-4">
-          <div className="skeleton-card h-24 w-full" />
-          <div className="grid grid-cols-6 gap-3">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="skeleton-card h-64 w-full" style={{ animationDelay: `${i * 100}ms` }} />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+  // Only show skeleton on very first load (no data yet, not errored)
+  if (ctx.runtime.isLoading && !ctx.runtime.data && !ctx.runtime.isError) {
+    return <LoadingHero />;
   }
 
   const toastType = ctx.toast?.type || "info";
