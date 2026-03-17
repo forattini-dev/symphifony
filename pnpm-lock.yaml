@@ -20,6 +20,9 @@ importers:
       lucide-react:
         specifier: ^0.577.0
         version: 0.577.0(react@19.2.4)
+      node-cron:
+        specifier: ^4.2.1
+        version: 4.2.1
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -5044,8 +5047,7 @@ snapshots:
   node-addon-api@8.6.0:
     optional: true
 
-  node-cron@4.2.1:
-    optional: true
+  node-cron@4.2.1: {}
 
   node-gyp-build@4.8.4:
     optional: true
