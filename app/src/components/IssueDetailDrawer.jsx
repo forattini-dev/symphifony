@@ -1439,15 +1439,27 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
   }, [issue?.id, issue?.state]);
 
   // History integration — back button closes drawer
+  // Use a ref to avoid re-pushing state on every render cycle
+  const historyPushedRef = useRef(false);
   useEffect(() => {
     if (!issue || !visible) return;
-    history.pushState({ drawer: "issue-detail" }, "");
+    if (!historyPushedRef.current) {
+      historyPushedRef.current = true;
+      window.history.pushState({ drawer: "issue-detail" }, "");
+    }
     const handler = (e) => {
       if (e.state?.drawer !== "issue-detail") handleClose();
     };
     window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
+    return () => {
+      window.removeEventListener("popstate", handler);
+    };
   }, [issue?.id, visible, handleClose]);
+
+  // Reset history ref when drawer closes
+  useEffect(() => {
+    if (!issue) historyPushedRef.current = false;
+  }, [issue]);
 
   // Auto-scroll active tab into view
   useEffect(() => {
