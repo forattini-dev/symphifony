@@ -5,7 +5,6 @@ import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } fro
 import Header from "../components/Header";
 import Fab from "../components/Fab";
 import MobileDock from "../components/MobileDock";
-import EventsDrawer from "../components/EventsDrawer";
 import CreateIssueDrawer from "../components/CreateIssueForm";
 import IssueDetailDrawer from "../components/IssueDetailDrawer";
 import PwaBanner from "../components/PwaBanner";
@@ -33,7 +32,6 @@ function RootLayout() {
 
   const closeAllDrawers = useCallback(() => {
     ctx.setIsCreateOpen(false);
-    ctx.setIsEventsOpen(false);
     ctx.setSelectedIssue(null);
     setShortcutsHelpOpen(false);
   }, [ctx]);
@@ -84,8 +82,6 @@ function RootLayout() {
         issueCount={ctx.issues.length}
         sourceRepo={ctx.data.sourceRepoUrl}
         updatedAt={ctx.data.updatedAt}
-        onToggleEvents={ctx.toggleEvents}
-        eventsOpen={ctx.isEventsOpen}
         wsStatus={ctx.wsStatus}
         notifications={ctx.notifications}
         issues={ctx.issues}
@@ -105,18 +101,7 @@ function RootLayout() {
       </div>
 
       <Fab onClick={() => ctx.setIsCreateOpen(true)} />
-      <MobileDock onToggleEvents={ctx.toggleEvents} eventsOpen={ctx.isEventsOpen} />
-      <EventsDrawer
-        open={ctx.isEventsOpen}
-        onClose={() => ctx.setIsEventsOpen(false)}
-        events={ctx.eventsData}
-        kind={ctx.eventKind}
-        setKind={ctx.setEventKind}
-        issueId={ctx.eventIssueId}
-        setIssueId={ctx.setEventIssueId}
-        issueOptions={ctx.issueOptions}
-        wsStatus={ctx.wsStatus}
-      />
+      <MobileDock />
       <CreateIssueDrawer
         open={ctx.isCreateOpen}
         onClose={() => ctx.setIsCreateOpen(false)}

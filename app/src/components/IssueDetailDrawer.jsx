@@ -5,7 +5,7 @@ import {
   PlayCircle, Eye, Ban, XCircle, Diff, Wrench, Copy, Check,
   Info, Code, Route, ClipboardCheck, ThumbsUp, ThumbsDown, MessageSquare,
   Loader, Pause, ListOrdered, Lightbulb, Zap, ChevronDown, SlidersHorizontal,
-  GitMerge,
+  GitMerge, UserCircle,
 } from "lucide-react";
 import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate, formatDuration } from "../utils.js";
 import { api } from "../api.js";
@@ -1112,47 +1112,78 @@ function classifyHistoryEntry(message) {
 }
 
 function HistoryTab({ issue }) {
-  const history = Array.isArray(issue.history) ? issue.history : [];
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const listRef = useRef(null);
 
-  if (history.length === 0) {
-    return <div className="text-sm opacity-40 text-center py-8">No history entries.</div>;
+  // Fetch events for this issue — poll every 3s while tab is visible
+  useEffect(() => {
+    let active = true;
+    const fetchEvents = async () => {
+      try {
+        const data = await api.get(`/events/feed?issueId=${encodeURIComponent(issue.id)}`);
+        if (active && Array.isArray(data?.events)) {
+          setEvents(data.events);
+        }
+      } catch {}
+      if (active) setLoading(false);
+    };
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 3000);
+    return () => { active = false; clearInterval(interval); };
+  }, [issue.id]);
+
+  // Auto-scroll to bottom when new events arrive
+  useEffect(() => {
+    if (listRef.current) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+      });
+    }
+  }, [events.length]);
+
+  if (loading && events.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8 gap-2 opacity-40">
+        <span className="loading loading-spinner loading-xs" />
+        <span className="text-sm">Loading events...</span>
+      </div>
+    );
   }
 
-  const entries = history.map((entry) => {
-    const match = entry.match(/^\[(.+?)\]\s*(.*)$/);
-    return {
-      raw: entry,
-      timestamp: match?.[1] || null,
-      message: match?.[2] || entry,
-    };
-  });
+  if (events.length === 0) {
+    return <div className="text-sm opacity-40 text-center py-8">No events for this issue yet.</div>;
+  }
+
+  const KIND_STYLES = {
+    info: { color: "text-info", icon: Info },
+    error: { color: "text-error", icon: AlertTriangle },
+    progress: { color: "text-primary", icon: Activity },
+    state: { color: "text-secondary", icon: GitBranch },
+    manual: { color: "text-warning", icon: UserCircle },
+    runner: { color: "text-accent", icon: Terminal },
+    merge: { color: "text-success", icon: GitMerge },
+  };
 
   return (
-    <ul className="timeline timeline-vertical timeline-compact pl-1">
-      {entries.map((entry, i) => {
-        const { icon: Icon, color } = classifyHistoryEntry(entry.message);
-        const isFirst = i === 0;
-        const isLast = i === entries.length - 1;
-
+    <div ref={listRef} className="space-y-2 max-h-96 overflow-y-auto -mx-2 px-2">
+      {events.map((ev, i) => {
+        const style = KIND_STYLES[ev.kind] || KIND_STYLES.info;
+        const EvIcon = style.icon;
         return (
-          <li key={i}>
-            {!isFirst && <hr className="bg-base-300" />}
-            <div className="timeline-middle px-1">
-              <Icon className={`size-4 ${color}`} />
+          <div key={`${ev.id || ev.at}-${i}`} className="flex gap-2.5 items-start py-1.5">
+            <EvIcon className={`size-3.5 mt-0.5 shrink-0 ${style.color}`} />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs leading-relaxed">{ev.message}</div>
+              <div className="text-[10px] font-mono opacity-30 mt-0.5">
+                {ev.at ? timeAgo(ev.at) : ""}
+                {ev.kind && <span className="ml-2 opacity-60">{ev.kind}</span>}
+              </div>
             </div>
-            <div className="timeline-end timeline-box py-2 px-3 border-base-300 bg-base-200/50">
-              <div className="text-xs leading-relaxed">{entry.message}</div>
-              {entry.timestamp && (
-                <div className="text-[10px] font-mono opacity-40 mt-0.5" title={formatDate(entry.timestamp)}>
-                  {timeAgo(entry.timestamp)}
-                </div>
-              )}
-            </div>
-            {!isLast && <hr className="bg-base-300" />}
-          </li>
+          </div>
         );
       })}
-    </ul>
+    </div>
   );
 }
 
