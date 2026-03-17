@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Zap, Circle, Activity, Lightbulb, Loader, CheckSquare } from "lucide-react";
+import { Zap, Circle, Activity, Lightbulb, Loader, CheckSquare, GitMerge } from "lucide-react";
 import { timeAgo } from "../utils.js";
 
 const STATE_BADGE = {
@@ -80,6 +80,7 @@ export function IssueCard({ issue, onSelect, dragHandlers, isDragging, isSelecte
 
   const formattedTokens = (isRunning || isInReview) ? formatTokens(issue.tokenUsage?.totalTokens) : null;
   const phase = isRunning ? derivePhase(issue.tokensByPhase) : null;
+  const isMerged = !!issue.mergedAt;
 
   const handleClick = (e) => {
     if (e.shiftKey) {
@@ -154,9 +155,16 @@ export function IssueCard({ issue, onSelect, dragHandlers, isDragging, isSelecte
             <span className="font-mono text-xs opacity-50">{issue.identifier}</span>
             <h3 className={`font-semibold text-sm truncate ${isCancelled ? "line-through opacity-60" : ""}`}>{issue.title}</h3>
           </div>
-          <span className={`badge badge-xs ${STATE_BADGE[issue.state] || "badge-ghost"} shrink-0`}>
-            {issue.state}
-          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            {isMerged && (
+              <span className="badge badge-xs badge-success gap-0.5" title="Code merged to project">
+                <GitMerge size={9} />
+              </span>
+            )}
+            <span className={`badge badge-xs ${STATE_BADGE[issue.state] || "badge-ghost"}`}>
+              {issue.state}
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5 text-xs opacity-50 truncate">

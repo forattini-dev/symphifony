@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { env } from "node:process";
 import { execSync, spawn } from "node:child_process";
 import type {
@@ -33,6 +33,7 @@ import type {
 } from "./types.ts";
 import {
   SOURCE_ROOT,
+  TARGET_ROOT,
   TERMINAL_STATES,
   WORKSPACE_ROOT,
 } from "./constants.ts";
@@ -412,6 +413,149 @@ export function computeDiffStats(issue: IssueEntry): void {
   } catch {
     // ignore diff failures
   }
+}
+
+export interface MergeResult {
+  copied: string[];
+  deleted: string[];
+  skipped: string[];
+  conflicts: string[];
+}
+
+/** Check if a file in TARGET_ROOT has been modified by another worker (differs from SOURCE_ROOT). */
+function isConflict(relativePath: string): boolean {
+  const targetPath = join(TARGET_ROOT, relativePath);
+  const sourcePath = join(SOURCE_ROOT, relativePath);
+
+  // File exists in target but not in source → another worker created it
+  if (!existsSync(sourcePath)) return existsSync(targetPath);
+
+  // File doesn't exist in target → someone deleted it, not a conflict for us
+  if (!existsSync(targetPath)) return false;
+
+  // Both exist → compare target vs source. If different, another worker already changed it.
+  const targetStat = statSync(targetPath);
+  const sourceStat = statSync(sourcePath);
+  if (targetStat.size !== sourceStat.size) return true;
+  return !readFileSync(targetPath).equals(readFileSync(sourcePath));
+}
+
+/**
+ * Merge workspace changes back into TARGET_ROOT.
+ * Copies new/modified files from the workspace and removes files deleted in the workspace.
+ * Skips fifony internal files (fifony-*, .fifony-*, node_modules, .git, etc.).
+ *
+ * Conflict detection: if a file in TARGET_ROOT already differs from SOURCE_ROOT
+ * (another worker merged first), the file is added to `conflicts` instead of being overwritten.
+ */
+export function mergeWorkspace(workspacePath: string): MergeResult {
+  const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
+
+  if (!workspacePath || !existsSync(workspacePath)) {
+    throw new Error(`Workspace not found: ${workspacePath}`);
+  }
+
+  // 1. Walk workspace and copy new/modified files to TARGET_ROOT
+  const walkWorkspace = (dir: string): void => {
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = join(dir, item.name);
+      const relativePath = relative(workspacePath, fullPath);
+
+      if (shouldSkipMergePath(relativePath)) {
+        result.skipped.push(relativePath);
+        continue;
+      }
+
+      if (item.isDirectory()) {
+        walkWorkspace(fullPath);
+        continue;
+      }
+
+      if (!item.isFile()) continue;
+
+      const sourcePath = join(SOURCE_ROOT, relativePath);
+
+      // Check if file is new or modified compared to SOURCE_ROOT
+      const isNew = !existsSync(sourcePath);
+      let isModified = false;
+      if (!isNew) {
+        const wsStat = statSync(fullPath);
+        const srcStat = statSync(sourcePath);
+        if (wsStat.size !== srcStat.size) {
+          isModified = true;
+        } else {
+          const wsContent = readFileSync(fullPath);
+          const srcContent = readFileSync(sourcePath);
+          isModified = !wsContent.equals(srcContent);
+        }
+      }
+
+      if (isNew || isModified) {
+        // Conflict detection: another worker already changed this file in TARGET_ROOT
+        if (isConflict(relativePath)) {
+          result.conflicts.push(relativePath);
+          continue;
+        }
+
+        const targetDir = join(TARGET_ROOT, relative(workspacePath, dir));
+        const targetPath = join(TARGET_ROOT, relativePath);
+        mkdirSync(targetDir, { recursive: true });
+        cpSync(fullPath, targetPath, { force: true });
+        result.copied.push(relativePath);
+      }
+    }
+  };
+
+  // 2. Walk SOURCE_ROOT to find files deleted in workspace
+  const walkSource = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = join(dir, item.name);
+      const relativePath = relative(SOURCE_ROOT, fullPath);
+
+      if (shouldSkipMergePath(relativePath)) continue;
+
+      if (item.isDirectory()) {
+        walkSource(fullPath);
+        continue;
+      }
+
+      if (!item.isFile()) continue;
+
+      const wsPath = join(workspacePath, relativePath);
+      if (!existsSync(wsPath)) {
+        // File was deleted in workspace — only remove if untouched by another worker
+        const targetPath = join(TARGET_ROOT, relativePath);
+        if (existsSync(targetPath)) {
+          if (isConflict(relativePath)) {
+            result.conflicts.push(relativePath);
+          } else {
+            rmSync(targetPath, { force: true });
+            result.deleted.push(relativePath);
+          }
+        }
+      }
+    }
+  };
+
+  walkWorkspace(workspacePath);
+  walkSource(SOURCE_ROOT);
+
+  return result;
+}
+
+function shouldSkipMergePath(relativePath: string): boolean {
+  const parts = relativePath.split("/");
+  if (parts.some((s) => s === ".git" || s === "node_modules" || s === ".fifony" || s === "dist" || s === ".tanstack")) {
+    return true;
+  }
+  const base = parts.at(-1) ?? "";
+  return base === "WORKFLOW.local.md"
+    || base === ".fifony-env.sh"
+    || base === ".fifony-compiled-env.sh"
+    || base === ".fifony-local-source-ready"
+    || base.startsWith("fifony-")
+    || base.startsWith("fifony_");
 }
 
 export function hydrateIssuePathsFromWorkspace(issue: IssueEntry): string[] {
@@ -1393,6 +1537,29 @@ export async function runIssueOnce(
       computeDiffStats(issue);
       if (issue.filesChanged) {
         addEvent(state, issue.id, "info", `Diff: ${issue.filesChanged} files, +${issue.linesAdded || 0} -${issue.linesRemoved || 0} lines.`);
+      }
+
+      // Merge workspace into TARGET_ROOT so the code is runnable/testable before review
+      try {
+        const mergeResult = mergeWorkspace(workspacePath);
+        issue.mergedAt = now();
+        issue.mergeResult = {
+          copied: mergeResult.copied.length,
+          deleted: mergeResult.deleted.length,
+          skipped: mergeResult.skipped.length,
+          conflicts: mergeResult.conflicts.length,
+        };
+        const conflictMsg = mergeResult.conflicts.length > 0
+          ? ` ${mergeResult.conflicts.length} conflict(s): ${mergeResult.conflicts.join(", ")}.`
+          : "";
+        addEvent(state, issue.id, "merge", `Workspace merged to project: ${mergeResult.copied.length} file(s) copied, ${mergeResult.deleted.length} deleted.${conflictMsg} Code is now available in the project root.`);
+        if (mergeResult.conflicts.length > 0) {
+          addEvent(state, issue.id, "error", `Merge conflicts detected — ${mergeResult.conflicts.length} file(s) modified by another worker: ${mergeResult.conflicts.join(", ")}`);
+        }
+        logger.info(`Workspace merged for ${issue.identifier}: ${mergeResult.copied.length} copied, ${mergeResult.deleted.length} deleted, ${mergeResult.conflicts.length} conflicts.`);
+      } catch (mergeErr) {
+        addEvent(state, issue.id, "error", `Merge failed: ${String(mergeErr)}`);
+        logger.error(`Merge failed for ${issue.identifier}: ${String(mergeErr)}`);
       }
 
       // Persist execution audit

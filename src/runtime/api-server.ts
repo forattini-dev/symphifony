@@ -28,7 +28,7 @@ import {
 } from "./constants.ts";
 import { NATIVE_RESOURCE_CONFIGS } from "./resources/index.ts";
 import { now, isoWeek, clamp, toStringValue } from "./helpers.ts";
-import { isAgentStillRunning } from "./agent.ts";
+import { isAgentStillRunning, mergeWorkspace } from "./agent.ts";
 import { logger } from "./logger.ts";
 import {
   loadS3dbModule,
@@ -693,6 +693,32 @@ export async function startApiServer(
           await transitionIssueState(issue, "Todo", `Plan approved for ${issue.identifier}. Ready for execution.`);
           addEvent(state, issue.id, "state", `Plan approved — ${issue.identifier} moved to Todo.`);
         });
+      },
+      "POST /api/issues/:id/merge": async (c: any) => {
+        try {
+          const issueId = parseIssue(c);
+          if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
+          const issue = findIssue(issueId);
+          if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
+          const wp = issue.workspacePath;
+          if (!wp || !existsSync(wp)) {
+            return c.json({ ok: false, error: "No workspace found for this issue." }, 400);
+          }
+          const result = mergeWorkspace(wp);
+          const conflictMsg = result.conflicts.length > 0
+            ? ` ${result.conflicts.length} conflict(s): ${result.conflicts.join(", ")}.`
+            : "";
+          addEvent(state, issue.id, "merge", `Workspace merged: ${result.copied.length} file(s) copied, ${result.deleted.length} deleted.${conflictMsg}`);
+          if (result.conflicts.length > 0) {
+            addEvent(state, issue.id, "error", `Merge conflicts: ${result.conflicts.join(", ")}`);
+          }
+          await persistState(state);
+          return c.json({ ok: true, ...result });
+        } catch (error) {
+          const issueId = parseIssue(c);
+          logger.error(`Failed to merge workspace for ${issueId || "<unknown>"}: ${String(error)}`);
+          return c.json({ ok: false, error: String(error) }, 500);
+        }
       },
       "POST /api/issues/:id/plan/refine": async (c: any) => {
         return mutateIssueState(c, async (issue) => {

@@ -4,7 +4,7 @@ import { timeAgo, formatDate } from "../utils.js";
 import { EmptyState } from "./EmptyState.jsx";
 import { useSwipeToDismiss } from "../hooks/useSwipeToDismiss.js";
 
-const EVENT_KINDS = ["all", "info", "state", "progress", "error", "manual", "runner"];
+const EVENT_KINDS = ["all", "info", "state", "progress", "error", "manual", "runner", "merge"];
 
 const KIND_COLORS = {
   error: "badge-error",
@@ -13,6 +13,7 @@ const KIND_COLORS = {
   manual: "badge-warning",
   runner: "badge-accent",
   info: "badge-ghost",
+  merge: "badge-success",
 };
 
 /** Border color for state-transition events, keyed by the new state name found in the message. */

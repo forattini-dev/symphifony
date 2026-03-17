@@ -654,6 +654,7 @@ function listTools(): Array<Record<string, unknown>> {
     { name: "fifony.plan", description: "Generate an AI plan for an issue. The issue must be in Planning state. Returns the plan summary and step count.", inputSchema: { type: "object", properties: { issueId: { type: "string", description: "The issue identifier to plan." }, fast: { type: "boolean", description: "Use fast planning mode (less thorough but quicker)." } }, required: ["issueId"], additionalProperties: false } },
     { name: "fifony.refine", description: "Refine an existing plan with feedback. The issue must already have a plan.", inputSchema: { type: "object", properties: { issueId: { type: "string", description: "The issue identifier whose plan to refine." }, feedback: { type: "string", description: "Feedback to guide the plan refinement." } }, required: ["issueId", "feedback"], additionalProperties: false } },
     { name: "fifony.approve", description: "Approve a plan and move the issue to Todo for execution.", inputSchema: { type: "object", properties: { issueId: { type: "string", description: "The issue identifier to approve." } }, required: ["issueId"], additionalProperties: false } },
+    { name: "fifony.merge", description: "Merge workspace changes back into the project root. Copies new/modified files from the issue workspace to TARGET_ROOT and removes files that were deleted. Skips fifony internal files, node_modules, .git, and dist.", inputSchema: { type: "object", properties: { issueId: { type: "string", description: "The issue identifier whose workspace to merge." } }, required: ["issueId"], additionalProperties: false } },
     { name: "fifony.analytics", description: "Get token usage analytics including overall totals, cost estimates, and top issues by token consumption.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "fifony.integration_config", description: "Generate a ready-to-paste MCP client configuration snippet for this Fifony workspace.", inputSchema: { type: "object", properties: { client: { type: "string" } }, additionalProperties: false } },
     { name: "fifony.list_integrations", description: "List discovered local integrations such as agency-agents profiles and impeccable skills.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
@@ -830,6 +831,19 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
     }, null, 2));
   }
 
+  if (name === "fifony.merge") {
+    const issueId = typeof args.issueId === "string" ? args.issueId.trim() : "";
+    if (!issueId) throw new Error("issueId is required");
+    const result = await apiPost(`/api/issues/${encodeURIComponent(issueId)}/merge`);
+    return toolText(JSON.stringify({
+      issueId,
+      copied: result.copied,
+      deleted: result.deleted,
+      skipped: result.skipped,
+      message: `Merged ${(result.copied as string[])?.length ?? 0} files into project root. ${(result.deleted as string[])?.length ?? 0} files removed.`,
+    }, null, 2));
+  }
+
   if (name === "fifony.analytics") {
     const result = await apiGet("/api/analytics/tokens");
     const overall = result.overall as Record<string, unknown> | undefined;
@@ -888,8 +902,13 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
       const evResult = await apiGet(`/api/events/feed?issueId=${encodeURIComponent(issueId)}`);
       events = Array.isArray((evResult as any).events) ? (evResult as any).events : [];
     } catch {}
+    const issueObj = issue as Record<string, unknown>;
+    const mergeInfo = issueObj.mergedAt
+      ? { mergedAt: issueObj.mergedAt, mergeResult: issueObj.mergeResult, message: `Code merged to project root at ${issueObj.mergedAt}. Available for testing.` }
+      : null;
     return toolText(JSON.stringify({
       issue,
+      mergeStatus: mergeInfo,
       diffSummary: diff ? { files: (diff as any).files, totalAdditions: (diff as any).totalAdditions, totalDeletions: (diff as any).totalDeletions } : null,
       recentEvents: (events as any[]).slice(0, 20),
     }, null, 2));

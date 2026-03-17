@@ -17,7 +17,8 @@ export type RuntimeEventType =
   | "progress"
   | "error"
   | "manual"
-  | "runner";
+  | "runner"
+  | "merge";
 
 export type RuntimeEvent = {
   id: string;
@@ -69,6 +70,10 @@ export type IssueEntry = {
   linesRemoved?: number;
   filesChanged?: number;
   plan?: IssuePlan;
+  /** When the workspace was merged into TARGET_ROOT */
+  mergedAt?: string;
+  /** Summary of the merge result */
+  mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number };
   /** Planning process status — driven by background plan generation */
   planningStatus?: "idle" | "planning" | "refining";
   /** Error message from last plan generation attempt */

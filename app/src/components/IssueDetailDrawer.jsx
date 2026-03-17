@@ -5,6 +5,7 @@ import {
   PlayCircle, Eye, Ban, XCircle, Diff, Wrench, Copy, Check,
   Info, Code, Route, ClipboardCheck, ThumbsUp, ThumbsDown, MessageSquare,
   Loader, Pause, ListOrdered, Lightbulb, Zap, ChevronDown, SlidersHorizontal,
+  GitMerge,
 } from "lucide-react";
 import { STATES, ISSUE_STATE_MACHINE, getIssueTransitions, timeAgo, formatDate, formatDuration } from "../utils.js";
 import { api } from "../api.js";
@@ -102,6 +103,69 @@ function CopyButton({ text }) {
 
 function getStateMachineOrder(state) {
   return { Todo: 0, Queued: 1, Running: 2, Interrupted: 2, "In Review": 3, Blocked: 3, Done: 4, Cancelled: 4 }[state] ?? 0;
+}
+
+// ── Pipeline Stepper ────────────────────────────────────────────────────────
+
+const PIPELINE_STEPS = [
+  { key: "plan", label: "Plan", icon: Lightbulb, states: ["Planning"] },
+  { key: "execute", label: "Execute", icon: PlayCircle, states: ["Todo", "Queued", "Running", "Interrupted"] },
+  { key: "merge", label: "Merge", icon: GitMerge, states: [] },
+  { key: "review", label: "Review", icon: Eye, states: ["In Review"] },
+  { key: "done", label: "Done", icon: CheckCircle2, states: ["Done"] },
+];
+
+function getPipelineIndex(issue) {
+  if (issue.state === "Done") return 4;
+  if (issue.state === "Cancelled") return -1;
+  if (issue.state === "In Review") return 3;
+  if (issue.mergedAt) return 3; // merged but review hasn't started yet
+  if (["Running", "Interrupted", "Queued", "Todo"].includes(issue.state)) return 1;
+  if (issue.state === "Blocked") return issue.mergedAt ? 3 : 1;
+  if (issue.state === "Planning") return 0;
+  return 0;
+}
+
+function PipelineStepper({ issue }) {
+  const currentIdx = getPipelineIndex(issue);
+  const isMerged = !!issue.mergedAt;
+  const isCancelled = issue.state === "Cancelled";
+
+  if (isCancelled) return null;
+
+  return (
+    <div className="flex items-center gap-0 w-full py-2 px-1 overflow-x-auto scrollbar-none">
+      {PIPELINE_STEPS.map((step, i) => {
+        const isDone = i < currentIdx || (i === currentIdx && issue.state === "Done");
+        const isCurrent = i === currentIdx && issue.state !== "Done";
+        const isMergeStep = step.key === "merge";
+        const mergeComplete = isMergeStep && isMerged;
+        const stepDone = isDone || mergeComplete;
+        const Icon = step.icon;
+
+        return (
+          <React.Fragment key={step.key}>
+            {i > 0 && (
+              <div className={`flex-1 h-0.5 min-w-3 transition-colors duration-300 ${stepDone || isDone ? "bg-success" : isCurrent ? "bg-primary/40" : "bg-base-300"}`} />
+            )}
+            <div className="flex flex-col items-center gap-0.5 shrink-0" title={step.label}>
+              <div className={[
+                "size-7 rounded-full flex items-center justify-center transition-all duration-300",
+                stepDone ? "bg-success text-success-content" : "",
+                isCurrent ? "bg-primary text-primary-content ring-2 ring-primary/30 scale-110" : "",
+                !stepDone && !isCurrent ? "bg-base-300 text-base-content/40" : "",
+              ].filter(Boolean).join(" ")}>
+                {stepDone ? <CheckCircle2 className="size-3.5" /> : <Icon className="size-3.5" />}
+              </div>
+              <span className={`text-[10px] leading-tight ${isCurrent ? "font-semibold text-primary" : stepDone ? "text-success font-medium" : "opacity-40"}`}>
+                {step.label}
+              </span>
+            </div>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
 }
 
 // ── Tab: Overview ───────────────────────────────────────────────────────────
@@ -1112,8 +1176,28 @@ function ReviewTab({ issue, issueId, onStateChange }) {
   const handleRework = () => { setVerdict("rework"); onStateChange?.(issue.id, "Queued"); };
   const handleReject = () => { setVerdict("rejected"); onStateChange?.(issue.id, "Blocked"); };
 
+  const mergeResult = issue.mergeResult;
+  const isMerged = !!issue.mergedAt;
+
   return (
     <div className="space-y-5">
+      {/* Merge banner */}
+      {isMerged && (
+        <div className={`alert border text-sm ${mergeResult?.conflicts > 0 ? "border-warning/30 bg-warning/5" : "border-success/30 bg-success/5"}`}>
+          <GitMerge className={`size-4 shrink-0 ${mergeResult?.conflicts > 0 ? "text-warning" : "text-success"}`} />
+          <div>
+            <span className="font-semibold">Code merged to project root</span>
+            {mergeResult && (
+              <span className="opacity-70"> — {mergeResult.copied} file{mergeResult.copied !== 1 ? "s" : ""} copied{mergeResult.deleted > 0 ? `, ${mergeResult.deleted} deleted` : ""}</span>
+            )}
+            {mergeResult?.conflicts > 0 && (
+              <p className="text-xs text-warning font-medium mt-0.5">{mergeResult.conflicts} file{mergeResult.conflicts !== 1 ? "s" : ""} conflicted with another worker and were skipped.</p>
+            )}
+            <p className="text-xs opacity-50 mt-0.5">The code is available in the project. You can run, test, and preview it before approving.</p>
+          </div>
+        </div>
+      )}
+
       {/* Status banners */}
       {isDone && (
         <div className="alert alert-success text-sm"><CheckCircle2 className="size-4" /> This issue has been approved.</div>
@@ -1389,7 +1473,10 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
             </button>
           </div>
 
-          <h2 className="text-lg font-bold leading-tight mb-3">{issue.title || "-"}</h2>
+          <h2 className="text-lg font-bold leading-tight mb-2">{issue.title || "-"}</h2>
+
+          {/* Pipeline stepper */}
+          <PipelineStepper issue={issue} />
 
           {/* Tabs — horizontally scrollable on mobile with fade edges */}
           <div className="relative">
