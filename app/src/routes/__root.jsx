@@ -1,7 +1,7 @@
 import { createRootRoute, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
 import { DashboardProvider, useDashboard } from "../context/DashboardContext";
 import { useSettings, getSettingsList, getSettingValue } from "../hooks";
-import { lazy, Suspense, useState, useCallback, useEffect, useMemo } from "react";
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import Header from "../components/Header";
 import Fab from "../components/Fab";
 import MobileDock from "../components/MobileDock";
@@ -184,29 +184,39 @@ function LoadingHero() {
 
 function OnboardingGate({ children }) {
   const settingsQuery = useSettings();
-  const navigate = useNavigate();
-  const routerState = useRouterState();
-  const isOnboardingRoute = routerState.location.pathname === "/onboarding";
-  const [redirecting, setRedirecting] = useState(false);
 
   const settingsList = getSettingsList(settingsQuery.data);
   const completed = getSettingValue(settingsList, "ui.onboarding.completed", null);
-  const needsOnboarding = !completed && !settingsQuery.isLoading && !isOnboardingRoute;
 
-  useEffect(() => {
-    if (needsOnboarding) {
-      setRedirecting(true);
-      navigate({ to: "/onboarding", replace: true });
-    } else if (redirecting && !needsOnboarding) {
-      setRedirecting(false);
-    }
-  }, [needsOnboarding, redirecting, navigate]);
-
-  if (settingsQuery.isLoading || redirecting) {
+  // Still loading settings — show hero
+  if (settingsQuery.isLoading) {
     return <LoadingHero />;
   }
 
+  // Onboarding not completed — show inline wizard (no navigation needed)
+  if (completed !== true) {
+    return (
+      <Suspense fallback={<LoadingHero />}>
+        <OnboardingRedirect />
+      </Suspense>
+    );
+  }
+
   return children;
+}
+
+function OnboardingRedirect() {
+  const navigate = useNavigate();
+  const didRedirect = useRef(false);
+
+  useEffect(() => {
+    if (!didRedirect.current) {
+      didRedirect.current = true;
+      navigate({ to: "/onboarding", replace: true });
+    }
+  }, [navigate]);
+
+  return <LoadingHero />;
 }
 
 function RootComponent() {
