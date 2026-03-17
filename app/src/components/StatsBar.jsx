@@ -2,6 +2,21 @@ import React, { useRef, useEffect, useState } from "react";
 import { Zap, TrendingUp, Layers, Activity, ChevronDown } from "lucide-react";
 import { useTokenAnalytics, useHourlyAnalytics } from "../hooks.js";
 
+/** Format a full model slug into a readable short name */
+function formatModelName(slug) {
+  if (!slug || typeof slug !== "string") return slug || "unknown";
+  // claude-sonnet-4-6 → Sonnet 4.6
+  // claude-opus-4-6 → Opus 4.6
+  // claude-haiku-4-5-20251001 → Haiku 4.5
+  const claudeMatch = slug.match(/claude-(\w+)-(\d+)-(\d+)/);
+  if (claudeMatch) {
+    const family = claudeMatch[1].charAt(0).toUpperCase() + claudeMatch[1].slice(1);
+    return `${family} ${claudeMatch[2]}.${claudeMatch[3]}`;
+  }
+  // codex, gpt-*, o3, o4-mini, etc — return as-is
+  return slug;
+}
+
 /**
  * Smooth count-up animation using requestAnimationFrame.
  * Receives a raw number, formats at each frame with K/M suffix, animates over 600ms.
@@ -228,7 +243,7 @@ function MobileStatsBar({ totalTokens, byPhase, tokensPerHour, eventsPerHour, ha
               <div className="flex flex-col gap-0.5">
                 {modelEntries.slice(0, 3).map(([model, tokens]) => {
                   const color = model.includes("claude") ? "bg-primary" : model.includes("gpt") || model.includes("codex") ? "bg-secondary" : "bg-accent";
-                  const short = model.split("-").slice(-2).join("-");
+                  const short = formatModelName(model);
                   return (
                     <span key={model} className="flex items-center gap-1.5 text-xs">
                       <span className={`inline-block w-2 h-2 rounded-full ${color} shrink-0`} />
@@ -360,7 +375,7 @@ export function StatsBar({ metrics, total, issues = [], compact = false }) {
             <div className="flex flex-col gap-0.5">
               {modelEntries.slice(0, 3).map(([model, tokens]) => {
                 const color = model.includes("claude") ? "bg-primary" : model.includes("gpt") || model.includes("codex") ? "bg-secondary" : "bg-accent";
-                const short = model.split("-").slice(-2).join("-");
+                const short = formatModelName(model);
                 return (
                   <span key={model} className="flex items-center gap-1.5 text-xs">
                     <span className={`inline-block w-2 h-2 rounded-full ${color} shrink-0`} />
@@ -438,7 +453,7 @@ export function StatsBar({ metrics, total, issues = [], compact = false }) {
             <span className="flex items-center gap-2 mt-1">
               {modelEntries.slice(0, 3).map(([model]) => {
                 const color = model.includes("claude") ? "bg-primary" : model.includes("gpt") || model.includes("codex") ? "bg-secondary" : "bg-accent";
-                const short = model.split("-").slice(-2).join("-");
+                const short = formatModelName(model);
                 return (
                   <span key={model} className="flex items-center gap-1 text-[10px]">
                     <span className={`inline-block w-2 h-2 rounded-full ${color}`} />
