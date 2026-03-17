@@ -197,8 +197,10 @@ function OnboardingGate({ children }) {
     if (needsOnboarding) {
       setRedirecting(true);
       navigate({ to: "/onboarding", replace: true });
+    } else if (redirecting && !needsOnboarding) {
+      setRedirecting(false);
     }
-  }, [needsOnboarding, navigate]);
+  }, [needsOnboarding, redirecting, navigate]);
 
   if (settingsQuery.isLoading || redirecting) {
     return <LoadingHero />;
