@@ -1027,6 +1027,8 @@ async function runCommandWithTimeout(
     child.stdout?.on("data", onChunk);
     child.stderr?.on("data", onChunk);
 
+    const AGENT_STALE_OUTPUT_MS = 300_000; // 5 minutes without output growth → stuck
+
     const timer = setTimeout(() => {
       timedOut = true;
       // Kill the whole process group (detached child + its children)
@@ -1034,19 +1036,55 @@ async function runCommandWithTimeout(
       else { child.kill("SIGTERM"); }
     }, config.commandTimeoutMs);
 
+    // Progress watchdog: check PID alive + output growing every 30s
+    let lastWatchdogBytes = 0;
+    let lastOutputGrowthAt = Date.now();
+    let watchdogKilled = false;
+    const watchdog = setInterval(() => {
+      // Check if PID is still alive
+      if (pid) {
+        try { process.kill(pid, 0); } catch {
+          // PID died without triggering close — force resolve
+          clearInterval(watchdog);
+          clearTimeout(timer);
+          watchdogKilled = true;
+          try { rmSync(pidFile, { force: true }); } catch {}
+          resolve({ success: false, code: null, output: appendFileTail(output, `\nAgent process died unexpectedly (PID ${pid}).`, config.logLinesTail) });
+          return;
+        }
+      }
+      // Check if output is still growing
+      if (outputBytes > lastWatchdogBytes) {
+        lastWatchdogBytes = outputBytes;
+        lastOutputGrowthAt = Date.now();
+      } else if (Date.now() - lastOutputGrowthAt > AGENT_STALE_OUTPUT_MS) {
+        clearInterval(watchdog);
+        clearTimeout(timer);
+        timedOut = true;
+        watchdogKilled = true;
+        if (pid) { try { process.kill(-pid, "SIGTERM"); } catch {} }
+        else { child.kill("SIGTERM"); }
+        try { rmSync(pidFile, { force: true }); } catch {}
+        resolve({ success: false, code: null, output: appendFileTail(output, `\nAgent process stuck — no output for ${Math.round(AGENT_STALE_OUTPUT_MS / 60_000)} minutes.`, config.logLinesTail) });
+      }
+    }, 30_000);
+
     const cleanup = () => {
+      clearInterval(watchdog);
       try { rmSync(pidFile, { force: true }); } catch {}
     };
 
     child.on("error", () => {
       clearTimeout(timer);
       cleanup();
+      if (watchdogKilled) return;
       resolve({ success: false, code: null, output: `Command execution failed for issue ${issue.id}.` });
     });
 
     child.on("close", (code) => {
       clearTimeout(timer);
       cleanup();
+      if (watchdogKilled) return;
       if (timedOut) {
         resolve({ success: false, code: null, output: appendFileTail(output, `\nExecution timeout after ${config.commandTimeoutMs}ms.`, config.logLinesTail) });
         return;

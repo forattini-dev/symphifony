@@ -460,14 +460,44 @@ export async function generatePlan(
       session.outputBytes += String(chunk).length;
     });
 
+    const PLAN_TIMEOUT_MS = 1_800_000; // 30 minutes
+    const STALE_OUTPUT_MS = 300_000;   // 5 minutes without output growth → stuck
+
     const timer = setTimeout(() => {
       if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
       else { child.kill("SIGTERM"); }
-      reject(new Error("Plan generation timed out."));
-    }, 600_000);
+      reject(new Error("Plan generation timed out after 30 minutes."));
+    }, PLAN_TIMEOUT_MS);
 
-    child.on("error", () => { clearTimeout(timer); reject(new Error("Failed to execute planning command.")); });
+    // Progress watchdog: check PID alive + output growing every 30s
+    let lastWatchdogBytes = 0;
+    let lastOutputGrowthAt = Date.now();
+    const watchdog = setInterval(() => {
+      // Check if PID is still alive
+      if (child.pid) {
+        try { process.kill(child.pid, 0); } catch {
+          clearInterval(watchdog);
+          clearTimeout(timer);
+          reject(new Error(`Planning process died unexpectedly (PID ${child.pid}).`));
+          return;
+        }
+      }
+      // Check if output is still growing
+      if (session.outputBytes > lastWatchdogBytes) {
+        lastWatchdogBytes = session.outputBytes;
+        lastOutputGrowthAt = Date.now();
+      } else if (Date.now() - lastOutputGrowthAt > STALE_OUTPUT_MS) {
+        clearInterval(watchdog);
+        clearTimeout(timer);
+        if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
+        else { child.kill("SIGTERM"); }
+        reject(new Error(`Planning process stuck — no output for ${Math.round(STALE_OUTPUT_MS / 60_000)} minutes.`));
+      }
+    }, 30_000);
+
+    child.on("error", () => { clearInterval(watchdog); clearTimeout(timer); reject(new Error("Failed to execute planning command.")); });
     child.on("close", (code) => {
+      clearInterval(watchdog);
       clearTimeout(timer);
       rmSync(tempDir, { recursive: true, force: true });
       if (code !== 0) {
@@ -619,21 +649,54 @@ export async function refinePlan(
     child.unref();
     child.stdin?.end();
 
+    let refineOutputBytes = 0;
     child.stdout?.on("data", (chunk) => {
       stdout = appendFileTail(stdout, String(chunk), 32_000);
+      refineOutputBytes += String(chunk).length;
     });
     child.stderr?.on("data", (chunk) => {
       stdout = appendFileTail(stdout, String(chunk), 32_000);
+      refineOutputBytes += String(chunk).length;
     });
+
+    const REFINE_TIMEOUT_MS = 1_800_000; // 30 minutes
+    const REFINE_STALE_OUTPUT_MS = 300_000; // 5 minutes without output growth
 
     const timer = setTimeout(() => {
       if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
       else { child.kill("SIGTERM"); }
-      reject(new Error("Plan refinement timed out."));
-    }, 600_000);
+      reject(new Error("Plan refinement timed out after 30 minutes."));
+    }, REFINE_TIMEOUT_MS);
 
-    child.on("error", () => { clearTimeout(timer); reject(new Error("Failed to execute refinement command.")); });
+    // Progress watchdog: check PID alive + output growing every 30s
+    let lastRefineWatchdogBytes = 0;
+    let lastRefineOutputGrowthAt = Date.now();
+    const watchdog = setInterval(() => {
+      // Check if PID is still alive
+      if (child.pid) {
+        try { process.kill(child.pid, 0); } catch {
+          clearInterval(watchdog);
+          clearTimeout(timer);
+          reject(new Error(`Refinement process died unexpectedly (PID ${child.pid}).`));
+          return;
+        }
+      }
+      // Check if output is still growing
+      if (refineOutputBytes > lastRefineWatchdogBytes) {
+        lastRefineWatchdogBytes = refineOutputBytes;
+        lastRefineOutputGrowthAt = Date.now();
+      } else if (Date.now() - lastRefineOutputGrowthAt > REFINE_STALE_OUTPUT_MS) {
+        clearInterval(watchdog);
+        clearTimeout(timer);
+        if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
+        else { child.kill("SIGTERM"); }
+        reject(new Error(`Refinement process stuck — no output for ${Math.round(REFINE_STALE_OUTPUT_MS / 60_000)} minutes.`));
+      }
+    }, 30_000);
+
+    child.on("error", () => { clearInterval(watchdog); clearTimeout(timer); reject(new Error("Failed to execute refinement command.")); });
     child.on("close", (code) => {
+      clearInterval(watchdog);
       clearTimeout(timer);
       rmSync(tempDir, { recursive: true, force: true });
       if (code !== 0) {

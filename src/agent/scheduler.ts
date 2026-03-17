@@ -21,7 +21,7 @@ import {
 import {
   getIssueCapabilityPriority,
 } from "./providers.ts";
-import { canRunIssue, issueHasResumableSession, runIssueOnce } from "./agent.ts";
+import { canRunIssue, issueHasResumableSession, runIssueOnce, isAgentStillRunning } from "./agent.ts";
 
 let shuttingDown = false;
 let lastPersistAt = 0;
@@ -166,19 +166,28 @@ export function analyzeParallelizability(issues: IssueEntry[]): ParallelismAnaly
 export async function ensureNotStale(state: RuntimeState, staleTimeoutMs: number): Promise<void> {
   const limit = Date.now() - staleTimeoutMs;
   for (const issue of state.issues) {
-    if (
-      EXECUTING_STATES.has(issue.state)
-      && Date.parse(issue.updatedAt) < limit
-      && !issueHasResumableSession(issue)
-    ) {
+    if (!EXECUTING_STATES.has(issue.state)) continue;
+    if (issueHasResumableSession(issue)) continue;
+
+    // Fast path: if the agent PID is dead, immediately mark as Blocked
+    const agentStatus = isAgentStillRunning(issue);
+    const pidDead = agentStatus.pid !== null && !agentStatus.alive;
+
+    if (pidDead || Date.parse(issue.updatedAt) < limit) {
       const staleMinutes = Math.round((Date.now() - Date.parse(issue.updatedAt)) / 60_000);
-      logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, updatedAt: issue.updatedAt }, "[Scheduler] Recovering stale issue");
+      const reason = pidDead
+        ? `Agent process died (PID ${agentStatus.pid!.pid}) — auto-recovering.`
+        : `Issue state auto-recovered from stale execution.`;
+      logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, updatedAt: issue.updatedAt, pidDead }, "[Scheduler] Recovering stale issue");
       issue.attempts += 1;
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       issue.startedAt = undefined;
       markIssueDirty(issue.id);
-      await transitionIssueState(issue, "Blocked", `Issue state auto-recovered from stale execution.`);
-      addEvent(state, issue.id, "info", `Issue ${issue.identifier} was stale for over ${staleMinutes} minute(s) in ${issue.state} state, moved to Blocked for retry.`);
+      await transitionIssueState(issue, "Blocked", reason);
+      const eventMsg = pidDead
+        ? `Issue ${issue.identifier} agent process died (PID ${agentStatus.pid!.pid}), moved to Blocked for retry.`
+        : `Issue ${issue.identifier} was stale for over ${staleMinutes} minute(s) in ${issue.state} state, moved to Blocked for retry.`;
+      addEvent(state, issue.id, "info", eventMsg);
     }
   }
 }

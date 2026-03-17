@@ -153,7 +153,7 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
       case SETTING_ID_COMMAND_TIMEOUT_MS: {
         const parsed = parseIntegerSetting(setting.value);
         if (parsed !== null) {
-          nextConfig.commandTimeoutMs = clamp(parsed, 1_000, 600_000);
+          nextConfig.commandTimeoutMs = clamp(parsed, 1_000, 3_600_000);
         }
         break;
       }
