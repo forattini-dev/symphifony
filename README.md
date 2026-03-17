@@ -6,10 +6,8 @@
 
 Point at a repo. Open the dashboard. AI plans, builds, and reviews — you approve.
 
-One command. Full orchestra.
-
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)]()
+[![Node](https://img.shields.io/badge/node-%3E%3D23-brightgreen.svg)]()
 
 </div>
 
@@ -21,97 +19,75 @@ One command. Full orchestra.
 npx -y fifony --port 4040
 ```
 
-Open **http://localhost:4040**. First run launches the **onboarding wizard** — it detects your CLIs, scans your project, and configures everything.
-
-State lives in `.fifony/`. No accounts, no cloud, no setup.
-
----
-
-## What Makes Fifony Different
-
-### Mixed-Agent Pipeline
-
-The core idea: **different AI providers handle different stages** of a single task.
-
-```
-  Plan          Execute        Review
-┌─────────┐   ┌─────────┐   ┌─────────┐
-│ Claude   │──▶│ Codex   │──▶│ Claude  │
-│ Opus 4.6 │   │         │   │ Sonnet  │
-│ high     │   │ medium  │   │ medium  │
-└─────────┘   └─────────┘   └─────────┘
-```
-
-Claude plans. Codex executes. Claude reviews. Each stage gets its own **provider**, **model**, and **reasoning effort** — configurable per-project in Settings → Workflow.
-
-### Onboarding Wizard
-
-First run detects your environment and walks you through setup:
-
-1. **Pipeline** — Choose which CLI runs each stage (planner, executor, reviewer)
-2. **Project Scan** — AI analyzes your codebase to detect language, stack, and domains
-3. **Domains** — Pre-selected by AI, 21 options across Technical/Industry/Role
-4. **Agents & Skills** — Curated catalog of 15 agents and 5 skills, auto-recommended by domain
-5. **Effort** — Per-stage reasoning effort, reactive to which CLI is selected
-6. **Workers & Theme** — Parallel worker count + visual theme
-
-Settings saved progressively. Re-run anytime from Settings.
-
-### Language Agnostic
-
-The project scanner works with any codebase — it detects build files for 18+ ecosystems:
-
-`package.json` · `Cargo.toml` · `pyproject.toml` · `go.mod` · `build.gradle` · `Gemfile` · `mix.exs` · `pubspec.yaml` · `CMakeLists.txt` · `composer.json` · `Package.swift` · `deno.json` · `pom.xml` · `Dockerfile` · and more
-
-Uses the detected CLI with `--reasoning-effort low` for fast, accurate analysis.
+Open **http://localhost:4040**. The first run launches the onboarding wizard — it detects your CLIs, scans your project, and configures everything in six steps. State lives in `.fifony/`. No accounts, no cloud, no external database.
 
 ---
 
 ## How It Works
 
+Fifony breaks every task into three stages, each independently configurable:
+
 ```
-Planning → Todo → Queued → Running → In Review → Done
-    ↑                                      ↓
-    └──── Blocked ←── Rework ──────────────┘
+  Plan             Execute          Review
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Claude       │─▶│ Codex        │─▶│ Claude       │
+│ Opus 4.5     │  │              │  │ Sonnet 4.5   │
+│ effort: high │  │ effort: med  │  │ effort: med  │
+└──────────────┘  └──────────────┘  └──────────────┘
 ```
 
-1. **Create an Issue** — Click "+", describe what you want done
-2. **AI Plans It** — Structured execution plan with steps, risks, file paths, complexity
-3. **You Approve** — Review the plan, approve → agents pick it up
-4. **Agents Execute** — Isolated workspace, live output streaming, PID tracking
-5. **Automated Review** — Diff inspection, approve/rework/block decision
-6. **You Ship** — Review the diff, merge
+You set the provider, model, and reasoning effort for each stage. Claude plans, Codex executes, Claude reviews — or any combination you prefer. Configure it in the Settings UI or drop a `WORKFLOW.md` in your project root.
+
+### Issue Lifecycle
+
+```
+Planning → Todo → Queued → Running → In Review → Done
+                                ↓            ↓
+                           Interrupted    Blocked → (retry with backoff)
+```
+
+1. **Create** — Describe what you want done. Fifony AI-enhances the title and description before planning.
+2. **Plan** — The planner agent generates a structured execution plan: phases, steps, target files, complexity, risks.
+3. **Approve** — You review the plan. Optionally chat with the AI to refine it before approving.
+4. **Execute** — Agents run in an isolated workspace (a copy of your project). Live output streams to the dashboard.
+5. **Review** — The reviewer agent inspects the diff and either approves, requests rework, or blocks.
+6. **Merge** — You review the diff and merge the workspace back to your project root.
+
+Agents run as detached child processes, tracked by PID. If the server restarts mid-run, Fifony recovers on the next boot.
+
+---
+
+## Onboarding Wizard
+
+The first run walks you through six steps:
+
+| Step | What happens |
+|------|-------------|
+| CLI Detection | Finds `claude`, `codex`, `git`, `node`, `docker`, and other tools on your system |
+| Project Scan | Detects language, stack, and build system — 18+ ecosystems supported |
+| AI Analysis | Uses the detected CLI to extract domain context from your codebase |
+| Domains | 21 options across Technical / Industry / Role, pre-selected by the AI |
+| Agents & Skills | Catalog of 15 agents and 5 skills, auto-recommended for your domains |
+| Effort & Workers | Per-stage reasoning effort, worker concurrency, and visual theme |
+
+Settings are saved progressively and can be re-run from Settings at any time.
+
+Supported build files include: `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `build.gradle`, `Gemfile`, `mix.exs`, `pubspec.yaml`, `CMakeLists.txt`, `composer.json`, `Package.swift`, `deno.json`, `pom.xml`, `Dockerfile`, and more.
 
 ---
 
 ## Dashboard
 
-| Page | What you see |
-|------|-------------|
-| **Kanban** | Drag-and-drop board. Cards flow through the pipeline with state-colored borders and stagger animations. |
-| **Issues** | Searchable list with descriptions, labels, token usage, duration, and filter chips by state. |
-| **Agents** | Live cockpit with agent slots, real-time log output, queue, token usage sparkline. |
-| **Settings** | Tabbed: General, Workflow (pipeline config), Notifications, Providers. |
+| Route | What you see |
+|-------|-------------|
+| `/kanban` | Drag-and-drop board. Cards flow through pipeline stages. Desktop click+drag, mobile long-press. |
+| `/issues` | Searchable list with state, label, and capability filters. Shows token usage and duration per issue. |
+| `/agents` | Live cockpit: worker slots, queue depth, real-time log tail, token sparklines per agent. |
+| `/discover` | Import TODOs from your codebase, GitHub issues, or AI-suggested tasks. |
+| `/analytics` | Token usage trends, daily and weekly rollups, top issues by cost, per-model breakdown. |
+| `/settings` | General, Workflow pipeline config, Notifications, Providers. |
 
-### Kanban Drag & Drop
-
-Drag issues between columns to change state. Works on desktop (click + drag) and mobile (long-press). Valid drop targets highlight green, invalid ones dim. State machine enforces valid transitions only.
-
-### Micro-interactions
-
-Every interaction has visual feedback:
-
-- **Cards** lift on hover with state-colored left border
-- **Running cards** pulse with a breathing border glow
-- **Buttons** scale on press, hover lift
-- **Toasts** slide in with progress bar, typed as success/error/info
-- **Drawers** slide in/out with backdrop fade
-- **View transitions** fade between routes
-- **Theme changes** cross-fade in 300ms
-- **Counters** bounce when values change
-- **Skeleton loaders** shimmer during initial load
-- **Empty states** animate in with helpful guidance
-- **Confetti** bursts on issue creation
+The **Issue Detail Drawer** shows the full plan (phases and steps), all execution sessions, the workspace diff, and a per-phase token breakdown — Plan / Execute / Review — with input and output counts per model.
 
 ### PWA
 
@@ -121,15 +97,15 @@ Install as a desktop app. Works offline. Desktop notifications when issues chang
 
 ## Agent & Skill Catalog
 
-Fifony ships with a curated catalog of specialist agents:
+Fifony ships with 15 specialist agents:
 
-| Agent | Domain |
-|-------|--------|
+| Agent | Focus |
+|-------|-------|
 | Frontend Developer | React, Vue, CSS, responsive design |
 | Backend Architect | APIs, microservices, scalable systems |
 | Database Optimizer | Schema design, query optimization, indexing |
 | Security Engineer | OWASP, threat modeling, secure code review |
-| DevOps Automator | CI/CD, Docker, Kubernetes, cloud infra |
+| DevOps Automator | CI/CD, Docker, Kubernetes, cloud infrastructure |
 | Mobile App Builder | iOS, Android, React Native, Flutter |
 | AI Engineer | ML models, LLM integration, data pipelines |
 | UI Designer | Visual design, component libraries, design systems |
@@ -141,9 +117,36 @@ Fifony ships with a curated catalog of specialist agents:
 | Software Architect | System design, DDD, architectural patterns |
 | Game Designer | Game mechanics, level design, cross-engine |
 
-Skills: `commit`, `review-pr`, `debug`, `testing`, `impeccable` (frontend design).
+And 5 skills: `commit`, `review-pr`, `debug`, `testing`, `impeccable` (frontend design system).
 
-Agents are installed to `.claude/agents/` during onboarding. Compatible with both Claude Code and Codex CLI.
+Agents install to `.claude/agents/` and `.codex/agents/` during onboarding. Skills load from `SKILL.md` files in `.claude/skills/`, `.codex/skills/`, or your home directory. Fifony infers the right agent from the issue description and target file paths — capability routing is automatic.
+
+---
+
+## CLI Reference
+
+```bash
+# Dashboard + API + scheduler
+npx -y fifony --port 4040
+
+# With Vite HMR for frontend development
+npx -y fifony --port 4040 --dev
+
+# Headless — scheduler only, no UI
+npx -y fifony
+
+# MCP server (stdio)
+npx -y fifony mcp
+
+# Different workspace
+npx -y fifony --workspace /path/to/repo --port 4040
+
+# Run one scheduler cycle and exit
+npx -y fifony --once
+
+# Fine-grained control
+npx -y fifony --concurrency 2 --attempts 3 --poll 500
+```
 
 ---
 
@@ -152,8 +155,10 @@ Agents are installed to `.claude/agents/` during onboarding. Compatible with bot
 Use Fifony as tools inside your editor:
 
 ```bash
-npx -y fifony mcp
+npx -y fifony mcp --workspace /path/to/repo
 ```
+
+Add to `claude_desktop_config.json` or VS Code settings:
 
 ```json
 {
@@ -166,53 +171,52 @@ npx -y fifony mcp
 }
 ```
 
-Create issues, check status, review workflows — without leaving the editor.
+**Resources**: state summary, all issues, workflow config, runtime guide, per-issue detail
+
+**Tools**: `fifony.status`, `fifony.list_issues`, `fifony.create_issue`, `fifony.update_issue_state`, `fifony.integration_config`
+
+**Prompts**: `fifony-integrate-client`, `fifony-plan-issue`, `fifony-review-workflow`
 
 ---
 
-## API
+## REST API
 
-REST + WebSocket API with auto-generated OpenAPI docs:
-
-```
-http://localhost:4040/docs
-```
+Interactive docs at `http://localhost:4040/docs`.
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/state` | Runtime state with issues, metrics, config |
-| `POST /api/issues/create` | Create a new issue |
-| `POST /api/issues/:id/plan` | Generate AI execution plan |
+| `GET /api/state` | Full runtime state: issues, metrics, config |
+| `POST /api/issues/create` | Create an issue |
+| `POST /api/issues/enhance` | AI-enhance title and description |
+| `POST /api/issues/:id/plan` | Generate execution plan |
+| `POST /api/issues/:id/plan/refine` | Refine plan with chat feedback |
 | `POST /api/issues/:id/approve` | Approve plan, start execution |
-| `GET /api/live/:id` | Live agent output (PID, log tail, elapsed) |
+| `POST /api/issues/:id/merge` | Merge workspace to project root |
+| `GET /api/live/:id` | Live agent output: PID, log tail, elapsed time |
 | `GET /api/diff/:id` | Git diff of workspace changes |
 | `GET /api/config/workflow` | Pipeline workflow configuration |
-| `GET /api/scan/project` | Project structure scan |
-| `POST /api/scan/analyze` | AI-powered project analysis |
-| `GET /api/catalog/agents` | Agent catalog (filterable by domain) |
+| `GET /api/analytics/tokens` | Token usage summary |
+| `GET /api/analytics/hourly` | Hourly usage buckets (48h retention) |
+| `GET /api/providers` | Detected providers and availability |
+| `GET /api/catalog/agents` | Agent catalog, filterable by domain |
 | `POST /api/install/agents` | Install agents to project |
-| `GET /api/settings` | All persisted settings |
 | `/ws` | WebSocket for real-time state updates |
 
 ---
 
-## Run Modes
+## Configuration
+
+Fifony reads a `WORKFLOW.md` in your project root if present. Front matter configures the pipeline; the Markdown body defines the execution contract. Settings from the UI write to `.fifony/s3db/`.
+
+**Environment variables** (all optional when using the UI or WORKFLOW.md):
 
 ```bash
-# Full experience — dashboard + API + scheduler
-npx -y fifony --port 4040
-
-# Dev mode — Vite HMR on port+1
-npx -y fifony --port 4040 --dev
-
-# Headless — scheduler only, no UI
-npx -y fifony
-
-# MCP server — stdio for editor integration
-npx -y fifony mcp
-
-# Custom workspace
-npx -y fifony --workspace /path/to/repo --port 4040
+FIFONY_WORKSPACE_ROOT=/path/to/repo
+FIFONY_PERSISTENCE=/path/to/state     # defaults to $FIFONY_WORKSPACE_ROOT
+FIFONY_AGENT_PROVIDER=codex           # codex | claude
+FIFONY_WORKER_CONCURRENCY=2
+FIFONY_MAX_ATTEMPTS=3
+FIFONY_AGENT_MAX_TURNS=4
 ```
 
 ---
@@ -220,19 +224,28 @@ npx -y fifony --workspace /path/to/repo --port 4040
 ## Architecture
 
 ```
-.fifony/                ← all state (gitignore it)
-  s3db/                     ← durable database (issues, events, sessions, settings)
-  source/                   ← codebase snapshot
-  workspaces/               ← isolated per-issue agent workspaces
+.fifony/
+  s3db/           ← durable database (issues, events, sessions, settings)
+  source/         ← project snapshot used for workspace seeding
+  workspaces/     ← isolated per-issue execution directories
 ```
 
-**Persistence**: [s3db.js](https://github.com/forattini-dev/s3db.js) — filesystem-backed database. Issues, events, settings, agent sessions — all persisted and recoverable across restarts.
+**Persistence**: [s3db.js](https://github.com/forattini-dev/s3db.js) — filesystem-backed key-value store. No external database. All state is fully recoverable across restarts.
 
-**State Machine**: `Planning → Todo → Queued → Running → Interrupted → In Review → Blocked → Done → Cancelled`
+**State machine**: The `StateMachinePlugin` enforces valid state transitions. Invalid moves are rejected at the API layer.
 
-**Agent Protection**: Detached child processes survive server restarts. PID tracking for recovery. Graceful shutdown marks running issues as Interrupted.
+**Token tracking**: O(1) in-memory ledger, no I/O on the hot path. Per-phase and per-model breakdown. Daily and hourly rollups via the `EventualConsistencyPlugin`. Cost estimates when the provider reports them.
 
-**Token Tracking**: Per-model token usage with daily/weekly rollups and cost estimates.
+**Capability routing**: Fifony infers task type from the issue description and target file paths. It derives `capability:<category>` and `overlay:<name>` labels for queue triage. When `paths[]` is omitted, routing falls back to path mentions in the issue text and files changed in an existing workspace.
+
+**Graceful shutdown**: Running issues are marked `Interrupted` on SIGTERM. They resume from the last completed turn on the next boot.
+
+---
+
+## Requirements
+
+- Node.js 23 or newer
+- At least one of: `claude` CLI, `codex` CLI
 
 ---
 
@@ -240,11 +253,11 @@ npx -y fifony --workspace /path/to/repo --port 4040
 
 Fifony is built on the shoulders of:
 
-- **[OpenAI Codex CLI](https://github.com/openai/codex)** — Original foundation (Apache 2.0). See [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md).
+- **[OpenAI Codex CLI](https://github.com/openai/codex)** — Original foundation (Apache 2.0). See [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - **[Agency Agents](https://github.com/msitarzewski/agency-agents)** — Inspiration for the agent catalog.
-- **[Impeccable](https://github.com/pbakaus/impeccable)** — Frontend design skill system by Paul Bakaus.
-- **[s3db.js](https://github.com/forattini-dev/s3db.js)** — Filesystem-backed persistence layer.
-- **[DaisyUI](https://daisyui.com)** — Component library for the dashboard.
+- **[Impeccable](https://github.com/pbakaus/impeccable)** — Frontend design skill by Paul Bakaus.
+- **[s3db.js](https://github.com/forattini-dev/s3db.js)** — Filesystem persistence layer.
+- **[DaisyUI](https://daisyui.com)** — Dashboard component library.
 
 ---
 
