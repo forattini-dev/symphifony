@@ -58,9 +58,12 @@ export function installGracefulShutdown(
     // Mark running issues as Interrupted so they resume on next boot
     for (const issue of state.issues) {
       if (running.has(issue.id) && (issue.state === "Running" || issue.state === "In Review")) {
-        issue.state = "Interrupted" as any;
-        issue.updatedAt = now();
-        issue.history.push(`[${issue.updatedAt}] Interrupted by ${signal} — will resume on next start.`);
+        try {
+          await transitionIssueState(issue, "Interrupted", `Interrupted by ${signal} — will resume on next start.`, { fallbackToLocal: true });
+        } catch {
+          // Issue may already be in a terminal state; proceed with shutdown regardless
+          logger.warn(`Could not transition issue ${issue.identifier} to Interrupted during shutdown.`);
+        }
         addEvent(state, issue.id, "info", `Issue ${issue.identifier} interrupted by shutdown.`);
       }
     }
@@ -170,12 +173,14 @@ export async function ensureNotStale(state: RuntimeState, staleTimeoutMs: number
       && !TERMINAL_STATES.has(issue.state)
       && !issueHasResumableSession(issue)
     ) {
+      const staleMinutes = Math.round((Date.now() - Date.parse(issue.updatedAt)) / 60_000);
       logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, updatedAt: issue.updatedAt }, "[Scheduler] Recovering stale issue");
       issue.attempts += 1;
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       issue.startedAt = undefined;
       markIssueDirty(issue.id);
       await transitionIssueState(issue, "Blocked", `Issue state auto-recovered from stale execution.`);
+      addEvent(state, issue.id, "info", `Issue ${issue.identifier} was stale for over ${staleMinutes} minute(s) in ${issue.state} state, moved to Blocked for retry.`);
     }
   }
 }

@@ -166,6 +166,7 @@ export type RuntimeConfig = {
 
 export type RuntimeMetrics = {
   total: number;
+  planning: number;
   queued: number;
   inProgress: number;
   blocked: number;

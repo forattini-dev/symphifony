@@ -395,6 +395,7 @@ export function buildRuntimeState(
 }
 
 export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
+  let planning = 0;
   let queued = 0;
   let inProgress = 0;
   let blocked = 0;
@@ -416,6 +417,9 @@ export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
     }
 
     switch (issue.state) {
+      case "Planning":
+        planning += 1;
+        break;
       case "Todo":
         queued += 1;
         break;
@@ -440,6 +444,7 @@ export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
   if (completionTimes.length === 0) {
     return {
       total: issues.length,
+      planning,
       queued,
       inProgress,
       blocked,
@@ -458,6 +463,7 @@ export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
 
   return {
     total: issues.length,
+    planning,
     queued,
     inProgress,
     blocked,

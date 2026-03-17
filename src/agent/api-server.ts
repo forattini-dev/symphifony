@@ -744,6 +744,9 @@ export async function startApiServer(
       },
       "POST /api/issues/:id/plan/refine": async (c: any) => {
         return mutateIssueState(c, async (issue) => {
+          if (issue.state !== "Planning") {
+            throw new Error(`Cannot refine plan for issue in state ${issue.state}. Must be in Planning.`);
+          }
           if (!issue.plan) {
             throw new Error("Issue has no plan to refine. Generate a plan first.");
           }
