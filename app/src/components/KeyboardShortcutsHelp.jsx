@@ -6,6 +6,7 @@ const SHORTCUTS = [
   { key: "k", description: "Navigate to Kanban" },
   { key: "i", description: "Navigate to Issues" },
   { key: "a", description: "Navigate to Agents" },
+  { key: "t", description: "Navigate to Analytics" },
   { key: "s", description: "Navigate to Settings" },
   { key: "1–6", description: "Jump to kanban column by index" },
   { key: "Esc", description: "Close any open drawer / modal" },

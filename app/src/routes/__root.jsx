@@ -45,6 +45,7 @@ function RootLayout() {
     k: () => navigate({ to: "/kanban" }),
     i: () => navigate({ to: "/issues" }),
     a: () => navigate({ to: "/agents" }),
+    t: () => navigate({ to: "/analytics" }),
     s: () => navigate({ to: "/settings" }),
     1: () => {}, // column nav – wired for future use
     2: () => {},
