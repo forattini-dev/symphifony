@@ -49,7 +49,6 @@ export function IssueCard({ issue, onSelect, dragHandlers, isDragging, isSelecte
   const isCancelled = issue.state === "Cancelled";
   const isBlocked = issue.state === "Blocked";
   const isPlanBusy = issue.planningStatus === "planning" || issue.planningStatus === "refining";
-  const showTokens = isRunning || isInReview;
 
   // Track previous token count for bump animation
   const prevTokensRef = useRef(issue.tokenUsage?.totalTokens);
@@ -79,11 +78,8 @@ export function IssueCard({ issue, onSelect, dragHandlers, isDragging, isSelecte
     prevStateRef.current = issue.state;
   }, [issue.state]);
 
-  const formattedTokens = showTokens ? formatTokens(issue.tokenUsage?.totalTokens) : null;
+  const formattedTokens = (isRunning || isInReview) ? formatTokens(issue.tokenUsage?.totalTokens) : null;
   const phase = isRunning ? derivePhase(issue.tokensByPhase) : null;
-  const outputTail = isRunning && issue.commandOutputTail
-    ? issue.commandOutputTail.trim().split("\n").pop()?.slice(-60) || null
-    : null;
 
   const handleClick = (e) => {
     if (e.shiftKey) {
@@ -163,58 +159,39 @@ export function IssueCard({ issue, onSelect, dragHandlers, isDragging, isSelecte
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 text-xs opacity-50">
-          <span>P{issue.priority}</span>
-          <span>·</span>
-          <span>{timeAgo(issue.updatedAt)}</span>
+        <div className="flex items-center gap-1.5 text-xs opacity-50 truncate">
+          <span className="shrink-0">P{issue.priority}</span>
+          <span className="shrink-0">·</span>
+          <span className="shrink-0">{timeAgo(issue.updatedAt)}</span>
           {issue.capabilityCategory && (
             <>
-              <span>·</span>
-              <span>{issue.capabilityCategory}</span>
-            </>
-          )}
-
-          {/* Live token counter */}
-          {formattedTokens && (
-            <>
-              <span>·</span>
-              <span className={`inline-flex items-center gap-0.5 ${tokenBump ? "animate-count-bump" : ""}`}>
-                <Zap size={10} />
-                {formattedTokens} tokens
-              </span>
-            </>
-          )}
-
-          {/* Phase indicator */}
-          {phase && (
-            <>
-              <span>·</span>
-              <span className="inline-flex items-center gap-1 text-primary font-medium">
-                <span className="issue-phase-dot" />
-                {phase}
-              </span>
-            </>
-          )}
-
-          {/* Planning in progress indicator */}
-          {isPlanBusy && (
-            <>
-              <span>·</span>
-              <span className="inline-flex items-center gap-1 text-info font-medium">
-                <Loader size={10} className="animate-spin" />
-                {issue.planningStatus === "refining" ? "Refining" : "Planning"}
-              </span>
+              <span className="shrink-0">·</span>
+              <span className="truncate">{issue.capabilityCategory}</span>
             </>
           )}
         </div>
 
-        {/* Recent command output preview */}
-        {outputTail && (
-          <div
-            className="font-mono text-[10px] leading-tight opacity-40 truncate mt-0.5"
-            title={issue.commandOutputTail}
-          >
-            {outputTail}
+        {/* Secondary info line — tokens + phase (only when active) */}
+        {(formattedTokens || phase || isPlanBusy) && (
+          <div className="flex items-center gap-1.5 text-xs truncate">
+            {formattedTokens && (
+              <span className={`inline-flex items-center gap-0.5 opacity-50 shrink-0 ${tokenBump ? "animate-count-bump" : ""}`}>
+                <Zap size={10} />
+                {formattedTokens}
+              </span>
+            )}
+            {phase && (
+              <span className="inline-flex items-center gap-1 text-primary font-medium shrink-0">
+                <span className="issue-phase-dot" />
+                {phase}
+              </span>
+            )}
+            {isPlanBusy && (
+              <span className="inline-flex items-center gap-1 text-info font-medium shrink-0">
+                <Loader size={10} className="animate-spin" />
+                {issue.planningStatus === "refining" ? "Refining" : "Planning"}
+              </span>
+            )}
           </div>
         )}
       </div>
