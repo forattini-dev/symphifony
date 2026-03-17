@@ -823,41 +823,53 @@ function AgentsSkillsStep({
 // ── Step 5: Configure Effort ────────────────────────────────────────────────
 
 function RoleEffortSelector({ role, title, description, providerName, value, onChange, options }) {
+  const currentIndex = Math.max(0, options.findIndex((o) => o.value === value));
+  const current = options[currentIndex] || options[0];
+  const Icon = current.icon;
+
   return (
     <div className="card bg-base-200">
-      <div className="card-body p-5 gap-3">
+      <div className="card-body p-5 gap-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold">{title}</h3>
-            <p className="text-xs text-base-content/60 mt-1">{description}</p>
+            <p className="text-xs text-base-content/60 mt-0.5">{description}</p>
           </div>
           {providerName && (
             <span className="badge badge-sm badge-soft badge-primary capitalize">{providerName}</span>
           )}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {options.map((opt) => {
-            const Icon = opt.icon;
-            const isSelected = value === opt.value;
-            return (
-              <button
-                key={`${role}-${opt.value}`}
-                className={`card card-interactive bg-base-100 cursor-pointer transition-all text-left ${
-                  isSelected ? "ring-2 ring-primary ring-offset-2 ring-offset-base-200" : ""
-                }`}
-                onClick={() => onChange(opt.value)}
+
+        {/* Current value display */}
+        <div className="flex flex-col items-center gap-2 py-2">
+          <div className={`flex items-center gap-2 text-lg font-bold ${current.color}`}>
+            <Icon className="size-6" />
+            {current.label}
+          </div>
+          <p className="text-xs text-base-content/50 text-center max-w-xs">{current.description}</p>
+        </div>
+
+        {/* Slider */}
+        <div className="px-1">
+          <input
+            type="range"
+            min={0}
+            max={options.length - 1}
+            value={currentIndex}
+            onChange={(e) => onChange(options[Number(e.target.value)].value)}
+            className="range range-primary range-sm w-full"
+            step={1}
+          />
+          <div className="flex justify-between mt-1 px-0.5">
+            {options.map((opt) => (
+              <span
+                key={`${role}-tick-${opt.value}`}
+                className={`text-[10px] ${opt.value === current.value ? current.color + " font-semibold" : "text-base-content/30"}`}
               >
-                <div className="card-body p-4 gap-2">
-                  <div className="flex items-center gap-2">
-                    <Icon className={`size-5 ${opt.color}`} />
-                    <span className="font-semibold">{opt.label}</span>
-                    {isSelected && <Check className="size-4 text-primary ml-auto" />}
-                  </div>
-                  <p className="text-xs text-base-content/60">{opt.description}</p>
-                </div>
-              </button>
-            );
-          })}
+                {opt.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
