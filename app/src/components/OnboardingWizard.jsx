@@ -121,14 +121,14 @@ function normalizeRoleEfforts(value) {
 }
 
 /**
- * Build a WorkflowConfig object from wizard pipeline + efforts state.
+ * Build a WorkflowConfig object from wizard pipeline + efforts + models state.
  * This is the format expected by `runtime.workflowConfig` (plan/execute/review stages).
  */
-function buildWorkflowConfig(pipeline, efforts) {
+function buildWorkflowConfig(pipeline, efforts, models = {}) {
   return {
-    plan: { provider: pipeline.planner || "claude", model: pipeline.planner || "claude", effort: efforts.planner || "medium" },
-    execute: { provider: pipeline.executor || "codex", model: pipeline.executor || "codex", effort: efforts.executor || "medium" },
-    review: { provider: pipeline.reviewer || "claude", model: pipeline.reviewer || "claude", effort: efforts.reviewer || "medium" },
+    plan: { provider: pipeline.planner || "claude", model: models.plan || pipeline.planner || "claude", effort: efforts.planner || "medium" },
+    execute: { provider: pipeline.executor || "codex", model: models.execute || pipeline.executor || "codex", effort: efforts.executor || "medium" },
+    review: { provider: pipeline.reviewer || "claude", model: models.review || pipeline.reviewer || "claude", effort: efforts.reviewer || "medium" },
   };
 }
 
@@ -822,7 +822,7 @@ function AgentsSkillsStep({
 
 // ── Step 5: Configure Effort ────────────────────────────────────────────────
 
-function RoleEffortSelector({ role, title, description, providerName, value, onChange, options }) {
+function RoleEffortSelector({ role, title, description, providerName, value, onChange, options, model, onModelChange, availableModels }) {
   const currentIndex = Math.max(0, options.findIndex((o) => o.value === value));
   const current = options[currentIndex] || options[0];
   const Icon = current.icon;
@@ -839,6 +839,22 @@ function RoleEffortSelector({ role, title, description, providerName, value, onC
             <span className="badge badge-sm badge-soft badge-primary capitalize">{providerName}</span>
           )}
         </div>
+
+        {/* Model selector */}
+        {availableModels && availableModels.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-base-content/50">Model</label>
+            <select
+              className="select select-sm select-bordered w-full"
+              value={model || ""}
+              onChange={(e) => onModelChange?.(e.target.value)}
+            >
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.label || m.id}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Current value display */}
         <div className="flex flex-col items-center gap-2 py-2">
@@ -876,7 +892,7 @@ function RoleEffortSelector({ role, title, description, providerName, value, onC
   );
 }
 
-function EffortStep({ efforts, setEfforts, pipeline }) {
+function EffortStep({ efforts, setEfforts, pipeline, models, setModels, modelsByProvider }) {
   // Auto-clamp effort if user changed pipeline and current effort is unsupported
   useEffect(() => {
     for (const role of ["planner", "executor", "reviewer"]) {
@@ -888,12 +904,16 @@ function EffortStep({ efforts, setEfforts, pipeline }) {
     }
   }, [pipeline, efforts, setEfforts]);
 
+  const plannerModels = modelsByProvider?.[pipeline?.planner] || [];
+  const executorModels = modelsByProvider?.[pipeline?.executor] || [];
+  const reviewerModels = modelsByProvider?.[pipeline?.reviewer] || [];
+
   return (
     <div className="flex flex-col gap-6 stagger-children">
       <div className="text-center">
         <Gauge className="size-10 text-primary mx-auto mb-3" />
-        <h2 className="text-2xl font-bold">Reasoning Effort By Stage</h2>
-        <p className="text-base-content/60 mt-1">Choose the depth for each pipeline stage. Options depend on the CLI selected.</p>
+        <h2 className="text-2xl font-bold">Models & Reasoning Effort</h2>
+        <p className="text-base-content/60 mt-1">Choose the model and reasoning depth for each pipeline stage.</p>
       </div>
 
       <RoleEffortSelector
@@ -904,6 +924,9 @@ function EffortStep({ efforts, setEfforts, pipeline }) {
         value={efforts.planner}
         onChange={(value) => setEfforts((current) => ({ ...current, planner: value }))}
         options={getEffortOptionsForRole("planner", pipeline)}
+        model={models?.plan}
+        onModelChange={(m) => setModels((prev) => ({ ...prev, plan: m }))}
+        availableModels={plannerModels}
       />
       <RoleEffortSelector
         role="executor"
@@ -913,6 +936,9 @@ function EffortStep({ efforts, setEfforts, pipeline }) {
         value={efforts.executor}
         onChange={(value) => setEfforts((current) => ({ ...current, executor: value }))}
         options={getEffortOptionsForRole("executor", pipeline)}
+        model={models?.execute}
+        onModelChange={(m) => setModels((prev) => ({ ...prev, execute: m }))}
+        availableModels={executorModels}
       />
       <RoleEffortSelector
         role="reviewer"
@@ -922,6 +948,9 @@ function EffortStep({ efforts, setEfforts, pipeline }) {
         value={efforts.reviewer}
         onChange={(value) => setEfforts((current) => ({ ...current, reviewer: value }))}
         options={getEffortOptionsForRole("reviewer", pipeline)}
+        model={models?.review}
+        onModelChange={(m) => setModels((prev) => ({ ...prev, review: m }))}
+        availableModels={reviewerModels}
       />
     </div>
   );
@@ -1108,6 +1137,8 @@ export default function OnboardingWizard({ onComplete }) {
   // Provider detection
   const [providers, setProviders] = useState(null);
   const [providersLoading, setProvidersLoading] = useState(false);
+  const [modelsByProvider, setModelsByProvider] = useState({});
+  const [models, setModels] = useState({ plan: "", execute: "", review: "" });
 
   // Workspace path from runtime state
   const [workspacePath, setWorkspacePath] = useState("");
@@ -1143,27 +1174,46 @@ export default function OnboardingWizard({ onComplete }) {
     }
   }, [settings, settingsQuery.isLoading]);
 
-  // Fetch providers when reaching step 1
+  // Fetch providers (and models) when reaching step 1
   useEffect(() => {
     if (step === 1 && providers === null) {
       setProvidersLoading(true);
-      api.get("/providers").then((data) => {
-        const list = Array.isArray(data) ? data : data?.providers || [];
+      Promise.all([
+        api.get("/providers"),
+        api.get("/config/workflow?details=1").catch(() => null),
+      ]).then(([provData, workflowData]) => {
+        const list = Array.isArray(provData) ? provData : provData?.providers || [];
         setProviders(list);
+
+        // Models from workflow endpoint
+        const fetchedModels = workflowData?.models || {};
+        setModelsByProvider(fetchedModels);
+
         // Auto-select first available + set default pipeline
         const available = list.filter((p) => p.available !== false);
         const firstName = available[0]?.id || available[0]?.name || "";
-        if (firstName && !selectedProvider) {
-          setSelectedProvider(firstName);
-        }
+        if (firstName && !selectedProvider) setSelectedProvider(firstName);
+
         // Default pipeline: claude plans + reviews, first available executes
         const claudeAvailable = available.find((p) => (p.id || p.name) === "claude");
         const defaultCli = firstName;
         const planReviewCli = claudeAvailable ? "claude" : defaultCli;
+        const newPipeline = {
+          planner: planReviewCli,
+          executor: defaultCli,
+          reviewer: planReviewCli,
+        };
         setPipeline((prev) => ({
-          planner: prev.planner || planReviewCli,
-          executor: prev.executor || defaultCli,
-          reviewer: prev.reviewer || planReviewCli,
+          planner: prev.planner || newPipeline.planner,
+          executor: prev.executor || newPipeline.executor,
+          reviewer: prev.reviewer || newPipeline.reviewer,
+        }));
+
+        // Auto-select first model per stage
+        setModels((prev) => ({
+          plan: prev.plan || fetchedModels[planReviewCli]?.[0]?.id || "",
+          execute: prev.execute || fetchedModels[defaultCli]?.[0]?.id || "",
+          review: prev.review || fetchedModels[planReviewCli]?.[0]?.id || "",
         }));
       }).catch(() => {
         setProviders([]);
@@ -1200,16 +1250,16 @@ export default function OnboardingWizard({ onComplete }) {
       saveSetting("runtime.agentProvider", pipeline.executor, "runtime").catch(() => {});
       saveSetting("runtime.pipeline", pipelineProviders, "runtime").catch(() => {});
       // Also save as WorkflowConfig so planner/executor/reviewer use correct providers
-      saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts), "runtime").catch(() => {});
+      saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts, models), "runtime").catch(() => {});
     } else if (currentStepName === "Effort") {
       saveSetting("runtime.defaultEffort", efforts, "runtime").catch(() => {});
-      // Update WorkflowConfig with latest efforts
-      saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts), "runtime").catch(() => {});
+      // Update WorkflowConfig with latest efforts + models
+      saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts, models), "runtime").catch(() => {});
     } else if (currentStepName === "Workers & Theme") {
       saveSetting("ui.theme", selectedTheme, "ui").catch(() => {});
       api.post("/config/concurrency", { concurrency }).catch(() => {});
     }
-  }, [pipeline, efforts, concurrency, selectedTheme]);
+  }, [pipeline, efforts, models, concurrency, selectedTheme]);
 
   const goNext = useCallback(() => {
     if (step < STEP_COUNT - 1) {
@@ -1248,6 +1298,7 @@ export default function OnboardingWizard({ onComplete }) {
       saves.push(saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts), "runtime"));
 
       saves.push(saveSetting("runtime.defaultEffort", efforts, "runtime"));
+      saves.push(saveSetting("runtime.workflowConfig", buildWorkflowConfig(pipeline, efforts, models), "runtime"));
       saves.push(api.post("/config/concurrency", { concurrency }));
 
       // Install selected agents and skills
@@ -1260,21 +1311,35 @@ export default function OnboardingWizard({ onComplete }) {
 
       await Promise.allSettled(saves);
 
-      // Show confetti
-      setConfetti({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
+      // Optimistically update settings cache so OnboardingGate immediately sees completed=true
+      qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, {
+        id: "ui.onboarding.completed",
+        scope: "ui",
+        value: true,
+        source: "user",
+        updatedAt: new Date().toISOString(),
+      }));
 
-      // Wait for confetti then complete
+      // Show confetti, then navigate
+      setConfetti({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
       setTimeout(() => {
         qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
         onComplete?.();
       }, 1200);
     } catch {
       // Even on error, mark as done so user isn't stuck
+      qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, {
+        id: "ui.onboarding.completed",
+        scope: "ui",
+        value: true,
+        source: "user",
+        updatedAt: new Date().toISOString(),
+      }));
       await saveSetting("ui.onboarding.completed", true, "ui").catch(() => {});
       qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
       onComplete?.();
     }
-  }, [pipeline, selectedProvider, efforts, concurrency, selectedTheme, selectedAgents, selectedSkills, qc, onComplete]);
+  }, [pipeline, selectedProvider, efforts, models, concurrency, selectedTheme, selectedAgents, selectedSkills, qc, onComplete]);
 
   // Can proceed from step
   const canProceed =
@@ -1330,7 +1395,6 @@ export default function OnboardingWizard({ onComplete }) {
           )}
           {stepName === "Scan Project" && (
             <>
-              <GitignoreBanner />
               <ScanProjectStep
                 scanResult={scanResult}
                 setScanResult={setScanResult}
@@ -1362,6 +1426,9 @@ export default function OnboardingWizard({ onComplete }) {
                   </div>
                 </label>
               </div>
+              <div className="mt-3 w-full max-w-lg">
+                <GitignoreBanner />
+              </div>
             </>
           )}
           {stepName === "Discover Issues" && (
@@ -1385,7 +1452,7 @@ export default function OnboardingWizard({ onComplete }) {
               existingSkills={existingSkills}
             />
           )}
-          {stepName === "Effort" && <EffortStep efforts={efforts} setEfforts={setEfforts} pipeline={pipeline} />}
+          {stepName === "Effort" && <EffortStep efforts={efforts} setEfforts={setEfforts} pipeline={pipeline} models={models} setModels={setModels} modelsByProvider={modelsByProvider} />}
           {stepName === "Workers & Theme" && (
             <WorkersThemeStep
               concurrency={concurrency}

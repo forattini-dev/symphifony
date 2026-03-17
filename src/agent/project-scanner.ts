@@ -452,7 +452,7 @@ export async function analyzeProjectWithCli(
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill("SIGTERM");
-      }, 45_000);
+      }, 120_000);
 
       child.on("error", (err) => {
         clearTimeout(timer);
@@ -462,7 +462,7 @@ export async function analyzeProjectWithCli(
       child.on("close", (code) => {
         clearTimeout(timer);
         if (timedOut) {
-          reject(new Error(`CLI analysis timed out after 45s`));
+          reject(new Error(`CLI analysis timed out after 120s`));
           return;
         }
         if (code !== 0) {
