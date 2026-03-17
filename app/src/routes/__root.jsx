@@ -2,7 +2,7 @@ import { createRootRoute, Outlet, useRouterState, useNavigate } from "@tanstack/
 import { DashboardProvider, useDashboard } from "../context/DashboardContext";
 import { useSettings, getSettingsList, getSettingValue, SETTINGS_QUERY_KEY } from "../hooks";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo } from "react";
 import Header from "../components/Header";
 import Fab from "../components/Fab";
 import MobileDock from "../components/MobileDock";
@@ -11,10 +11,12 @@ import CreateIssueDrawer from "../components/CreateIssueForm";
 import IssueDetailDrawer from "../components/IssueDetailDrawer";
 import PwaBanner from "../components/PwaBanner";
 import Confetti from "../components/Confetti";
-import OnboardingWizard from "../components/OnboardingWizard";
-import KeyboardShortcutsHelp from "../components/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { CheckCircle, AlertTriangle, Info } from "lucide-react";
+
+// Lazy-loaded components: only needed on first run or on-demand
+const OnboardingWizard = lazy(() => import("../components/OnboardingWizard"));
+const KeyboardShortcutsHelp = lazy(() => import("../components/KeyboardShortcutsHelp"));
 
 function ViewTransition({ children }) {
   const routerState = useRouterState();
@@ -147,10 +149,14 @@ function RootLayout() {
         onRetry={ctx.retryIssue}
         onCancel={ctx.cancelIssue}
       />
-      <KeyboardShortcutsHelp
-        open={shortcutsHelpOpen}
-        onClose={() => setShortcutsHelpOpen(false)}
-      />
+      {shortcutsHelpOpen && (
+        <Suspense fallback={null}>
+          <KeyboardShortcutsHelp
+            open={shortcutsHelpOpen}
+            onClose={() => setShortcutsHelpOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -167,12 +173,20 @@ function OnboardingGate({ children }) {
   // Show wizard if onboarding not completed and settings have loaded
   if (!done && !settingsQuery.isLoading) {
     return (
-      <OnboardingWizard
-        onComplete={() => {
-          setDismissed(true);
-          queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
-        }}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <span className="loading loading-spinner loading-lg" />
+          </div>
+        }
+      >
+        <OnboardingWizard
+          onComplete={() => {
+            setDismissed(true);
+            queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+          }}
+        />
+      </Suspense>
     );
   }
 

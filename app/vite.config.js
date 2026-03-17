@@ -20,6 +20,21 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 600,
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/@tanstack/react-query/") ||
+            id.includes("node_modules/@tanstack/react-router/")
+          ) {
+            return "vendor";
+          }
+        },
+      },
+    },
   },
   server: {
     port: 5173,

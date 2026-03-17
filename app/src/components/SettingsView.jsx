@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { SETTINGS_QUERY_KEY, upsertSettingPayload } from "../hooks";
-import OnboardingWizard from "./OnboardingWizard";
+
+const OnboardingWizard = lazy(() => import("./OnboardingWizard"));
 import { Sun, Moon, Wifi, WifiOff, CircleDot, Palette, Cpu, Radio, Download, RefreshCw, Smartphone, Bell, BellOff, Wand2 } from "lucide-react";
 
 const PINNED_THEMES = ["auto", "light", "dark"];
@@ -294,12 +295,20 @@ function SetupWizardSection() {
 
   if (showWizard) {
     return (
-      <OnboardingWizard
-        onComplete={() => {
-          setShowWizard(false);
-          qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
-        }}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <span className="loading loading-spinner loading-lg" />
+          </div>
+        }
+      >
+        <OnboardingWizard
+          onComplete={() => {
+            setShowWizard(false);
+            qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+          }}
+        />
+      </Suspense>
     );
   }
 
