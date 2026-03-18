@@ -23,15 +23,11 @@ export function CreateIssueDrawer({ open, onClose, onSubmit, isLoading, onToast 
   const applyTemplate = useCallback((templateId) => {
     const tpl = ISSUE_TEMPLATES.find((t) => t.id === templateId);
     if (!tpl) return;
-    const hasContent = title.trim() || description.trim();
-    if (hasContent && templateId !== "blank") {
-      if (!window.confirm("Replace current content with template?")) return;
-    }
     setSelectedTemplate(templateId);
     setTitle(tpl.title);
     setDescription(tpl.description);
     setTimeout(() => titleRef.current?.focus(), 50);
-  }, [title, description]);
+  }, []);
 
   const onDismiss = useCallback(() => onClose(), [onClose]);
   const { ref: swipeRef, handlers: swipeHandlers } = useSwipeToDismiss({ onDismiss, direction: "right" });
@@ -52,15 +48,6 @@ export function CreateIssueDrawer({ open, onClose, onSubmit, isLoading, onToast 
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  useEffect(() => {
-    if (!open) return;
-    history.pushState({ drawer: "create-issue" }, "");
-    const handler = (e) => {
-      if (e.state?.drawer !== "create-issue") onClose();
-    };
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [open, onClose]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
