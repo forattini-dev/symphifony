@@ -165,6 +165,39 @@ const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  *
  * Falls back to OpenAI /v1/models API (filtered to gpt-5.*) if cache doesn't exist.
  */
+/**
+ * Read the user's configured default model from ~/.codex/config.toml.
+ * Returns the model string (e.g. "gpt-5.4") and reasoning effort if present.
+ */
+export function readCodexConfig(): { model?: string; reasoningEffort?: string } {
+  try {
+    const configPath = join(homedir(), ".codex", "config.toml");
+    if (!existsSync(configPath)) return {};
+    const raw = readFileSync(configPath, "utf8");
+    const model = raw.match(/^model\s*=\s*"([^"]+)"/m)?.[1];
+    const reasoningEffort = raw.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1];
+    return { model, reasoningEffort };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Read the user's configured default model from ~/.claude/settings.json.
+ * Returns the model alias/ID (e.g. "sonnet", "opus").
+ */
+function readClaudeConfig(): { model?: string } {
+  try {
+    const settingsPath = join(homedir(), ".claude", "settings.json");
+    if (!existsSync(settingsPath)) return {};
+    const raw = readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(raw) as { model?: string };
+    return { model: typeof settings.model === "string" ? settings.model : undefined };
+  } catch {
+    return {};
+  }
+}
+
 async function fetchCodexModels(): Promise<DiscoveredModel[]> {
   // 1. Try ~/.codex/models_cache.json (authoritative — from the CLI itself)
   const cachePath = join(homedir(), ".codex", "models_cache.json");
@@ -399,7 +432,34 @@ export async function discoverModels(providers: DetectedProvider[]): Promise<Rec
   const settled = await Promise.allSettled(tasks.map((t) => t.fetch()));
   for (let i = 0; i < tasks.length; i++) {
     const res = settled[i];
-    const models = res.status === "fulfilled" ? res.value : [];
+    let models = res.status === "fulfilled" ? res.value : [];
+
+    // Promote the user's configured CLI default model to the top of the list
+    if (tasks[i].name === "codex") {
+      const { model: configuredModel } = readCodexConfig();
+      if (configuredModel) {
+        const idx = models.findIndex((m) => m.id === configuredModel);
+        if (idx > 0) {
+          // Move to front
+          models = [models[idx], ...models.slice(0, idx), ...models.slice(idx + 1)];
+        } else if (idx === -1) {
+          // Not in list yet — add it
+          models = [{ id: configuredModel, provider: "codex", label: configuredModel, tier: "Configured default" }, ...models];
+        }
+      }
+    }
+
+    if (tasks[i].name === "claude") {
+      const { model: configuredModel } = readClaudeConfig();
+      if (configuredModel) {
+        // Claude config uses aliases ("sonnet", "opus") — find matching model by id/prefix
+        const idx = models.findIndex((m) => m.id === configuredModel || m.id.includes(configuredModel));
+        if (idx > 0) {
+          models = [models[idx], ...models.slice(0, idx), ...models.slice(idx + 1)];
+        }
+      }
+    }
+
     result[tasks[i].name] = models;
     modelCache.set(tasks[i].name, { models, fetchedAt: Date.now() });
   }

@@ -13,7 +13,7 @@ import type {
 import type { DiscoveredModel } from "./providers.ts";
 import { clamp, now } from "./helpers.ts";
 import { loadPersistedSettings, replacePersistedSetting } from "./store.ts";
-import { getProviderDefaultCommand, normalizeAgentProvider } from "./providers.ts";
+import { getProviderDefaultCommand, normalizeAgentProvider, readCodexConfig } from "./providers.ts";
 
 export const SETTING_ID_POLL_INTERVAL_MS = "runtime.pollIntervalMs";
 export const SETTING_ID_WORKER_CONCURRENCY = "runtime.workerConcurrency";
@@ -319,12 +319,15 @@ export function buildDefaultWorkflowConfig(
   const hasClaude = available.some((p) => p.name === "claude");
   const hasCodex = available.some((p) => p.name === "codex");
 
-  // Pick the first discovered model for each provider, or leave empty (CLI will use its default)
+  // Pick the first discovered model per provider (discoverModels promotes the user's configured CLI default to [0])
   const claudeModel = discoveredModels?.claude?.[0]?.id || "";
   const codexModel = discoveredModels?.codex?.[0]?.id || "";
 
+  // Use the effort the user already configured in ~/.codex/config.toml as the execute default
+  const codexEffort = (readCodexConfig().reasoningEffort as ReasoningEffort | undefined) || "medium";
+
   const claudeDefault: PipelineStageConfig = { provider: "claude", model: claudeModel, effort: "medium" };
-  const codexDefault: PipelineStageConfig = { provider: "codex", model: codexModel, effort: "medium" };
+  const codexDefault: PipelineStageConfig = { provider: "codex", model: codexModel, effort: codexEffort };
 
   // Default: claude for plan+review (better reasoning), codex for execute (better code)
   if (hasClaude && hasCodex) {
