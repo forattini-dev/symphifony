@@ -150,7 +150,21 @@ export function DashboardProvider({ children }) {
 
   const createIssue = useMutation({
     mutationFn: (p) => api.post("/issues/create", p),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["runtime-state"] }); setIsCreateOpen(false); showToast("Issue created", "success"); showConfetti(); },
+    onSuccess: (res) => {
+      // Optimistically inject the new issue into all runtime-state cache variants
+      if (res?.issue) {
+        qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => {
+          if (!cur) return cur;
+          const issues = Array.isArray(cur.issues) ? cur.issues : [];
+          if (issues.some((i) => i.id === res.issue.id)) return cur;
+          return { ...cur, issues: [...issues, res.issue] };
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["runtime-state"] });
+      setIsCreateOpen(false);
+      showToast("Issue created", "success");
+      showConfetti();
+    },
     onError: (e) => showToast(e.message, "error"),
   });
 

@@ -72,8 +72,8 @@ export function useRuntimeWebSocket(onMessage) {
       ws.onmessage = (e) => {
         const msg = safeJson(e.data);
         if (!msg) return;
-        const cur = qc.getQueryData(["runtime-state"]) || {};
-        qc.setQueryData(["runtime-state"], applyWsPayload(cur, msg));
+        // Update ALL runtime-state query variants (e.g. ["runtime-state", false], ["runtime-state", true])
+        qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => applyWsPayload(cur || {}, msg));
         if (onMessage) onMessage(msg);
       };
 
