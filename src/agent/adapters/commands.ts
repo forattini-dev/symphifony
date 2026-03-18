@@ -75,14 +75,17 @@ export function buildCodexCommand(options: {
   addDirs?: string[];
   reasoningEffort?: string;
 }): string {
-  const parts = ["codex", "exec", "--skip-git-repo-check"];
-
-  if (options.model && options.model !== "codex") {
-    parts.push(`--model ${options.model}`);
-  }
+  // --reasoning-effort is a global flag that must come before the subcommand
+  const parts = ["codex"];
 
   if (options.reasoningEffort) {
     parts.push(`--reasoning-effort ${options.reasoningEffort}`);
+  }
+
+  parts.push("exec", "--skip-git-repo-check");
+
+  if (options.model && options.model !== "codex") {
+    parts.push(`--model ${options.model}`);
   }
 
   if (options.addDirs?.length) {
