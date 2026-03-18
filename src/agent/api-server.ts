@@ -738,7 +738,7 @@ export async function startApiServer(
           if (!wp || !existsSync(wp)) {
             return c.json({ ok: false, error: "No workspace found for this issue." }, 400);
           }
-          const result = mergeWorkspace(wp);
+          const result = mergeWorkspace(issue);
           const conflictMsg = result.conflicts.length > 0
             ? ` ${result.conflicts.length} conflict(s): ${result.conflicts.join(", ")}.`
             : "";
@@ -857,31 +857,46 @@ export async function startApiServer(
           if (!wp || !existsSync(wp)) {
             return c.json({ ok: true, files: [], diff: "", message: "No workspace found." });
           }
-          if (!existsSync(SOURCE_ROOT)) {
-            return c.json({ ok: true, files: [], diff: "", message: "Source root not found." });
-          }
           let raw = "";
-          try {
-            raw = execSync(
-              `git diff --no-index --no-color -- "${SOURCE_ROOT}" "${wp}"`,
-              { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 15_000 },
-            );
-          } catch (err: any) {
-            // git diff --no-index exits 1 when diffs exist — normal
-            raw = err.stdout || "";
+          if (issue.branchName && issue.baseBranch) {
+            // Git worktree: proper branch diff
+            try {
+              raw = execSync(
+                `git diff --no-color "${issue.baseBranch}"..."${issue.branchName}"`,
+                { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 15_000, cwd: TARGET_ROOT },
+              );
+            } catch (err: any) {
+              raw = err.stdout || "";
+            }
+          } else {
+            // Legacy: no-index diff between SOURCE_ROOT and workspace
+            if (!existsSync(SOURCE_ROOT)) {
+              return c.json({ ok: true, files: [], diff: "", message: "Source root not found." });
+            }
+            try {
+              raw = execSync(
+                `git diff --no-index --no-color -- "${SOURCE_ROOT}" "${wp}"`,
+                { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 15_000 },
+              );
+            } catch (err: any) {
+              raw = err.stdout || "";
+            }
           }
 
           if (!raw.trim()) {
             return c.json({ ok: true, files: [], diff: "", message: "No changes" });
           }
 
-          // Clean paths: replace absolute paths with relative a/ b/ style
-          const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const sourcePrefix = SOURCE_ROOT.endsWith("/") ? SOURCE_ROOT : `${SOURCE_ROOT}/`;
-          const wpPrefix = wp.endsWith("/") ? wp : `${wp}/`;
-          const cleaned = raw
-            .replace(new RegExp(esc(wpPrefix), "g"), "b/")
-            .replace(new RegExp(esc(sourcePrefix), "g"), "a/");
+          // Clean paths for legacy diff (git worktree diff already uses a/ b/ prefixes)
+          let cleaned = raw;
+          if (!issue.branchName || !issue.baseBranch) {
+            const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const sourcePrefix = SOURCE_ROOT.endsWith("/") ? SOURCE_ROOT : `${SOURCE_ROOT}/`;
+            const wpPrefix = wp.endsWith("/") ? wp : `${wp}/`;
+            cleaned = raw
+              .replace(new RegExp(esc(wpPrefix), "g"), "b/")
+              .replace(new RegExp(esc(sourcePrefix), "g"), "a/");
+          }
 
           // Split into per-file chunks and filter internals
           const internalRe = /^(fifony[-_]|\.fifony-|WORKFLOW\.local)/;

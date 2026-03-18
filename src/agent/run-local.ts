@@ -181,7 +181,7 @@ async function main() {
     logger.info(`Scheduling cleanup of ${terminalIssues.length} terminal workspace(s) in background...`);
     setImmediate(async () => {
       for (const issue of terminalIssues) {
-        try { await cleanWorkspace(issue.id, workflowDefinition); } catch {}
+        try { await cleanWorkspace(issue.id, issue, workflowDefinition); } catch {}
       }
       logger.info("Background workspace cleanup complete.");
     });

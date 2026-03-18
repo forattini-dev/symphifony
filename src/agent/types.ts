@@ -36,6 +36,9 @@ export type IssueEntry = {
   priority: number;
   state: IssueState;
   branchName?: string;
+  baseBranch?: string;
+  headCommitAtStart?: string;
+  worktreePath?: string;
   url?: string;
   assigneeId?: string;
   labels: string[];

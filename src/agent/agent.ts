@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { env } from "node:process";
 import { execSync, spawn } from "node:child_process";
 import type {
@@ -77,6 +77,16 @@ import { ensureSourceReady } from "./workflow.ts";
 import { compileExecution, compileReview, persistCompilationArtifacts, buildExecutionAudit, persistExecutionAudit } from "./adapters/index.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
 import { record as recordTokens } from "./token-ledger.ts";
+
+/** Check if a directory is inside a git repository. */
+function isGitRepo(dir: string): boolean {
+  try {
+    execSync("git rev-parse --git-dir", { cwd: dir, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function normalizeAgentDirectiveStatus(value: unknown, fallback: AgentDirectiveStatus): AgentDirectiveStatus {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -380,8 +390,21 @@ function shouldSkipRoutingPath(relativePath: string): boolean {
     || base.startsWith("fifony_");
 }
 
-function inferChangedWorkspacePaths(workspacePath: string, limit = 32): string[] {
-  if (!workspacePath || !existsSync(workspacePath) || !existsSync(SOURCE_ROOT)) return [];
+function inferChangedWorkspacePaths(workspacePath: string, limit = 32, issue?: IssueEntry): string[] {
+  // Git worktree: use git diff --name-only for accuracy
+  if (issue?.baseBranch && issue.branchName) {
+    try {
+      const output = execSync(
+        `git diff --name-only "${issue.baseBranch}"..."${issue.branchName}"`,
+        { cwd: TARGET_ROOT, encoding: "utf8", timeout: 10_000 },
+      );
+      return output.trim().split("\n").filter(Boolean).slice(0, limit);
+    } catch {}
+  }
+
+  // Fallback: filesystem walk comparing workspace vs SOURCE_ROOT
+  const codePath = issue?.worktreePath ?? workspacePath;
+  if (!codePath || !existsSync(codePath) || !existsSync(SOURCE_ROOT)) return [];
 
   const changed = new Set<string>();
 
@@ -405,15 +428,32 @@ function inferChangedWorkspacePaths(workspacePath: string, limit = 32): string[]
     }
   };
 
-  walk(workspacePath);
+  walk(codePath);
   return [...changed];
 }
 
 /** Compute lines added/removed/files changed from workspace diff. */
 export function computeDiffStats(issue: IssueEntry): void {
-  const wp = issue.workspacePath;
-  if (!wp || !existsSync(wp) || !existsSync(SOURCE_ROOT)) return;
+  // Git worktree: diff the branch vs its base
+  if (issue.baseBranch && issue.branchName) {
+    try {
+      let raw = "";
+      try {
+        raw = execSync(
+          `git diff --stat "${issue.baseBranch}"..."${issue.branchName}"`,
+          { cwd: TARGET_ROOT, encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+        );
+      } catch (err: any) {
+        raw = err.stdout || "";
+      }
+      if (raw) parseDiffStats(issue, raw);
+    } catch {}
+    return;
+  }
 
+  // Legacy: git diff --no-index
+  const wp = issue.worktreePath ?? issue.workspacePath;
+  if (!wp || !existsSync(wp) || !existsSync(SOURCE_ROOT)) return;
   try {
     let raw = "";
     try {
@@ -424,28 +464,26 @@ export function computeDiffStats(issue: IssueEntry): void {
     } catch (err: any) {
       raw = err.stdout || "";
     }
-    if (!raw) return;
+    if (raw) parseDiffStats(issue, raw);
+  } catch {}
+}
 
-    // Parse git diff --stat output: last line is " N files changed, M insertions(+), K deletions(-)"
-    const lines = raw.trim().split("\n");
-    const summary = lines[lines.length - 1] || "";
-    const filesMatch = summary.match(/(\d+)\s+files?\s+changed/);
-    const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
-    const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
+function parseDiffStats(issue: IssueEntry, raw: string): void {
+  const lines = raw.trim().split("\n");
+  const summary = lines[lines.length - 1] || "";
+  const filesMatch = summary.match(/(\d+)\s+files?\s+changed/);
+  const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
+  const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
 
-    // Filter out fifony internal files from the file count
-    const internalRe = /fifony[-_]|\.fifony-|WORKFLOW\.local/;
-    const fileLines = lines.slice(0, -1).filter((l) => {
-      const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
-      return !internalRe.test(name);
-    });
+  const internalRe = /fifony[-_]|\.fifony-|WORKFLOW\.local/;
+  const fileLines = lines.slice(0, -1).filter((l) => {
+    const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
+    return !internalRe.test(name);
+  });
 
-    issue.filesChanged = fileLines.length || (filesMatch ? parseInt(filesMatch[1], 10) : 0);
-    issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
-    issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
-  } catch {
-    // ignore diff failures
-  }
+  issue.filesChanged = fileLines.length || (filesMatch ? parseInt(filesMatch[1], 10) : 0);
+  issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
+  issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
 }
 
 export interface MergeResult {
@@ -453,6 +491,66 @@ export interface MergeResult {
   deleted: string[];
   skipped: string[];
   conflicts: string[];
+}
+
+/** Merge a worktree branch into TARGET_ROOT using git merge --no-ff. */
+function mergeWorktree(issue: IssueEntry, worktreePath: string): MergeResult {
+  const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
+
+  // Auto-commit any uncommitted changes the agent left in the worktree
+  try {
+    execSync("git add -A", { cwd: worktreePath, stdio: "pipe" });
+    const status = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf8" });
+    if (status.trim()) {
+      execSync(`git commit -m "fifony: agent changes for ${issue.identifier}"`, { cwd: worktreePath, stdio: "pipe" });
+    }
+  } catch { /* nothing staged or commit failed — continue */ }
+
+  // Collect changed files before merging (for the result summary)
+  try {
+    const diffOut = execSync(
+      `git diff --name-status "${issue.baseBranch}"..."${issue.branchName}"`,
+      { cwd: TARGET_ROOT, encoding: "utf8" },
+    );
+    for (const line of diffOut.trim().split("\n").filter(Boolean)) {
+      const [statusChar, ...parts] = line.split("\t");
+      const filePath = parts.join("\t");
+      if (statusChar === "D") result.deleted.push(filePath);
+      else result.copied.push(filePath);
+    }
+  } catch { /* best-effort */ }
+
+  // Stash any uncommitted changes in TARGET_ROOT so merge can proceed
+  let didStash = false;
+  try {
+    const stashOut = execSync("git stash", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+    didStash = !stashOut.includes("No local changes to save");
+  } catch { /* ignore stash failure */ }
+
+  try {
+    execSync(
+      `git merge --no-ff "${issue.branchName}" -m "fifony: merge ${issue.identifier}"`,
+      { cwd: TARGET_ROOT, stdio: "pipe" },
+    );
+  } catch (err: any) {
+    // Merge failed — collect conflict files and abort
+    try {
+      const conflictOut = execSync(
+        "git diff --name-only --diff-filter=U",
+        { cwd: TARGET_ROOT, encoding: "utf8" },
+      );
+      result.conflicts.push(...conflictOut.trim().split("\n").filter(Boolean));
+    } catch {}
+    try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+    logger.warn({ issueId: issue.id, err: String(err) }, "[Agent] Git merge failed, aborted");
+  }
+
+  // Restore stashed changes
+  if (didStash) {
+    try { execSync("git stash pop", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+  }
+
+  return result;
 }
 
 /** Check if a file in TARGET_ROOT has been modified by another worker (differs from SOURCE_ROOT). */
@@ -475,24 +573,32 @@ function isConflict(relativePath: string): boolean {
 
 /**
  * Merge workspace changes back into TARGET_ROOT.
- * Copies new/modified files from the workspace and removes files deleted in the workspace.
- * Skips fifony internal files (fifony-*, .fifony-*, node_modules, .git, etc.).
- *
- * Conflict detection: if a file in TARGET_ROOT already differs from SOURCE_ROOT
- * (another worker merged first), the file is added to `conflicts` instead of being overwritten.
+ * If the issue has a git worktree branch, uses git merge --no-ff.
+ * Otherwise falls back to the legacy file-copy approach.
  */
-export function mergeWorkspace(workspacePath: string): MergeResult {
-  const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
+export function mergeWorkspace(issue: IssueEntry): MergeResult {
+  const worktreePath = issue.worktreePath;
+  const workspacePath = issue.workspacePath;
+  const effectivePath = worktreePath ?? workspacePath;
 
-  if (!workspacePath || !existsSync(workspacePath)) {
-    throw new Error(`Workspace not found: ${workspacePath}`);
+  if (!effectivePath || !existsSync(effectivePath)) {
+    throw new Error(`Workspace not found for ${issue.identifier}`);
   }
+
+  // Git worktree path: use git merge
+  if (issue.branchName && issue.baseBranch && worktreePath) {
+    return mergeWorktree(issue, worktreePath);
+  }
+
+  // Legacy: manual file copy
+  const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
+  const legacyPath = effectivePath;
 
   // 1. Walk workspace and copy new/modified files to TARGET_ROOT
   const walkWorkspace = (dir: string): void => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
       const fullPath = join(dir, item.name);
-      const relativePath = relative(workspacePath, fullPath);
+      const relativePath = relative(legacyPath, fullPath);
 
       if (shouldSkipMergePath(relativePath)) {
         result.skipped.push(relativePath);
@@ -508,7 +614,6 @@ export function mergeWorkspace(workspacePath: string): MergeResult {
 
       const sourcePath = join(SOURCE_ROOT, relativePath);
 
-      // Check if file is new or modified compared to SOURCE_ROOT
       const isNew = !existsSync(sourcePath);
       let isModified = false;
       if (!isNew) {
@@ -524,13 +629,12 @@ export function mergeWorkspace(workspacePath: string): MergeResult {
       }
 
       if (isNew || isModified) {
-        // Conflict detection: another worker already changed this file in TARGET_ROOT
         if (isConflict(relativePath)) {
           result.conflicts.push(relativePath);
           continue;
         }
 
-        const targetDir = join(TARGET_ROOT, relative(workspacePath, dir));
+        const targetDir = join(TARGET_ROOT, relative(legacyPath, dir));
         const targetPath = join(TARGET_ROOT, relativePath);
         mkdirSync(targetDir, { recursive: true });
         cpSync(fullPath, targetPath, { force: true });
@@ -555,9 +659,8 @@ export function mergeWorkspace(workspacePath: string): MergeResult {
 
       if (!item.isFile()) continue;
 
-      const wsPath = join(workspacePath, relativePath);
+      const wsPath = join(legacyPath, relativePath);
       if (!existsSync(wsPath)) {
-        // File was deleted in workspace — only remove if untouched by another worker
         const targetPath = join(TARGET_ROOT, relativePath);
         if (existsSync(targetPath)) {
           if (isConflict(relativePath)) {
@@ -571,7 +674,7 @@ export function mergeWorkspace(workspacePath: string): MergeResult {
     }
   };
 
-  walkWorkspace(workspacePath);
+  walkWorkspace(legacyPath);
   walkSource(SOURCE_ROOT);
 
   return result;
@@ -592,7 +695,7 @@ function shouldSkipMergePath(relativePath: string): boolean {
 }
 
 export function hydrateIssuePathsFromWorkspace(issue: IssueEntry): string[] {
-  const inferredPaths = inferChangedWorkspacePaths(issue.workspacePath ?? "");
+  const inferredPaths = inferChangedWorkspacePaths(issue.workspacePath ?? "", 32, issue);
   if (inferredPaths.length === 0) return [];
   issue.paths = [...new Set([...(issue.paths ?? []), ...inferredPaths])];
   issue.inferredPaths = [...new Set([...(issue.inferredPaths ?? []), ...inferredPaths])];
@@ -985,7 +1088,7 @@ async function runCommandWithTimeout(
       FIFONY_ISSUE_IDENTIFIER: issue.identifier,
       FIFONY_ISSUE_TITLE: issue.title,
       FIFONY_ISSUE_PRIORITY: String(issue.priority),
-      FIFONY_WORKSPACE_PATH: workspacePath,
+      FIFONY_WORKSPACE_PATH: issue.worktreePath ?? workspacePath,
       FIFONY_PROMPT_FILE: promptFile,
     };
     for (const [key, value] of Object.entries(extraEnv)) {
@@ -1007,7 +1110,7 @@ async function runCommandWithTimeout(
     const wrappedCommand = `. "${envFilePath}" && ${command}`;
     const child = spawn(wrappedCommand, {
       shell: true,
-      cwd: workspacePath,
+      cwd: issue.worktreePath ?? workspacePath,
       detached: true,  // Survive parent death
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1152,22 +1255,41 @@ async function runHook(
 
 export async function cleanWorkspace(
   issueId: string,
+  issue: IssueEntry | null,
   workflowDefinition: WorkflowDefinition | null,
 ): Promise<void> {
   const safeId = idToSafePath(issueId);
-  const workspacePath = join(WORKSPACE_ROOT, safeId);
+  const workspacePath = issue?.workspacePath ?? join(WORKSPACE_ROOT, safeId);
   if (!existsSync(workspacePath)) return;
 
   // Run before_remove hook (failure is logged but ignored)
   if (workflowDefinition?.beforeRemoveHook) {
     try {
-      const dummyIssue = { id: issueId, identifier: issueId } as IssueEntry;
+      const dummyIssue = issue ?? { id: issueId, identifier: issueId } as IssueEntry;
       await runHook(workflowDefinition.beforeRemoveHook, workspacePath, dummyIssue, "before_remove");
     } catch (error) {
       logger.warn(`before_remove hook failed for ${issueId}: ${String(error)}`);
     }
   }
 
+  // Git worktree cleanup
+  if (issue?.branchName && issue.worktreePath) {
+    try {
+      execSync(`git worktree remove --force "${issue.worktreePath}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+      logger.info(`Removed worktree for ${issueId}: ${issue.worktreePath}`);
+    } catch (error) {
+      logger.warn(`Failed to remove worktree for ${issueId}: ${String(error)}`);
+      try { rmSync(issue.worktreePath, { recursive: true, force: true }); } catch {}
+    }
+    try {
+      execSync(`git branch -D "${issue.branchName}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+    } catch { /* branch may already be gone */ }
+    // Also remove the management dir
+    try { rmSync(workspacePath, { recursive: true, force: true }); } catch {}
+    return;
+  }
+
+  // Legacy: remove the whole workspace dir
   try {
     rmSync(workspacePath, { recursive: true, force: true });
     logger.info(`Cleaned workspace for ${issueId}: ${workspacePath}`);
@@ -1181,24 +1303,31 @@ async function prepareWorkspace(
   workflowDefinition: WorkflowDefinition | null,
 ): Promise<{ workspacePath: string; promptText: string; promptFile: string }> {
   const safeId = idToSafePath(issue.id);
-  const workspaceRoot = join(WORKSPACE_ROOT, safeId);
-  const createdNow = !existsSync(workspaceRoot);
+  const workspaceRoot = join(WORKSPACE_ROOT, safeId);    // management dir
+  const worktreePath = join(workspaceRoot, "worktree");   // code dir (git worktree)
+  const createdNow = !existsSync(worktreePath);
 
   if (createdNow) {
-    logger.debug({ issueId: issue.id, identifier: issue.identifier, workspacePath: workspaceRoot }, "[Agent] Creating new workspace");
     mkdirSync(workspaceRoot, { recursive: true });
+    logger.debug({ issueId: issue.id, identifier: issue.identifier, workspacePath: workspaceRoot }, "[Agent] Creating workspace");
+
     if (workflowDefinition?.afterCreateHook) {
-      await runHook(workflowDefinition.afterCreateHook, workspaceRoot, issue, "after_create");
+      mkdirSync(worktreePath, { recursive: true });
+      await runHook(workflowDefinition.afterCreateHook, worktreePath, issue, "after_create");
+    } else if (isGitRepo(TARGET_ROOT)) {
+      await createGitWorktree(issue, worktreePath);
     } else {
-      // Ensure source snapshot is ready (lazy bootstrap)
+      // Fallback: copy SOURCE_ROOT snapshot
       await ensureSourceReady();
-      cpSync(SOURCE_ROOT, workspaceRoot, {
+      mkdirSync(worktreePath, { recursive: true });
+      cpSync(SOURCE_ROOT, worktreePath, {
         recursive: true,
         force: true,
         filter: (sourcePath) => !sourcePath.startsWith(WORKSPACE_ROOT),
       });
     }
-    logger.debug({ issueId: issue.id, workspacePath: workspaceRoot }, "[Agent] Workspace created");
+
+    logger.debug({ issueId: issue.id, workspacePath: workspaceRoot, worktreePath }, "[Agent] Workspace created");
   } else {
     logger.debug({ issueId: issue.id, workspacePath: workspaceRoot }, "[Agent] Reusing existing workspace");
   }
@@ -1210,9 +1339,46 @@ async function prepareWorkspace(
   writeFileSync(promptFile, `${promptText}\n`, "utf8");
 
   issue.workspacePath = workspaceRoot;
+  issue.worktreePath = worktreePath;
   issue.workspacePreparedAt = now();
 
   return { workspacePath: workspaceRoot, promptText, promptFile };
+}
+
+/** Create a git worktree for the issue at the given path. */
+async function createGitWorktree(issue: IssueEntry, worktreePath: string): Promise<void> {
+  let baseBranch = "main";
+  let headCommitAtStart = "";
+  try {
+    baseBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+    headCommitAtStart = execSync("git rev-parse HEAD", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  } catch {}
+
+  const branchName = `fifony/${issue.id}`;
+
+  // -B creates or resets the branch (handles retry scenarios)
+  execSync(`git worktree add "${worktreePath}" -B "${branchName}"`, {
+    cwd: TARGET_ROOT,
+    stdio: "pipe",
+  });
+
+  // Register fifony runtime files as ignored in the worktree's local excludes
+  try {
+    const gitFileContent = readFileSync(join(worktreePath, ".git"), "utf8").trim();
+    const gitDirRel = gitFileContent.replace("gitdir: ", "").trim();
+    const gitDirPath = resolve(worktreePath, gitDirRel);
+    mkdirSync(join(gitDirPath, "info"), { recursive: true });
+    writeFileSync(join(gitDirPath, "info", "exclude"), "fifony-*\n.fifony-*\nfifony_*\n", "utf8");
+  } catch (err) {
+    logger.warn({ err: String(err) }, "[Agent] Failed to write worktree excludes");
+  }
+
+  issue.branchName = branchName;
+  issue.baseBranch = baseBranch;
+  issue.headCommitAtStart = headCommitAtStart;
+  issue.worktreePath = worktreePath;
+
+  logger.debug({ issueId: issue.id, branchName, baseBranch, worktreePath }, "[Agent] Git worktree created");
 }
 
 async function runAgentSession(
@@ -1553,11 +1719,19 @@ export async function runIssueOnce(
       // Get diff summary for the review prompt
       let diffSummary = "";
       try {
-        const diffResult = execSync(
-          `git diff --no-index --stat -- "${SOURCE_ROOT}" "${workspacePath}" 2>/dev/null`,
-          { encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
-        );
-        diffSummary = diffResult.trim();
+        if (issue.baseBranch && issue.branchName) {
+          const diffResult = execSync(
+            `git diff --stat "${issue.baseBranch}"..."${issue.branchName}"`,
+            { cwd: TARGET_ROOT, encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+          );
+          diffSummary = diffResult.trim();
+        } else {
+          const diffResult = execSync(
+            `git diff --no-index --stat -- "${SOURCE_ROOT}" "${workspacePath}" 2>/dev/null`,
+            { encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+          );
+          diffSummary = diffResult.trim();
+        }
       } catch (err: any) {
         diffSummary = (err.stdout || "").trim();
       }
@@ -1631,7 +1805,7 @@ export async function runIssueOnce(
 
       // Merge workspace into TARGET_ROOT so the code is runnable/testable before review
       try {
-        const mergeResult = mergeWorkspace(workspacePath);
+        const mergeResult = mergeWorkspace(issue);
         issue.mergedAt = now();
         issue.mergeResult = {
           copied: mergeResult.copied.length,
