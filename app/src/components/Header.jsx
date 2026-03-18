@@ -91,7 +91,7 @@ export function Header({ issueCount, sourceRepo, updatedAt, onToggleEvents, even
   return (
     <div className="navbar bg-base-100 shadow-sm px-4">
       <div className="flex-1 gap-2">
-        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", letterSpacing: '-0.02em', fontWeight: 800 }}>Fifony</Link>
+        <Link to="/" className="btn btn-ghost text-xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", letterSpacing: '-0.02em', fontWeight: 800 }}>fifo</Link>
         {repoDisplay && <span className="text-xs opacity-40 hidden lg:inline">{repoDisplay}</span>}
         <div className="hidden md:flex ml-2">
           <GlobalActivityBar issues={issues} />

@@ -255,7 +255,7 @@ function NotificationsSection({ notifications }) {
           {isGranted && notifications.enabled && (
             <button
               className="btn btn-xs btn-ghost"
-              onClick={() => new Notification("Fifony", { body: "Notifications are working!", icon: "/icon.svg" })}
+              onClick={() => new Notification("fifo", { body: "Notifications are working!", icon: "/icon.svg" })}
             >
               Send test
             </button>

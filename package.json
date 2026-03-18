@@ -3,7 +3,7 @@
   "version": "0.1.20",
   "private": false,
   "type": "module",
-  "description": "Filesystem-backed local Fifony orchestrator with a TypeScript CLI, MCP mode, and multi-agent Codex or Claude workflows.",
+  "description": "Filesystem-backed local fifo orchestrator with a TypeScript CLI, MCP mode, and multi-agent Codex or Claude workflows.",
   "bin": {
     "fifony": "./bin/fifony.js"
   },

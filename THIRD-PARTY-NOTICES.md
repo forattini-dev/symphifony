@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Fifony is built upon and includes code from the following open-source projects.
+fifo is built upon and includes code from the following open-source projects.
 
 ---
 
@@ -10,7 +10,7 @@ Fifony is built upon and includes code from the following open-source projects.
 - **License**: Apache License 2.0
 - **Copyright**: Copyright 2025 OpenAI
 
-Fifony was originally forked from the OpenAI Codex CLI project. Substantial
+fifo was originally forked from the OpenAI Codex CLI project. Substantial
 modifications have been made including: multi-provider agent orchestration,
 dashboard UI, issue lifecycle management, capability routing, and onboarding
 wizard. The original Apache 2.0 license is preserved in the LICENSE file.
@@ -25,7 +25,7 @@ wizard. The original Apache 2.0 license is preserved in the LICENSE file.
 
 The bundled agent catalog in `src/fixtures/agent-catalog.json` includes agent
 definitions inspired by the Agency Agents project. Agent profiles have been
-adapted for use with Fifony's multi-agent orchestration system.
+adapted for use with fifo's multi-agent orchestration system.
 
 ---
 

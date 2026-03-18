@@ -1,12 +1,12 @@
 # Impeccable integration idea
 
-Use impeccable-oriented skills as a frontend review layer around Fifony issues.
+Use impeccable-oriented skills as a frontend review layer around fifo issues.
 
 Suggested pattern:
 
 1. Use `agency-senior-developer` or `codex` as executor.
 2. Route UI-heavy issues to a reviewer prompt that explicitly asks for impeccable-style critique.
-3. Expose the resulting review through the Fifony MCP prompts or as a follow-up review issue.
+3. Expose the resulting review through the fifo MCP prompts or as a follow-up review issue.
 
 Suggested labels:
 - frontend

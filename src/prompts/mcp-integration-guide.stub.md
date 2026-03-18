@@ -1,4 +1,4 @@
-# Fifony MCP integration
+# fifo MCP integration
 
 Workspace root: `{{workspaceRoot}}`
 Persistence root: `{{persistenceRoot}}`
@@ -25,4 +25,4 @@ Expected workflow:
 4. Update workflow state with `fifony.update_issue_state`.
 5. Use the prompts exposed by this MCP server to structure planning or execution.
 
-The MCP server is read-write against the same `s3db` filesystem store used by the Fifony runtime.
+The MCP server is read-write against the same `s3db` filesystem store used by the fifo runtime.

@@ -1,4 +1,4 @@
-You are integrating with Fifony as the {{role}} using {{provider}}.
+You are integrating with fifo as the {{role}} using {{provider}}.
 
 Issue ID: {{id}}
 Title: {{title}}
@@ -13,7 +13,7 @@ Paths: {{paths | join ", "}}
 Description:
 {{description}}
 
-Use Fifony as the source of truth:
+Use fifo as the source of truth:
 - Read the workflow contract from WORKFLOW.md if available.
-- Persist transitions through the Fifony tools instead of inventing local state.
+- Persist transitions through the fifo tools instead of inventing local state.
 - Keep outputs actionable and aligned with the tracked issue lifecycle.

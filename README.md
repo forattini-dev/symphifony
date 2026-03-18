@@ -1,6 +1,6 @@
 <div align="center">
 
-# Fifony
+# fifo
 
 **AI agents that actually ship code. You just watch.**
 
@@ -25,7 +25,7 @@ Open **http://localhost:4040**. The first run launches the onboarding wizard —
 
 ## How It Works
 
-Fifony breaks every task into three stages, each independently configurable:
+fifo breaks every task into three stages, each independently configurable:
 
 ```
   Plan             Execute          Review
@@ -46,14 +46,14 @@ Planning → Todo → Queued → Running → In Review → Done
                            Interrupted    Blocked → (retry with backoff)
 ```
 
-1. **Create** — Describe what you want done. Fifony AI-enhances the title and description before planning.
+1. **Create** — Describe what you want done. fifo AI-enhances the title and description before planning.
 2. **Plan** — The planner agent generates a structured execution plan: phases, steps, target files, complexity, risks.
 3. **Approve** — You review the plan. Optionally chat with the AI to refine it before approving.
 4. **Execute** — Agents run in an isolated workspace (a copy of your project). Live output streams to the dashboard.
 5. **Review** — The reviewer agent inspects the diff and either approves, requests rework, or blocks.
 6. **Merge** — You review the diff and merge the workspace back to your project root.
 
-Agents run as detached child processes, tracked by PID. If the server restarts mid-run, Fifony recovers on the next boot.
+Agents run as detached child processes, tracked by PID. If the server restarts mid-run, fifo recovers on the next boot.
 
 ---
 
@@ -97,7 +97,7 @@ Install as a desktop app. Works offline. Desktop notifications when issues chang
 
 ## Agent & Skill Catalog
 
-Fifony ships with 15 specialist agents:
+fifo ships with 15 specialist agents:
 
 | Agent | Focus |
 |-------|-------|
@@ -119,7 +119,7 @@ Fifony ships with 15 specialist agents:
 
 And 5 skills: `commit`, `review-pr`, `debug`, `testing`, `impeccable` (frontend design system).
 
-Agents install to `.claude/agents/` and `.codex/agents/` during onboarding. Skills load from `SKILL.md` files in `.claude/skills/`, `.codex/skills/`, or your home directory. Fifony infers the right agent from the issue description and target file paths — capability routing is automatic.
+Agents install to `.claude/agents/` and `.codex/agents/` during onboarding. Skills load from `SKILL.md` files in `.claude/skills/`, `.codex/skills/`, or your home directory. fifo infers the right agent from the issue description and target file paths — capability routing is automatic.
 
 ---
 
@@ -152,7 +152,7 @@ npx -y fifony --concurrency 2 --attempts 3 --poll 500
 
 ## MCP Server
 
-Use Fifony as tools inside your editor:
+Use fifo as tools inside your editor:
 
 ```bash
 npx -y fifony mcp --workspace /path/to/repo
@@ -206,7 +206,7 @@ Interactive docs at `http://localhost:4040/docs`.
 
 ## Configuration
 
-Fifony reads a `WORKFLOW.md` in your project root if present. Front matter configures the pipeline; the Markdown body defines the execution contract. Settings from the UI write to `.fifony/s3db/`.
+fifo reads a `WORKFLOW.md` in your project root if present. Front matter configures the pipeline; the Markdown body defines the execution contract. Settings from the UI write to `.fifony/s3db/`.
 
 **Environment variables** (all optional when using the UI or WORKFLOW.md):
 
@@ -236,7 +236,7 @@ FIFONY_AGENT_MAX_TURNS=4
 
 **Token tracking**: O(1) in-memory ledger, no I/O on the hot path. Per-phase and per-model breakdown. Daily and hourly rollups via the `EventualConsistencyPlugin`. Cost estimates when the provider reports them.
 
-**Capability routing**: Fifony infers task type from the issue description and target file paths. It derives `capability:<category>` and `overlay:<name>` labels for queue triage. When `paths[]` is omitted, routing falls back to path mentions in the issue text and files changed in an existing workspace.
+**Capability routing**: fifo infers task type from the issue description and target file paths. It derives `capability:<category>` and `overlay:<name>` labels for queue triage. When `paths[]` is omitted, routing falls back to path mentions in the issue text and files changed in an existing workspace.
 
 **Graceful shutdown**: Running issues are marked `Interrupted` on SIGTERM. They resume from the last completed turn on the next boot.
 
@@ -251,7 +251,7 @@ FIFONY_AGENT_MAX_TURNS=4
 
 ## Credits
 
-Fifony is built on the shoulders of:
+fifo is built on the shoulders of:
 
 - **[OpenAI Codex CLI](https://github.com/openai/codex)** — Original foundation (Apache 2.0). See [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - **[Agency Agents](https://github.com/msitarzewski/agency-agents)** — Inspiration for the agent catalog.

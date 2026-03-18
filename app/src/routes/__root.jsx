@@ -138,7 +138,7 @@ function LoadingHero() {
           <span className="absolute -bottom-1 -right-1 size-5 bg-primary rounded-full animate-ping opacity-50" />
         </div>
         <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-          <span className="text-primary">Fifony</span>
+          <span className="text-primary">fifo</span>
         </h1>
         <div className="flex items-center gap-3 text-base-content/50">
           <span className="loading loading-dots loading-md" />

@@ -223,7 +223,7 @@ function GitignoreBanner() {
       <GitBranch className="size-4 shrink-0" />
       <div className="flex-1">
         <span><code>.fifony/</code> is not in your <code>.gitignore</code>.</span>
-        <span className="text-base-content/50 block text-xs mt-0.5">Fifony stores local state there — it shouldn't be committed.</span>
+        <span className="text-base-content/50 block text-xs mt-0.5">fifo stores local state there — it shouldn't be committed.</span>
       </div>
       <button
         className="btn btn-xs btn-warning"
@@ -243,7 +243,7 @@ function WelcomeStep({ workspacePath, onGetStarted }) {
         <Music className="size-16 sm:size-20 text-primary mx-auto" />
       </div>
       <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-        Welcome to <span className="text-primary">Fifony</span>
+        Welcome to <span className="text-primary">fifo</span>
       </h1>
       <p className="text-base-content/60 text-lg max-w-md">
         Let's set up your AI orchestration workspace in just a few steps.
@@ -1497,7 +1497,7 @@ export default function OnboardingWizard({ onComplete }) {
               </>
             ) : (
               <>
-                <Rocket className="size-5" /> Launch Fifony
+                <Rocket className="size-5" /> Launch fifo
               </>
             )}
           </button>

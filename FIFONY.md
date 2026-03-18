@@ -1,6 +1,6 @@
-# Fifony local runtime reference
+# fifo local runtime reference
 
-This repository runs Fifony as a pure TypeScript local orchestrator with no external tracker dependency.
+This repository runs fifo as a pure TypeScript local orchestrator with no external tracker dependency.
 
 ## What this package provides
 
@@ -91,8 +91,8 @@ npx fifony --port 4040 --concurrency 2 --attempts 3
 - `routing.overrides[]` can override the automatic provider/profile selection for matching tasks.
 - `routing.overrides[].match.paths` can force routing based on target directories or files.
 - Issue payloads can carry `paths[]` so routing can use the real change surface, not only text and labels.
-- When `paths[]` is omitted, Fifony infers routing hints from path-like text mentions and from files changed inside an existing persisted workspace.
-- Fifony derives labels like `capability:<category>` and `overlay:<name>` from the routing result for queue triage and visibility.
+- When `paths[]` is omitted, fifo infers routing hints from path-like text mentions and from files changed inside an existing persisted workspace.
+- fifo derives labels like `capability:<category>` and `overlay:<name>` from the routing result for queue triage and visibility.
 - The rendered prompt is written to `fifony-prompt.md` and exported through `FIFONY_PROMPT` and `FIFONY_PROMPT_FILE`.
 - Each issue runs as a multi-turn session controlled by `agent.max_turns`.
 - Each turn exports `FIFONY_AGENT_PROVIDER`, `FIFONY_AGENT_ROLE`, `FIFONY_AGENT_PROFILE`, `FIFONY_AGENT_PROFILE_FILE`, `FIFONY_AGENT_PROFILE_INSTRUCTIONS`, `FIFONY_SESSION_ID`, `FIFONY_SESSION_KEY`, `FIFONY_TURN_INDEX`, `FIFONY_MAX_TURNS`, `FIFONY_TURN_PROMPT`, `FIFONY_TURN_PROMPT_FILE`, `FIFONY_PREVIOUS_OUTPUT`, and `FIFONY_RESULT_FILE`.
