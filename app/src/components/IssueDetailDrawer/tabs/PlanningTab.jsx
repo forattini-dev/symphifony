@@ -147,9 +147,9 @@ export function PlanningTab({ issue, onStateChange, workflowConfig }) {
             <div className="flex flex-col items-center justify-center gap-4 py-10">
               <div className="flex items-center gap-2">
                 <span className="loading loading-dots loading-sm text-info" />
-                <span className="text-sm opacity-60">Aguardando slot do scheduler...</span>
+                <span className="text-sm opacity-60">Na fila — aguardando worker de planejamento...</span>
               </div>
-              <div className="text-xs opacity-30">O plano será gerado automaticamente</div>
+              <div className="text-xs opacity-30">O plano será gerado em breve automaticamente</div>
               <div className="flex items-center gap-2 mt-2">
                 <button className="btn btn-ghost btn-xs gap-1 opacity-50 hover:opacity-100" onClick={() => handleGenerate(false)}>
                   <Zap className="size-3" /> Gerar agora

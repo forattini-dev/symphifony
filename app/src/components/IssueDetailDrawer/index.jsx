@@ -196,7 +196,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
 
   // Reset tab when issue changes — auto-open Review tab when Reviewing/Reviewed
   useEffect(() => {
-    setTab(issue?.state === "Planning" ? "planning" : (issue?.state === "Reviewing" || issue?.state === "Reviewed") ? "review" : "overview");
+    setTab((issue?.state === "Planning" || issue?.state === "Planned") ? "planning" : (issue?.state === "Reviewing" || issue?.state === "Reviewed") ? "review" : "overview");
     setMergeBusy(false);
     setMergeError(null);
     setMergeNotice(null);
