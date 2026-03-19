@@ -46,4 +46,33 @@ Effort suggestion:
 - Set per-role if different: planner, executor, reviewer
 {{/unless}}
 
-Return strict JSON. No text outside JSON.
+Return strict JSON matching EXACTLY this schema. No text outside JSON. Use these exact field names:
+
+```json
+{
+  "summary": "one-line summary of what needs to be done",
+  "estimatedComplexity": "trivial|low|medium|high",
+  "steps": [
+    {
+      "step": 1,
+      "action": "what to do (concrete, specific)",
+      "files": ["path/to/file.ts"],
+      "details": "additional context if needed",
+      "ownerType": "agent|human|skill|subagent|tool",
+      "doneWhen": "acceptance criterion as a single string"
+    }
+  ],
+  "assumptions": ["..."],
+  "constraints": ["..."],
+  "unknowns": [
+    { "question": "...", "whyItMatters": "...", "howToResolve": "..." }
+  ],
+  "successCriteria": ["..."],
+  "risks": [
+    { "risk": "...", "impact": "...", "mitigation": "..." }
+  ],
+  "suggestedPaths": ["path/to/relevant/file.ts"],
+  "suggestedLabels": ["frontend", "bug", "feature", "..."],
+  "suggestedEffort": { "default": "medium", "planner": "low", "executor": "medium", "reviewer": "medium" }
+}
+```
