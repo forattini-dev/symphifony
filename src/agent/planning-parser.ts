@@ -18,12 +18,12 @@ export function tryBuildPlan(parsed: any): IssuePlan | null {
       : complexities.includes(parsed.complexity) ? parsed.complexity : "medium",
 
     steps: parsed.steps.map((s: any, i: number) => ({
-      step: typeof s.step === "number" ? s.step : i + 1,
-      action: String(s.action || s.description || s.title || s.task_name || (typeof s.step === "string" ? s.step : "") || ""),
+      step: typeof s.step === "number" ? s.step : typeof s.id === "number" ? s.id : i + 1,
+      action: String(s.action || s.what || s.description || s.title || s.task_name || (typeof s.step === "string" ? s.step : "") || ""),
       files: toStringArray(s.files),
       details: s.details ? String(s.details) : undefined,
       ownerType: s.ownerType || s.owner_type || undefined,
-      doneWhen: s.doneWhen || s.done_when || undefined,
+      doneWhen: Array.isArray(s.doneWhen) ? s.doneWhen.join("\n") : (s.doneWhen || s.done_when || undefined),
     })),
 
     assumptions: toStringArray(parsed.assumptions),
@@ -45,7 +45,7 @@ export function tryBuildPlan(parsed: any): IssuePlan | null {
     executionStrategy: parsed.executionStrategy || parsed.execution_strategy || undefined,
     toolingDecision: parsed.toolingDecision || parsed.tooling_decision || undefined,
 
-    suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.filePaths || parsed.file_paths || parsed.paths),
+    suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.suggestedFilePaths || parsed.filePaths || parsed.file_paths || parsed.paths),
     suggestedLabels: toStringArray(parsed.suggestedLabels || parsed.suggested_labels || parsed.labels),
     suggestedEffort: parsed.suggestedEffort || parsed.suggested_effort || parsed.effortSuggestion || parsed.effort_suggestion || parsed.effort || { default: "medium" },
 
