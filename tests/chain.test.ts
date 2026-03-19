@@ -322,7 +322,7 @@ describe("codex chain", () => {
 
     assert.ok(result !== null, "compilation succeeded");
     // plan.suggestedEffort wins over provider.reasoningEffort and config.defaultEffort
-    assert.ok(result!.command.includes("--reasoning-effort high"), "plan effort wins");
+    assert.ok(result!.command.includes(`reasoning_effort="high"`), "plan effort wins");
   });
 
   it("step 3 — compile execution for codex: effort priority 2 — config.defaultEffort", async () => {
@@ -334,7 +334,7 @@ describe("codex chain", () => {
     const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
 
     assert.ok(result !== null, "compilation succeeded");
-    assert.ok(result!.command.includes("--reasoning-effort medium"), "config.defaultEffort wins");
+    assert.ok(result!.command.includes(`reasoning_effort="medium"`), "config.defaultEffort wins");
   });
 
   it("step 3 — compile execution for codex: effort priority 3 — provider.reasoningEffort as final fallback", async () => {
@@ -348,7 +348,7 @@ describe("codex chain", () => {
 
     assert.ok(result !== null, "compilation succeeded");
     // provider.reasoningEffort = WorkflowConfig.execute.effort is now the final fallback
-    assert.ok(result!.command.includes("--reasoning-effort high"), "WorkflowConfig effort reaches command");
+    assert.ok(result!.command.includes(`reasoning_effort="high"`), "WorkflowConfig effort reaches command");
   });
 
   it("step 3 — compile execution for codex: --reasoning-effort absent when nothing anywhere", async () => {
@@ -360,7 +360,7 @@ describe("codex chain", () => {
     const result = await compileExecution(issue, provider, noEffortConfig, WORKSPACE, "");
 
     assert.ok(result !== null, "compilation succeeded");
-    assert.ok(!result!.command.includes("--reasoning-effort"), "no effort flag when truly nothing configured");
+    assert.ok(!result!.command.includes("reasoning_effort="), "no effort flag when truly nothing configured");
   });
 
   it("step 3 — compile execution for codex: --model is injected", async () => {
@@ -426,7 +426,7 @@ describe("codex chain", () => {
     const result = await compileReview(issue, reviewer, WORKSPACE, "5 files changed");
 
     assert.ok(result.command.startsWith("codex exec"), "review command is codex");
-    assert.ok(result.command.includes("--reasoning-effort medium"), "has reasoning effort");
+    assert.ok(result.command.includes(`reasoning_effort="medium"`), "has reasoning effort");
   });
 
   it("step 4 — compile review for codex: model in review command", async () => {
@@ -465,7 +465,7 @@ describe("codex chain", () => {
     const reviewResult = await compileReview(issue, reviewer, WORKSPACE, "10 files changed");
 
     assert.ok(execResult !== null, "execution compiled");
-    assert.ok(execResult!.command.includes("--reasoning-effort high"), "executor uses high effort from plan");
+    assert.ok(execResult!.command.includes(`reasoning_effort="high"`), "executor uses high effort from plan");
     assert.ok(reviewResult.command.includes("o3-mini"), "reviewer uses o3-mini");
 
     // Both should be valid codex commands
@@ -502,7 +502,7 @@ describe("mixed chain: claude-planner + codex-executor + claude-reviewer", () =>
     const result = await compileExecution(issue, executor, BASE_CONFIG, WORKSPACE, "");
 
     assert.ok(result !== null, "compiled");
-    assert.ok(result!.command.includes("--reasoning-effort medium"), "has effort");
+    assert.ok(result!.command.includes(`reasoning_effort="medium"`), "has effort");
     assert.ok(result!.command.includes("--add-dir"), "has add-dir for db paths");
   });
 
@@ -518,7 +518,7 @@ describe("mixed chain: claude-planner + codex-executor + claude-reviewer", () =>
 
     assert.ok(result.command.startsWith("claude "), "reviewer uses claude");
     assert.ok(result.command.includes("claude-opus-4-6"), "uses opus model");
-    assert.ok(!result.command.includes("--reasoning-effort"), "no effort flag for claude");
+    assert.ok(!result.command.includes("reasoning_effort="), "no effort flag for claude");
   });
 
   it("execution and review commands are for different providers", async () => {

@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @plugin "daisyui" {
   logs: false;
+  themes: all;
 }
 
 /* Fifony Dashboard — layout helpers + micro-interactions */

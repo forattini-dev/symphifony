@@ -333,6 +333,22 @@ export function useTokenAnalytics() {
   });
 }
 
+export function useCodeChurnAnalytics({ pollInterval = 30000 } = {}) {
+  return useQuery({
+    queryKey: ["analytics-lines"],
+    queryFn: () => api.get("/analytics/lines"),
+    refetchInterval: pollInterval,
+  });
+}
+
+export function useKpiAnalytics({ pollInterval = 30000 } = {}) {
+  return useQuery({
+    queryKey: ["analytics-kpis"],
+    queryFn: () => api.get("/analytics/kpis"),
+    refetchInterval: pollInterval,
+  });
+}
+
 /** Fetch hourly sparkline data (tokens/hour + events/hour). Polls every 30s. */
 export function useHourlyAnalytics(hours = 24) {
   return useQuery({

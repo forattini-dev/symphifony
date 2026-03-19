@@ -13,14 +13,17 @@ import {
   triggerReplan,
 } from "../issues.ts";
 import { wakeScheduler } from "../scheduler.ts";
-import { ATTACHMENTS_ROOT, TERMINAL_STATES } from "../constants.ts";
+import { ATTACHMENTS_ROOT, TERMINAL_STATES, TARGET_ROOT } from "../constants.ts";
 import { isAgentStillRunning, mergeWorkspace } from "../agent.ts";
+import { readAgentPid } from "../pid-manager.ts";
 import { findIssue, mutateIssueState, parseIssue } from "../api-helpers.ts";
+import { cleanWorkspace } from "../workspace-setup.ts";
 import { detectAvailableProviders } from "../providers.ts";
 import { analyzeParallelizability } from "../scheduler.ts";
 import { collectProvidersUsage } from "../providers-usage.ts";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
 
 export function registerStateRoutes(
@@ -158,6 +161,17 @@ export function registerStateRoutes(
   app.post("/api/issues/:id/cancel", async (c: any) => {
     logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/cancel");
     return mutateIssueState(state, c, async (issue) => {
+      // Kill running agent process if one exists
+      const pidInfo = issue.workspacePath ? readAgentPid(issue.workspacePath) : null;
+      if (pidInfo) {
+        try {
+          process.kill(-pidInfo.pid, "SIGTERM");
+          logger.info({ pid: pidInfo.pid, issueId: issue.id }, "[API] Sent SIGTERM to agent process group");
+        } catch {
+          try { process.kill(pidInfo.pid, "SIGTERM"); } catch {}
+        }
+      }
+      issue.cancelledReason = "Manually cancelled by user.";
       await transitionIssueState(issue, "Cancelled", "Manual cancel requested.");
       addEvent(state, issue.id, "manual", `Manual cancel requested for ${issue.id}.`);
     });
@@ -211,13 +225,46 @@ export function registerStateRoutes(
       if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
       const issue = findIssue(state, issueId);
       if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
-      if (issue.state !== "Done") {
-        return c.json({ ok: false, error: `Issue ${issue.identifier} is in state ${issue.state}. Merge is only allowed after approval.` }, 409);
+      if (!["Done", "Reviewing", "Reviewed"].includes(issue.state)) {
+        return c.json({ ok: false, error: `Issue ${issue.identifier} is in state ${issue.state}. Merge is only allowed in Reviewing, Reviewed, or Done state.` }, 409);
+      }
+      // Auto-transition to Done if still in review
+      if (issue.state === "Reviewing" || issue.state === "Reviewed") {
+        await transitionIssueState(issue, "Done", `Approved and merged by user.`);
+        addEvent(state, issue.id, "state", `${issue.identifier} approved — moved to Done before merge.`);
       }
       const wp = issue.worktreePath ?? issue.workspacePath;
       if (!wp || !existsSync(wp)) {
         return c.json({ ok: false, error: "No workspace found for this issue." }, 400);
       }
+      // Compute line stats from git diff before merge
+      if (issue.branchName && issue.baseBranch) {
+        try {
+          const stat = execSync(
+            `git diff --shortstat "${issue.baseBranch}"..."${issue.branchName}"`,
+            { encoding: "utf8", cwd: TARGET_ROOT, stdio: "pipe", timeout: 10_000 },
+          );
+          const addMatch = stat.match(/(\d+) insertion/);
+          const delMatch = stat.match(/(\d+) deletion/);
+          const filesMatch = stat.match(/(\d+) file/);
+          issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
+          issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
+          issue.filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+        } catch { /* non-critical */ }
+      }
+      // If a prior "try" squash was applied (staged but not committed), reset it cleanly
+      // before the real git merge --no-ff. Only reset if the index is dirty but working tree is clean,
+      // which is exactly the state left by git merge --squash.
+      try {
+        const indexStatus = execSync("git diff --cached --name-only", { cwd: TARGET_ROOT, encoding: "utf8", stdio: "pipe" }).trim();
+        const wtStatus = execSync("git diff --name-only", { cwd: TARGET_ROOT, encoding: "utf8", stdio: "pipe" }).trim();
+        if (indexStatus && !wtStatus) {
+          // Staged-only changes → residual squash → hard reset so merge --no-ff can proceed cleanly
+          execSync("git reset --hard HEAD", { cwd: TARGET_ROOT, stdio: "pipe" });
+          logger.info({ issueId: issue.id }, "[API] Cleared residual squash from index before merge");
+        }
+      } catch { /* non-critical */ }
+
       const result = mergeWorkspace(issue);
       issue.mergeResult = {
         copied: result.copied.length,
@@ -227,6 +274,15 @@ export function registerStateRoutes(
       };
       if (result.conflicts.length === 0) {
         issue.mergedAt = now();
+        if (!issue.mergedReason) issue.mergedReason = "Merged by user via PreviewModal.";
+        // Cleanup worktree + branch after successful merge
+        if (issue.workspacePath) {
+          try {
+            await cleanWorkspace(issue.id, issue, state);
+            issue.workspacePath = undefined as any;
+            issue.worktreePath = undefined as any;
+          } catch { /* non-critical */ }
+        }
       }
       const conflictMsg = result.conflicts.length > 0
         ? ` ${result.conflicts.length} conflict(s): ${result.conflicts.join(", ")}.`
@@ -242,6 +298,63 @@ export function registerStateRoutes(
       logger.error(`Failed to merge workspace for ${issueId || "<unknown>"}: ${String(error)}`);
       return c.json({ ok: false, error: String(error) }, 500);
     }
+  });
+
+  app.post("/api/issues/:id/try", async (c: any) => {
+    logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/try");
+    return mutateIssueState(state, c, async (issue) => {
+      if (!["Reviewing", "Reviewed"].includes(issue.state)) {
+        throw new Error(`Cannot apply test for issue in state ${issue.state}.`);
+      }
+      if (!issue.branchName) {
+        throw new Error("No branch name found for this issue.");
+      }
+      try {
+        execSync(
+          `git merge --squash "${issue.branchName}"`,
+          { encoding: "utf8", cwd: TARGET_ROOT, stdio: "pipe", timeout: 30_000 },
+        );
+      } catch (err: any) {
+        const msg = err.stderr || err.stdout || String(err);
+        throw new Error(`git merge --squash failed: ${msg}`);
+      }
+      addEvent(state, issue.id, "manual", `Test squash applied to workspace: git merge --squash ${issue.branchName}`);
+    });
+  });
+
+  app.post("/api/issues/:id/revert-try", async (c: any) => {
+    logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/revert-try");
+    return mutateIssueState(state, c, async (issue) => {
+      try {
+        execSync("git reset --hard HEAD", { cwd: TARGET_ROOT, stdio: "pipe", timeout: 15_000 });
+        execSync("git clean -fd", { cwd: TARGET_ROOT, stdio: "pipe", timeout: 15_000 });
+      } catch (err: any) {
+        const msg = err.stderr || err.stdout || String(err);
+        throw new Error(`git reset/clean failed: ${msg}`);
+      }
+      addEvent(state, issue.id, "manual", `Test reverted: git reset --hard HEAD && git clean -fd`);
+    });
+  });
+
+  app.post("/api/issues/:id/rollback", async (c: any) => {
+    logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/rollback");
+    return mutateIssueState(state, c, async (issue) => {
+      if (!["Reviewing", "Reviewed", "Done"].includes(issue.state)) {
+        throw new Error(`Cannot rollback issue in state ${issue.state}. Must be in Reviewing, Reviewed, or Done.`);
+      }
+      if (issue.workspacePath) {
+        try {
+          await cleanWorkspace(issue.id, issue, state);
+          issue.workspacePath = undefined as any;
+          issue.worktreePath = undefined as any;
+        } catch (error) {
+          logger.warn({ err: error }, `[API] Workspace cleanup failed during rollback for ${issue.id}`);
+        }
+      }
+      await transitionIssueState(issue, "Queued", "Rolled back by user — worktree removed.");
+      addEvent(state, issue.id, "manual", `${issue.identifier} rolled back. Worktree and branch removed.`);
+      wakeScheduler();
+    });
   });
 
   app.post("/api/issues/:id/images", async (c: any) => {

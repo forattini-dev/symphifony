@@ -531,6 +531,10 @@ export function transition(issue: IssueEntry, target: IssueState, note: string):
     issue.nextRetryAt = undefined;
   }
 
+  if (target === "Reviewing") {
+    issue.reviewingAt = now();
+  }
+
   if (TERMINAL_STATES.has(target)) {
     issue.completedAt = now();
     issue.nextRetryAt = undefined;

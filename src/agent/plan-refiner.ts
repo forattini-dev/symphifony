@@ -1,31 +1,20 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { IssuePlan, RuntimeConfig, IssueEntry, AgentTokenUsage } from "./types.ts";
-import { appendFileTail, now } from "./helpers.ts";
-import { detectAvailableProviders } from "./providers.ts";
-import { getWorkflowConfig, loadRuntimeSettings } from "./settings.ts";
+import { now } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { record as recordTokens } from "./token-ledger.ts";
-import { STATE_ROOT } from "./constants.ts";
 import { type PlanningSessionUsage } from "./planning-session.ts";
-import { parsePlanOutput, tryBuildPlan, extractPlanTokenUsage } from "./planning-parser.ts";
-import { buildRefinePrompt, getPlanCommand } from "./planning-prompts.ts";
-
-// ── Debug helpers ─────────────────────────────────────────────────────────────
-
-function savePlanDebugFiles(slug: string, prompt: string, output: string): void {
-  try {
-    const debugDir = join(STATE_ROOT, "debug");
-    mkdirSync(debugDir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    writeFileSync(join(debugDir, `plan-${slug}-${ts}-prompt.md`), prompt, "utf8");
-    if (output) writeFileSync(join(debugDir, `plan-${slug}-${ts}-output.txt`), output, "utf8");
-  } catch {
-    // non-critical
-  }
-}
+import { parsePlanOutput, extractPlanTokenUsage } from "./planning-parser.ts";
+import {
+  buildRefinePrompt,
+  getPlanCommand,
+  savePlanDebugFiles,
+  resolvePlanStageConfig,
+  runPlanningProcess,
+} from "./planning-prompts.ts";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -44,33 +33,7 @@ export async function refinePlan(
 ): Promise<RefinePlanResult> {
   if (!issue.plan) throw new Error("Issue has no plan to refine.");
 
-  const providers = detectAvailableProviders();
-  const available = providers.filter((p) => p.available).map((p) => p.name);
-
-  // Use the same provider/model/effort logic as generatePlan
-  let planStageProvider: string | undefined;
-  let planStageModel: string | undefined;
-  let planStageEffort: string | undefined;
-  try {
-    const settings = await loadRuntimeSettings();
-    const workflowConfig = getWorkflowConfig(settings);
-    if (workflowConfig?.plan) {
-      planStageProvider = workflowConfig.plan.provider;
-      planStageModel = workflowConfig.plan.model;
-      planStageEffort = workflowConfig.plan.effort;
-    }
-  } catch {
-    // Fall through to default provider selection
-  }
-
-  const preferred =
-    (planStageProvider && available.includes(planStageProvider)) ? planStageProvider :
-    (config.agentProvider && available.includes(config.agentProvider)) ? config.agentProvider :
-    available[0];
-  if (!preferred) throw new Error("No AI provider available for plan refinement.");
-
-  // If provider changed (configured wasn't available → fallback), discard provider-specific model
-  if (preferred !== configuredProvider) planStageModel = undefined;
+  const { provider: preferred, model: planStageModel } = await resolvePlanStageConfig(config);
 
   const refineStartMs = Date.now();
   const prompt = await buildRefinePrompt(issue.title, issue.description, issue.plan, feedback);
@@ -78,88 +41,21 @@ export async function refinePlan(
   let plan: IssuePlan | null = null;
   let refineUsage: PlanningSessionUsage;
 
-  // ── All providers: spawn CLI process ──
   {
     const command = getPlanCommand(preferred, planStageModel);
     if (!command) throw new Error(`No command configured for provider ${preferred}.`);
 
     const tempDir = mkdtempSync(join(tmpdir(), "fifony-refine-"));
     const promptFile = join(tempDir, "fifony-refine-prompt.md");
-
     writeFileSync(promptFile, `${prompt}\n`, "utf8");
 
-    const output = await new Promise<string>((resolve, reject) => {
-      let stdout = "";
-      const child = spawn(command, {
-        shell: true,
-        cwd: tempDir,
-        detached: true,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          FIFONY_PROMPT_FILE: promptFile,
-          FIFONY_AGENT_PROVIDER: preferred,
-        },
-      });
-      child.unref();
-      child.stdin?.end();
-
-      let refineOutputBytes = 0;
-      child.stdout?.on("data", (chunk) => {
-        stdout = appendFileTail(stdout, String(chunk), 32_000);
-        refineOutputBytes += String(chunk).length;
-      });
-      child.stderr?.on("data", (chunk) => {
-        stdout = appendFileTail(stdout, String(chunk), 32_000);
-        refineOutputBytes += String(chunk).length;
-      });
-
-      const REFINE_TIMEOUT_MS = 1_800_000; // 30 minutes
-      const REFINE_STALE_OUTPUT_MS = 300_000; // 5 minutes without output growth
-
-      const timer = setTimeout(() => {
-        if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
-        else { child.kill("SIGTERM"); }
-        reject(new Error("Plan refinement timed out after 30 minutes."));
-      }, REFINE_TIMEOUT_MS);
-
-      // Progress watchdog: check PID alive + output growing every 30s
-      let lastRefineWatchdogBytes = 0;
-      let lastRefineOutputGrowthAt = Date.now();
-      const watchdog = setInterval(() => {
-        // Check if PID is still alive
-        if (child.pid) {
-          try { process.kill(child.pid, 0); } catch {
-            clearInterval(watchdog);
-            clearTimeout(timer);
-            reject(new Error(`Refinement process died unexpectedly (PID ${child.pid}).`));
-            return;
-          }
-        }
-        // Check if output is still growing
-        if (refineOutputBytes > lastRefineWatchdogBytes) {
-          lastRefineWatchdogBytes = refineOutputBytes;
-          lastRefineOutputGrowthAt = Date.now();
-        } else if (Date.now() - lastRefineOutputGrowthAt > REFINE_STALE_OUTPUT_MS) {
-          clearInterval(watchdog);
-          clearTimeout(timer);
-          if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
-          else { child.kill("SIGTERM"); }
-          reject(new Error(`Refinement process stuck — no output for ${Math.round(REFINE_STALE_OUTPUT_MS / 60_000)} minutes.`));
-        }
-      }, 30_000);
-
-      child.on("error", () => { clearInterval(watchdog); clearTimeout(timer); reject(new Error("Failed to execute refinement command.")); });
-      child.on("close", (code) => {
-        clearInterval(watchdog);
-        clearTimeout(timer);
-        rmSync(tempDir, { recursive: true, force: true });
-        if (code !== 0) {
-          reject(new Error(`Plan refinement failed (exit ${code}): ${stdout.slice(0, 500)}`));
-          return;
-        }
-        resolve(stdout);
-      });
+    const output = await runPlanningProcess({
+      command,
+      tempDir,
+      promptFile,
+      provider: preferred,
+    }).finally(() => {
+      rmSync(tempDir, { recursive: true, force: true });
     });
 
     logger.info({ rawOutput: output.slice(0, 2000) }, `Refine raw output from ${preferred}`);
@@ -187,7 +83,6 @@ export async function refinePlan(
 
   plan.provider = planStageModel ? `${preferred}/${planStageModel}` : preferred;
 
-  // Carry over refinement history from the original plan and append the new refinement
   const existingRefinements = issue.plan.refinements ?? [];
   const nextVersion = existingRefinements.length + 1;
   plan.refinements = [
@@ -198,7 +93,6 @@ export async function refinePlan(
   const durationMs = Date.now() - refineStartMs;
   refineUsage.durationMs = durationMs;
 
-  // Record refinement tokens in the ledger
   if (refineUsage.totalTokens > 0) {
     const tokenUsage: AgentTokenUsage = {
       inputTokens: refineUsage.inputTokens,

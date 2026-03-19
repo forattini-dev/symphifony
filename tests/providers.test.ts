@@ -160,7 +160,7 @@ describe("getProviderDefaultCommand", () => {
 
   it("codex command includes reasoning effort when provided", () => {
     const cmd = getProviderDefaultCommand("codex", "high");
-    assert.ok(cmd.includes("--reasoning-effort high"), "has effort");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "has effort");
   });
 
   it("claude command includes model when provided", () => {
@@ -170,7 +170,7 @@ describe("getProviderDefaultCommand", () => {
 
   it("claude command does NOT include --reasoning-effort (unsupported)", () => {
     const cmd = getProviderDefaultCommand("claude", "high");
-    assert.ok(!cmd.includes("--reasoning-effort"), "no effort flag for claude");
+    assert.ok(!cmd.includes("reasoning_effort="), "no effort flag for claude");
   });
 
   it("claude command includes --json-schema (for result parsing)", () => {
@@ -181,7 +181,7 @@ describe("getProviderDefaultCommand", () => {
   it("codex command with both model and effort", () => {
     const cmd = getProviderDefaultCommand("codex", "medium", "o4-mini");
     assert.ok(cmd.includes("--model o4-mini"), "has model");
-    assert.ok(cmd.includes("--reasoning-effort medium"), "has effort");
+    assert.ok(cmd.includes(`reasoning_effort="medium"`), "has effort");
   });
 });
 
@@ -225,7 +225,7 @@ describe("resolveAgentCommand", () => {
 
   it("reasoningEffort propagates through codex fallback", () => {
     const cmd = resolveAgentCommand("codex", "", "", "", "high");
-    assert.ok(cmd.includes("--reasoning-effort high"), "effort in fallback");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "effort in fallback");
   });
 
   it("claudeCommand not used for codex provider", () => {

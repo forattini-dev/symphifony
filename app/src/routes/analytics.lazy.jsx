@@ -1,7 +1,7 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { useTokenAnalytics } from "../hooks.js";
+import { useTokenAnalytics, useCodeChurnAnalytics, useKpiAnalytics } from "../hooks.js";
 import { fillDailyGaps } from "../utils.js";
-import { Zap, TrendingUp, Layers, Cpu, Clock, Activity } from "lucide-react";
+import { Zap, TrendingUp, Layers, Cpu, Clock, Activity, GitMerge, Timer, GitPullRequest } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 
 // ── Format helpers ───────────────────────────────────────────────────────
@@ -112,135 +112,83 @@ function PhaseBreakdownLarge({ byPhase }) {
   );
 }
 
-// ── Combined activity chart (tokens + events, shared x-axis) ─────────────
+// ── Single-metric daily bar chart ────────────────────────────────────────
 
-function ActivityChart({ daily }) {
-  if (!daily || daily.length === 0) return null;
+function DailyBarChart({ data, valueKey, barClass, label, height = 64, showXAxis = false, hoveredIdx, onHover, formatTooltip }) {
+  if (!data || data.length === 0) return null;
 
-  const [hoveredIdx, setHoveredIdx] = useState(null);
   const today = new Date().toISOString().slice(0, 10);
-  const data = daily;
-
-  const maxTokens = Math.max(...data.map((d) => d.totalTokens || 0), 1);
-  const maxEvents = Math.max(...data.map((d) => d.events || 0), 1);
-
+  const max = Math.max(...data.map((d) => d[valueKey] || 0), 1);
   const labelEvery = data.length <= 7 ? 1 : data.length <= 14 ? 2 : data.length <= 21 ? 3 : 5;
 
-  const TOKEN_H = 80;
-  const EVENT_H = 28;
-
   const hovered = hoveredIdx != null ? data[hoveredIdx] : null;
-  // Clamp tooltip so it doesn't overflow: left-anchor for first third, right-anchor for last third
   const tooltipAlign = hoveredIdx == null ? "center"
     : hoveredIdx < data.length / 3 ? "left"
     : hoveredIdx > (data.length * 2) / 3 ? "right"
     : "center";
 
   return (
-    <div>
-      {/* Legend */}
-      <div className="flex items-center gap-5 mb-3">
-        <span className="flex items-center gap-1.5 text-xs opacity-50">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-primary" />
-          Tokens / day
-        </span>
-        <span className="flex items-center gap-1.5 text-xs opacity-50">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-secondary" />
-          Events / day
-        </span>
+    <div className="relative">
+      {/* Label */}
+      <div className="flex items-center gap-1.5 text-xs opacity-50 mb-2">
+        <span className={`inline-block w-2.5 h-2.5 rounded-sm ${barClass}`} />
+        {label}
       </div>
 
-      {/* Chart — one column per day spanning both rows */}
-      <div className="relative">
-
-        {/* Tooltip */}
-        {hovered && (
-          <div
-            className="absolute -top-1 z-10 pointer-events-none"
-            style={{
-              left: tooltipAlign !== "right" ? `${((hoveredIdx + 0.5) / data.length) * 100}%` : undefined,
-              right: tooltipAlign === "right" ? `${((data.length - 1 - hoveredIdx) / data.length) * 100}%` : undefined,
-              transform: tooltipAlign === "center" ? "translateX(-50%) translateY(-100%)"
-                : tooltipAlign === "left" ? "translateY(-100%)"
-                : "translateY(-100%)",
-            }}
-          >
-            <div className="bg-base-300 border border-base-content/10 rounded-lg px-2.5 py-1.5 shadow-lg text-left whitespace-nowrap">
-              <div className="text-[10px] font-semibold opacity-60 mb-1">
-                {hovered.date === today ? "Today" : new Date(hovered.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="flex items-center gap-1.5 text-xs">
-                  <span className="inline-block w-2 h-2 rounded-sm bg-primary shrink-0" />
-                  <span className="font-mono font-semibold">{(hovered.totalTokens || 0).toLocaleString()}</span>
-                  <span className="opacity-50">tokens</span>
-                </span>
-                <span className="flex items-center gap-1.5 text-xs">
-                  <span className="inline-block w-2 h-2 rounded-sm bg-secondary shrink-0" />
-                  <span className="font-mono font-semibold">{hovered.events || 0}</span>
-                  <span className="opacity-50">events</span>
-                </span>
-              </div>
+      {/* Tooltip */}
+      {hovered && (
+        <div
+          className="absolute top-5 z-10 pointer-events-none"
+          style={{
+            left: tooltipAlign !== "right" ? `${((hoveredIdx + 0.5) / data.length) * 100}%` : undefined,
+            right: tooltipAlign === "right" ? `${((data.length - 1 - hoveredIdx) / data.length) * 100}%` : undefined,
+            transform: tooltipAlign === "center" ? "translateX(-50%) translateY(-100%)"
+              : tooltipAlign === "left" ? "translateY(-100%)"
+              : "translateY(-100%)",
+          }}
+        >
+          <div className="bg-base-300 border border-base-content/10 rounded-lg px-2.5 py-1.5 shadow-lg text-left whitespace-nowrap">
+            <div className="text-[10px] font-semibold opacity-60 mb-0.5">
+              {hovered.date === today ? "Today" : new Date(hovered.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
             </div>
+            <span className="flex items-center gap-1.5 text-xs">
+              <span className={`inline-block w-2 h-2 rounded-sm ${barClass} shrink-0`} />
+              <span className="font-mono font-semibold">{formatTooltip ? formatTooltip(hovered[valueKey] || 0) : (hovered[valueKey] || 0).toLocaleString()}</span>
+            </span>
           </div>
-        )}
-
-        {/* Columns */}
-        <div className="flex gap-px">
-          {data.map((d, i) => {
-            const tokenVal = d.totalTokens || 0;
-            const eventVal = d.events || 0;
-            const tokenH = tokenVal > 0 ? Math.max(3, Math.round((tokenVal / maxTokens) * TOKEN_H)) : 0;
-            const eventH = eventVal > 0 ? Math.max(3, Math.round((eventVal / maxEvents) * EVENT_H)) : 0;
-            const isToday = d.date === today;
-            const isHovered = hoveredIdx === i;
-
-            return (
-              <div
-                key={d.date}
-                className="flex-1 flex flex-col cursor-default"
-                onMouseEnter={() => setHoveredIdx(i)}
-                onMouseLeave={() => setHoveredIdx(null)}
-              >
-                {/* Token bar area */}
-                <div className="relative" style={{ height: TOKEN_H }}>
-                  {tokenH > 0 && (
-                    <div
-                      className={`absolute bottom-0 left-0 right-0 rounded-t-[2px] bg-primary transition-opacity duration-100 ${
-                        isHovered ? "opacity-80" : isToday ? "opacity-90" : "opacity-35"
-                      }`}
-                      style={{ height: tokenH }}
-                    />
-                  )}
-                  {/* Hover highlight column */}
-                  {isHovered && (
-                    <div className="absolute inset-0 bg-base-content/5 rounded-sm" />
-                  )}
-                </div>
-
-                {/* Divider */}
-                <div className={`h-px transition-colors duration-100 ${isHovered ? "bg-base-content/20" : "bg-base-300"}`} />
-
-                {/* Event bar area */}
-                <div className="relative" style={{ height: EVENT_H }}>
-                  {eventH > 0 && (
-                    <div
-                      className={`absolute bottom-0 left-0 right-0 rounded-t-[2px] bg-secondary transition-opacity duration-100 ${
-                        isHovered ? "opacity-80" : isToday ? "opacity-90" : "opacity-35"
-                      }`}
-                      style={{ height: eventH }}
-                    />
-                  )}
-                  {isHovered && (
-                    <div className="absolute inset-0 bg-base-content/5 rounded-sm" />
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
+      )}
 
-        {/* X-axis labels */}
+      {/* Bars */}
+      <div className="flex gap-px" style={{ height }}>
+        {data.map((d, i) => {
+          const val = d[valueKey] || 0;
+          const barH = val > 0 ? Math.max(3, Math.round((val / max) * height)) : 0;
+          const isToday = d.date === today;
+          const isHovered = hoveredIdx === i;
+          return (
+            <div
+              key={d.date}
+              className="flex-1 relative cursor-default"
+              onMouseEnter={() => onHover?.(i)}
+              onMouseLeave={() => onHover?.(null)}
+            >
+              {barH > 0 && (
+                <div
+                  className={`absolute bottom-0 left-0 right-0 rounded-t-[2px] ${barClass} transition-opacity duration-100 ${
+                    isHovered ? "opacity-80" : isToday ? "opacity-90" : "opacity-35"
+                  }`}
+                  style={{ height: barH }}
+                />
+              )}
+              {isHovered && <div className="absolute inset-0 bg-base-content/5 rounded-sm" />}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* X-axis labels (only on bottom chart) */}
+      {showXAxis && (
         <div className="flex gap-px mt-1.5">
           {data.map((d, i) => {
             const isToday = d.date === today;
@@ -262,7 +210,38 @@ function ActivityChart({ daily }) {
             );
           })}
         </div>
-      </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityChart({ daily }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const data = daily || [];
+
+  return (
+    <div className="space-y-4">
+      <DailyBarChart
+        data={data}
+        valueKey="totalTokens"
+        barClass="bg-primary"
+        label="Tokens / day"
+        height={64}
+        showXAxis={false}
+        hoveredIdx={hoveredIdx}
+        onHover={setHoveredIdx}
+        formatTooltip={(v) => v.toLocaleString()}
+      />
+      <DailyBarChart
+        data={data}
+        valueKey="events"
+        barClass="bg-secondary"
+        label="Events / day"
+        height={36}
+        showXAxis
+        hoveredIdx={hoveredIdx}
+        onHover={setHoveredIdx}
+      />
     </div>
   );
 }
@@ -383,7 +362,184 @@ function TopIssuesTable({ topIssues }) {
   );
 }
 
+// ── Code Churn Chart ─────────────────────────────────────────────────────
+
+function CodeChurnChart({ daily }) {
+  const daily_ = daily || [];
+
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const maxAdded = Math.max(...daily_.map((d) => d.linesAdded || 0), 1);
+  const maxRemoved = Math.max(...daily_.map((d) => d.linesRemoved || 0), 1);
+
+  const ADD_H = 64;
+  const DEL_H = 24;
+
+  const labelEvery = daily_.length <= 7 ? 1 : daily_.length <= 14 ? 2 : daily_.length <= 21 ? 3 : 5;
+  const hovered = hoveredIdx != null ? daily_[hoveredIdx] : null;
+  const tooltipAlign = hoveredIdx == null ? "center"
+    : hoveredIdx < daily_.length / 3 ? "left"
+    : hoveredIdx > (daily_.length * 2) / 3 ? "right"
+    : "center";
+
+  return (
+    <div>
+      <div className="flex items-center gap-5 mb-3">
+        <span className="flex items-center gap-1.5 text-xs opacity-50">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-success" />
+          Lines added / day
+        </span>
+        <span className="flex items-center gap-1.5 text-xs opacity-50">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-error" />
+          Lines removed / day
+        </span>
+      </div>
+
+      <div className="relative">
+        {hovered && (
+          <div
+            className="absolute -top-1 z-10 pointer-events-none"
+            style={{
+              left: tooltipAlign !== "right" ? `${((hoveredIdx + 0.5) / daily_.length) * 100}%` : undefined,
+              right: tooltipAlign === "right" ? `${((daily_.length - 1 - hoveredIdx) / daily_.length) * 100}%` : undefined,
+              transform: tooltipAlign === "center" ? "translateX(-50%) translateY(-100%)"
+                : tooltipAlign === "left" ? "translateY(-100%)"
+                : "translateY(-100%)",
+            }}
+          >
+            <div className="bg-base-300 border border-base-content/10 rounded-lg px-2.5 py-1.5 shadow-lg text-left whitespace-nowrap">
+              <div className="text-[10px] font-semibold opacity-60 mb-1">
+                {hovered.date === today ? "Today" : new Date(hovered.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="flex items-center gap-1.5 text-xs">
+                  <span className="inline-block w-2 h-2 rounded-sm bg-success shrink-0" />
+                  <span className="font-mono font-semibold">+{(hovered.linesAdded || 0).toLocaleString()}</span>
+                  <span className="opacity-50">added</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-xs">
+                  <span className="inline-block w-2 h-2 rounded-sm bg-error shrink-0" />
+                  <span className="font-mono font-semibold">-{(hovered.linesRemoved || 0).toLocaleString()}</span>
+                  <span className="opacity-50">removed</span>
+                </span>
+                {(hovered.filesChanged || 0) > 0 && (
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <span className="opacity-50">{hovered.filesChanged} file{hovered.filesChanged !== 1 ? "s" : ""}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-px">
+          {daily_.map((d, i) => {
+            const addVal = d.linesAdded || 0;
+            const delVal = d.linesRemoved || 0;
+            const addH = addVal > 0 ? Math.max(3, Math.round((addVal / maxAdded) * ADD_H)) : 0;
+            const delH = delVal > 0 ? Math.max(3, Math.round((delVal / maxRemoved) * DEL_H)) : 0;
+            const isToday = d.date === today;
+            const isHovered = hoveredIdx === i;
+
+            return (
+              <div
+                key={d.date}
+                className="flex-1 flex flex-col cursor-default"
+                onMouseEnter={() => setHoveredIdx(i)}
+                onMouseLeave={() => setHoveredIdx(null)}
+              >
+                <div className="relative" style={{ height: ADD_H }}>
+                  {addH > 0 && (
+                    <div
+                      className={`absolute bottom-0 left-0 right-0 rounded-t-[2px] bg-success transition-opacity duration-100 ${
+                        isHovered ? "opacity-80" : isToday ? "opacity-90" : "opacity-35"
+                      }`}
+                      style={{ height: addH }}
+                    />
+                  )}
+                  {isHovered && <div className="absolute inset-0 bg-base-content/5 rounded-sm" />}
+                </div>
+
+                <div className={`h-px transition-colors duration-100 ${isHovered ? "bg-base-content/20" : "bg-base-300"}`} />
+
+                <div className="relative" style={{ height: DEL_H }}>
+                  {delH > 0 && (
+                    <div
+                      className={`absolute bottom-0 left-0 right-0 rounded-t-[2px] bg-error transition-opacity duration-100 ${
+                        isHovered ? "opacity-80" : isToday ? "opacity-90" : "opacity-35"
+                      }`}
+                      style={{ height: delH }}
+                    />
+                  )}
+                  {isHovered && <div className="absolute inset-0 bg-base-content/5 rounded-sm" />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-px mt-1.5">
+          {daily_.map((d, i) => {
+            const isToday = d.date === today;
+            const isHovered = hoveredIdx === i;
+            const showLabel = isToday || i === 0 || i % labelEvery === 0;
+            const shortLabel = d.date
+              ? new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { month: "numeric", day: "numeric" })
+              : "";
+            return (
+              <div key={d.date} className="flex-1 overflow-hidden">
+                {showLabel && (
+                  <span className={`block text-center text-[9px] truncate transition-opacity duration-100 ${
+                    isHovered ? "opacity-80" : isToday ? "opacity-60 font-semibold" : "opacity-30"
+                  }`}>
+                    {isToday ? "today" : shortLabel}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Skeleton ─────────────────────────────────────────────────────────────
+
+// ── KPI helpers ──────────────────────────────────────────────────────────
+
+function fmtDays(n) {
+  if (n == null || !Number.isFinite(n)) return "–";
+  if (n < 1 / 24) return `${Math.round(n * 24 * 60)}m`;
+  if (n < 1) return `${(n * 24).toFixed(1)}h`;
+  return `${n.toFixed(1)}d`;
+}
+
+function fmtLines(n) {
+  if (n == null || !Number.isFinite(n)) return "–";
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return Math.round(n).toString();
+}
+
+function KpiCard({ icon: Icon, iconClass, title, avg, median, n, formatValue, unit }) {
+  return (
+    <div className="stat bg-base-200 rounded-box">
+      <div className={`stat-figure ${iconClass}`}>
+        <Icon className="size-6" />
+      </div>
+      <div className="stat-title">{title}</div>
+      <div className={`stat-value text-2xl ${iconClass}`}>
+        {formatValue(avg)}
+        {unit && <span className="text-base font-normal opacity-50 ml-1">{unit}</span>}
+      </div>
+      <div className="stat-desc">
+        {median != null ? `median ${formatValue(median)}` : "–"}
+        {n != null && <span className="opacity-40"> · n={n}</span>}
+      </div>
+    </div>
+  );
+}
 
 function AnalyticsSkeleton() {
   return (
@@ -428,6 +584,8 @@ export const Route = createLazyFileRoute("/analytics")({
 
 function AnalyticsPage() {
   const { data: analytics, isLoading: analyticsLoading } = useTokenAnalytics();
+  const { data: linesData } = useCodeChurnAnalytics();
+  const { data: kpiData } = useKpiAnalytics();
 
   if (analyticsLoading && !analytics) return <AnalyticsSkeleton />;
 
@@ -448,8 +606,22 @@ function AnalyticsPage() {
   const totalEvents = daily.reduce((sum, d) => sum + (d.events || 0), 0);
   const eventsToday = todayEntry?.events || 0;
 
-  const hasAnyData = totalTokens > 0 || totalEvents > 0 || topIssues.length > 0;
-  if (!hasAnyData) return <EmptyAnalytics />;
+  // Code churn — fill daily gaps manually since fillDailyGaps uses token defaults
+  const linesDaily = (() => {
+    const byDate = new Map((linesData?.lines || []).filter((d) => d.date).map((d) => [d.date, d]));
+    const result = [];
+    for (let i = 31; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const date = d.toISOString().slice(0, 10);
+      result.push(byDate.get(date) ?? { date, linesAdded: 0, linesRemoved: 0, filesChanged: 0 });
+    }
+    return result;
+  })();
+  const totalLinesAdded = linesDaily.reduce((s, d) => s + (d.linesAdded || 0), 0);
+  const totalLinesRemoved = linesDaily.reduce((s, d) => s + (d.linesRemoved || 0), 0);
+
+  const kpis = kpiData?.ok ? kpiData : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 px-4 pb-4 pt-3 overflow-y-auto">
@@ -457,7 +629,7 @@ function AnalyticsPage() {
 
         {/* Section 1: Overview stats */}
         <section>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             {/* Total tokens */}
             <div className="stat bg-base-200 rounded-box">
               <div className="stat-figure text-primary">
@@ -510,23 +682,97 @@ function AnalyticsPage() {
                 )}
               </div>
             </div>
+
+            {/* Lines added */}
+            <div className="stat bg-base-200 rounded-box">
+              <div className="stat-figure text-success">
+                <GitMerge className="size-6" />
+              </div>
+              <div className="stat-title">Lines Added</div>
+              <div className="stat-value text-2xl text-success">
+                <AnimatedCount value={totalLinesAdded} format={(n) => n >= 1000 ? `${(n/1000).toFixed(1)}K` : String(n || 0)} />
+              </div>
+              <div className="stat-desc">30d total</div>
+            </div>
+
+            {/* Lines removed */}
+            <div className="stat bg-base-200 rounded-box">
+              <div className="stat-figure text-error">
+                <GitMerge className="size-6" />
+              </div>
+              <div className="stat-title">Lines Removed</div>
+              <div className="stat-value text-2xl text-error">
+                <AnimatedCount value={totalLinesRemoved} format={(n) => n >= 1000 ? `${(n/1000).toFixed(1)}K` : String(n || 0)} />
+              </div>
+              <div className="stat-desc">30d total</div>
+            </div>
           </div>
         </section>
 
         {/* Section 2: Daily Activity Chart */}
-        {(daily.some((d) => (d.totalTokens || 0) > 0) || daily.some((d) => (d.events || 0) > 0)) && (
-          <section className="bg-base-200 rounded-box p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold flex items-center gap-2">
-                <TrendingUp className="size-4 text-primary" />
-                Daily Activity
-              </h2>
-            </div>
-            <ActivityChart daily={daily} />
-          </section>
-        )}
+        <section className="bg-base-200 rounded-box p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp className="size-4 text-primary" />
+              Daily Activity
+            </h2>
+          </div>
+          <ActivityChart daily={daily} />
+          <div className="border-t border-base-300 my-5" />
+          <CodeChurnChart daily={linesDaily} />
+        </section>
 
-        {/* Section 3: Top Issues */}
+        {/* Section 4: Engineering KPIs */}
+        <section className="bg-base-200 rounded-box p-5">
+          <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
+            <Timer className="size-4 text-warning" />
+            Engineering KPIs
+            {kpis?.sampleSize > 0 && (
+              <span className="text-xs font-normal opacity-40 ml-1">based on {kpis.sampleSize} completed issue{kpis.sampleSize !== 1 ? "s" : ""}</span>
+            )}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <KpiCard
+              icon={Clock}
+              iconClass="text-primary"
+              title="Issue Cycle Time"
+              avg={kpis?.issueCycleTimeDays?.avg ?? null}
+              median={kpis?.issueCycleTimeDays?.median ?? null}
+              n={kpis?.issueCycleTimeDays?.n ?? null}
+              formatValue={fmtDays}
+            />
+            <KpiCard
+              icon={GitPullRequest}
+              iconClass="text-secondary"
+              title="PR Cycle Time"
+              avg={kpis?.prCycleTimeDays?.avg ?? null}
+              median={kpis?.prCycleTimeDays?.median ?? null}
+              n={kpis?.prCycleTimeDays?.n ?? null}
+              formatValue={fmtDays}
+            />
+            <KpiCard
+              icon={Timer}
+              iconClass="text-warning"
+              title="Review Turnaround"
+              avg={kpis?.reviewTurnaroundDays?.avg ?? null}
+              median={kpis?.reviewTurnaroundDays?.median ?? null}
+              n={kpis?.reviewTurnaroundDays?.n ?? null}
+              formatValue={fmtDays}
+            />
+            <KpiCard
+              icon={GitMerge}
+              iconClass="text-info"
+              title="PR Size"
+              avg={kpis?.prSizeLines?.avg ?? null}
+              median={kpis?.prSizeLines?.median ?? null}
+              n={kpis?.prSizeLines?.n ?? null}
+              formatValue={fmtLines}
+              unit="lines"
+            />
+          </div>
+        </section>
+
+        {/* Section 6: Top Issues */}
         {topIssues.length > 0 && (
           <section className="bg-base-200 rounded-box p-5">
             <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
@@ -537,7 +783,7 @@ function AnalyticsPage() {
           </section>
         )}
 
-        {/* Section 5: Model Breakdown */}
+        {/* Section 7: Model Breakdown */}
         {Object.keys(byModel).length > 0 && (
           <section className="bg-base-200 rounded-box p-5">
             <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">

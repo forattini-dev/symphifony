@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, AlertTriangle, Loader, RotateCcw, PlayCircle, GitMerge,
-  ThumbsUp, GitPullRequest,
+  ThumbsUp, GitPullRequest, Eye,
 } from "lucide-react";
+import { PreviewModal } from "./PreviewModal.jsx";
 import { api } from "../../api.js";
 import { useSwipeToDismiss } from "../../hooks/useSwipeToDismiss.js";
 import { useWorkflowConfig } from "../../hooks/useWorkflowConfig.js";
@@ -23,6 +24,7 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
   const footerStyle = { paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" };
   const [executeBusy, setExecuteBusy] = useState(false);
   const [executeError, setExecuteError] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const handleExecute = useCallback(async () => {
     setExecuteBusy(true);
@@ -79,23 +81,34 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
     );
   }
 
-  // Reviewing/Reviewed: quick approve/rework actions
+  // Reviewing/Reviewed: preview + approve/rework actions
   if (isInReview) {
     return (
-      <div className="px-6 py-3 border-t border-base-300 shrink-0 flex items-center gap-2" style={footerStyle}>
-        <button
-          className="btn btn-success btn-sm gap-1.5 flex-1"
-          onClick={() => onStateChange?.(issue.id, "Done")}
-        >
-          <ThumbsUp className="size-4" /> Approve
-        </button>
-        <button
-          className="btn btn-warning btn-sm gap-1.5 flex-1"
-          onClick={() => onStateChange?.(issue.id, "Queued")}
-        >
-          <RotateCcw className="size-4" /> Rework
-        </button>
-      </div>
+      <>
+        {previewOpen && <PreviewModal issue={issue} onClose={() => setPreviewOpen(false)} />}
+        <div className="px-6 py-3 border-t border-base-300 shrink-0 space-y-1.5" style={footerStyle}>
+          <button
+            className="btn btn-primary btn-sm btn-soft gap-1.5 w-full"
+            onClick={() => setPreviewOpen(true)}
+          >
+            <Eye className="size-3.5" /> Preview Changes
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-success btn-sm gap-1.5 flex-1"
+              onClick={() => onStateChange?.(issue.id, "Done")}
+            >
+              <ThumbsUp className="size-4" /> Approve
+            </button>
+            <button
+              className="btn btn-warning btn-sm gap-1.5 flex-1"
+              onClick={() => onStateChange?.(issue.id, "Queued")}
+            >
+              <RotateCcw className="size-4" /> Rework
+            </button>
+          </div>
+        </div>
+      </>
     );
   }
 

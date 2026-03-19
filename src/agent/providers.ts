@@ -239,134 +239,36 @@ async function fetchCodexModels(): Promise<DiscoveredModel[]> {
 }
 
 /**
- * Discover Claude models from the CLI binary (no API calls):
+ * Discover Claude models from the CLI.
  *
- * 1. Extract model IDs embedded in the Claude CLI binary via `strings`
- *    — the binary contains all supported model IDs as string literals
- * 2. Parallel CLI probe as last resort (slow but works with OAuth)
+ * Strategy: use the stable aliases that the Claude CLI maintains itself
+ * (opus → latest opus, sonnet → latest sonnet, haiku → latest haiku).
+ *
+ * Why aliases instead of version-pinned IDs extracted from the binary:
+ * - Aliases always point to the current production model — no stale IDs
+ * - No `strings` parsing, no binary inspection, no network calls
+ * - When Anthropic releases a new version, the alias updates automatically
+ *
+ * The actual resolved model ID (e.g. claude-sonnet-4-6) is captured from
+ * the `modelUsage` field in the CLI JSON response after each run.
  */
 async function fetchAnthropicModels(): Promise<DiscoveredModel[]> {
-  // 1. Extract from Claude CLI binary (fast, no network, no tokens)
-  //    The compiled binary embeds model IDs as string literals.
-  //    `strings <binary> | grep claude-` extracts them.
+  // Verify the CLI is reachable before returning anything
   try {
-    // Resolve the real binary path (symlink → actual file)
-    const binaryPath = execFileSync("readlink", ["-f", execFileSync("which", ["claude"], { encoding: "utf8", timeout: 3000 }).trim()], {
-      encoding: "utf8",
-      timeout: 3000,
-    }).trim();
-
-    if (binaryPath && existsSync(binaryPath)) {
-      const stringsOutput = execFileSync("strings", [binaryPath], {
-        encoding: "utf8",
-        timeout: 10_000,
-        maxBuffer: 50_000_000,
-      });
-
-      // Extract model IDs matching "claude-{family}-{version}" pattern
-      const modelIds = new Set<string>();
-      for (const line of stringsOutput.split("\n")) {
-        const trimmed = line.trim();
-        // Match exact model IDs: claude-{opus|sonnet|haiku}-{version}
-        if (/^claude-(opus|sonnet|haiku)-\d+-\d+$/.test(trimmed)) {
-          modelIds.add(trimmed);
-        }
-      }
-
-      const models = extractClaudeModels([...modelIds]);
-      if (models.length > 0) return models;
-    }
+    execFileSync("which", ["claude"], { encoding: "utf8", timeout: 3000 });
   } catch {
-    // strings not available or binary not readable — fall through
+    return [];
   }
 
-  // 3. Last resort: parallel CLI probe (slow ~15s, burns minimal tokens)
-  try {
-    const aliases = [
-      { alias: "opus", tier: "Most capable" },
-      { alias: "sonnet", tier: "Balanced" },
-      { alias: "haiku", tier: "Fast" },
-    ];
-
-    const probeOne = (alias: string): Promise<string | null> =>
-      new Promise((resolve) => {
-        try {
-          const child = spawn("claude", [
-            "--print", "--output-format", "json", "--model", alias,
-            "--max-turns", "1", "--no-session-persistence", "reply ok",
-          ], { stdio: ["pipe", "pipe", "pipe"], timeout: 20_000 });
-          let stdout = "";
-          child.stdout?.on("data", (chunk: Buffer) => { stdout += String(chunk); });
-          child.on("close", () => {
-            try {
-              const parsed = JSON.parse(stdout.trim()) as { model?: string; modelUsage?: Record<string, unknown> };
-              resolve(parsed.model || Object.keys(parsed.modelUsage || {})[0] || null);
-            } catch { resolve(null); }
-          });
-          child.on("error", () => resolve(null));
-          child.stdin?.end();
-        } catch { resolve(null); }
-      });
-
-    const results = await Promise.all(aliases.map(async ({ alias, tier }) => {
-      const modelId = await probeOne(alias);
-      return modelId ? { id: modelId, provider: "claude" as const, label: modelId, tier } : null;
-    }));
-
-    const discovered = results.filter((m): m is DiscoveredModel => m !== null);
-    if (discovered.length > 0) return discovered;
-  } catch { /* CLI not available */ }
-
-  return [];
+  // These aliases are maintained by Anthropic in the Claude CLI itself.
+  // They always resolve to the current production model for each family.
+  return [
+    { id: "opus",   provider: "claude", label: "claude/opus (latest)",   tier: "Most capable" },
+    { id: "sonnet", provider: "claude", label: "claude/sonnet (latest)",  tier: "Balanced" },
+    { id: "haiku",  provider: "claude", label: "claude/haiku (latest)",   tier: "Fast" },
+  ];
 }
 
-/**
- * Filter and classify Claude model IDs into a sorted, deduplicated list.
- * Keeps only the latest version of each family (opus, sonnet, haiku).
- */
-function extractClaudeModels(ids: string[]): DiscoveredModel[] {
-  // Group by family, keep highest version
-  const families = new Map<string, { id: string; version: number }>();
-
-  for (const id of ids) {
-    if (!id.startsWith("claude-")) continue;
-    // Skip dated snapshots and @-versioned variants
-    if (/@/.test(id) || /\[\d+m\]/.test(id)) continue;
-    if (/\d{8}$/.test(id)) continue; // e.g. claude-opus-4-20250514
-
-    let family = "unknown";
-    if (/opus/i.test(id)) family = "opus";
-    else if (/sonnet/i.test(id)) family = "sonnet";
-    else if (/haiku/i.test(id)) family = "haiku";
-    else continue;
-
-    // Extract version: claude-opus-4-6 → 4.6, claude-sonnet-4 → 4.0
-    const versionMatch = id.match(/(\d+)(?:-(\d+))?$/);
-    const version = versionMatch
-      ? parseFloat(`${versionMatch[1]}.${versionMatch[2] || "0"}`)
-      : 0;
-
-    const existing = families.get(family);
-    if (!existing || version > existing.version) {
-      families.set(family, { id, version });
-    }
-  }
-
-  const tierMap: Record<string, string> = {
-    opus: "Most capable",
-    sonnet: "Balanced",
-    haiku: "Fast",
-  };
-
-  // Sort: opus first (most capable), then sonnet, then haiku
-  const order = ["opus", "sonnet", "haiku"];
-  return order
-    .filter((f) => families.has(f))
-    .map((f) => {
-      const { id } = families.get(f)!;
-      return { id, provider: "claude", label: id, tier: tierMap[f] || "Standard" };
-    });
-}
 
 /**
  * Discover available models for all detected providers.

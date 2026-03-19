@@ -200,7 +200,7 @@ export function registerMiscRoutes(
         try {
           raw = execSync(
             `git diff --no-color "${issue.baseBranch}"..."${issue.branchName}"`,
-            { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 15_000, cwd: TARGET_ROOT },
+            { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 15_000, cwd: TARGET_ROOT, stdio: "pipe" },
           );
         } catch (err: any) {
           raw = err.stdout || "";

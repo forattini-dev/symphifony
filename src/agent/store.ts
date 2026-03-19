@@ -180,6 +180,10 @@ export async function initStateStore(): Promise<void> {
             { field: "tokensByPhase.reviewer.totalTokens", fieldPath: "tokensByPhase.reviewer.totalTokens", initialValue: 0, cohort: { granularity: "day" } },
             // Event count (incremented on each addEvent call for this issue)
             { field: "eventsCount", fieldPath: "eventsCount", initialValue: 0, cohort: { granularity: "day" } },
+            // Code churn (set at merge time, accumulated per day)
+            { field: "linesAdded", fieldPath: "linesAdded", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "linesRemoved", fieldPath: "linesRemoved", initialValue: 0, cohort: { granularity: "day" } },
+            { field: "filesChanged", fieldPath: "filesChanged", initialValue: 0, cohort: { granularity: "day" } },
           ],
         },
         enableAnalytics: true,
@@ -402,6 +406,51 @@ export async function getEcDailyEvents(days = 90): Promise<Array<{ date: string;
         return { date: String(date).slice(0, 10), events };
       })
       .filter((e) => e.date && e.events > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Query EC plugin for daily code churn (linesAdded + linesRemoved + filesChanged per day).
+ */
+export async function getEcDailyLines(days = 90): Promise<Array<{ date: string; linesAdded: number; linesRemoved: number; filesChanged: number }>> {
+  if (!activeEcPlugin?.getLastNDays) return [];
+  try {
+    const [addedRaw, removedRaw, filesRaw] = await Promise.all([
+      activeEcPlugin.getLastNDays(S3DB_ISSUE_RESOURCE, "linesAdded", days),
+      activeEcPlugin.getLastNDays(S3DB_ISSUE_RESOURCE, "linesRemoved", days),
+      activeEcPlugin.getLastNDays(S3DB_ISSUE_RESOURCE, "filesChanged", days),
+    ]);
+
+    const toMap = (raw: unknown): Map<string, number> => {
+      if (!Array.isArray(raw)) return new Map();
+      return new Map(
+        raw
+          .map((r: unknown) => {
+            const rec = r as Record<string, unknown>;
+            const date = String(rec.date ?? rec.cohort ?? rec.key ?? "").slice(0, 10);
+            const value = Number(rec.total ?? rec.value ?? rec.sum ?? rec.count ?? 0);
+            return [date, value] as [string, number];
+          })
+          .filter(([date]) => date.length === 10),
+      );
+    };
+
+    const addedMap = toMap(addedRaw);
+    const removedMap = toMap(removedRaw);
+    const filesMap = toMap(filesRaw);
+    const allDates = new Set([...addedMap.keys(), ...removedMap.keys(), ...filesMap.keys()]);
+
+    return Array.from(allDates)
+      .map((date) => ({
+        date,
+        linesAdded: addedMap.get(date) ?? 0,
+        linesRemoved: removedMap.get(date) ?? 0,
+        filesChanged: filesMap.get(date) ?? 0,
+      }))
+      .filter((e) => e.linesAdded > 0 || e.linesRemoved > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch {
     return [];
   }

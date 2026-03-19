@@ -109,29 +109,29 @@ describe("buildCodexCommand", () => {
     assert.ok(!cmd.includes("--model"), "no --model when absent");
   });
 
-  it("includes --reasoning-effort when provided", () => {
+  it("includes reasoning_effort config when provided", () => {
     const cmd = buildCodexCommand({ reasoningEffort: "high" });
-    assert.ok(cmd.includes("--reasoning-effort high"), "has --reasoning-effort high");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "has reasoning_effort high");
   });
 
-  it("includes --reasoning-effort medium", () => {
+  it("includes reasoning_effort medium config", () => {
     const cmd = buildCodexCommand({ reasoningEffort: "medium" });
-    assert.ok(cmd.includes("--reasoning-effort medium"), "has --reasoning-effort medium");
+    assert.ok(cmd.includes(`reasoning_effort="medium"`), "has reasoning_effort medium");
   });
 
-  it("includes --reasoning-effort low", () => {
+  it("includes reasoning_effort low config", () => {
     const cmd = buildCodexCommand({ reasoningEffort: "low" });
-    assert.ok(cmd.includes("--reasoning-effort low"), "has --reasoning-effort low");
+    assert.ok(cmd.includes(`reasoning_effort="low"`), "has reasoning_effort low");
   });
 
-  it("omits --reasoning-effort when not provided", () => {
+  it("omits reasoning_effort when not provided", () => {
     const cmd = buildCodexCommand({});
-    assert.ok(!cmd.includes("--reasoning-effort"), "no --reasoning-effort when absent");
+    assert.ok(!cmd.includes("reasoning_effort="), "no reasoning_effort when absent");
   });
 
-  it("omits --reasoning-effort when empty string", () => {
+  it("omits reasoning_effort when empty string", () => {
     const cmd = buildCodexCommand({ reasoningEffort: "" });
-    assert.ok(!cmd.includes("--reasoning-effort"), "no --reasoning-effort for empty string");
+    assert.ok(!cmd.includes("reasoning_effort="), "no reasoning_effort for empty string");
   });
 
   it("adds --add-dir for each directory", () => {
@@ -152,18 +152,18 @@ describe("buildCodexCommand", () => {
       addDirs: ["/workspace/src"],
     });
     assert.ok(cmd.includes("--model o4-mini"), "has model");
-    assert.ok(cmd.includes("--reasoning-effort high"), "has effort");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "has effort");
     assert.ok(cmd.includes('--add-dir "/workspace/src"'), "has dir");
   });
 
-  it("--reasoning-effort appears before --add-dir flags", () => {
+  it("reasoning_effort config appears before --add-dir flags", () => {
     const cmd = buildCodexCommand({
       reasoningEffort: "medium",
       addDirs: ["/src"],
     });
-    const effortIdx = cmd.indexOf("--reasoning-effort");
+    const effortIdx = cmd.indexOf("reasoning_effort=");
     const addDirIdx = cmd.indexOf("--add-dir");
-    assert.ok(effortIdx < addDirIdx, "--reasoning-effort precedes --add-dir");
+    assert.ok(effortIdx < addDirIdx, "reasoning_effort precedes --add-dir");
   });
 });
 
@@ -235,12 +235,12 @@ describe("getProviderDefaultCommand", () => {
 
   it("passes reasoningEffort into codex command", () => {
     const cmd = getProviderDefaultCommand("codex", "high");
-    assert.ok(cmd.includes("--reasoning-effort high"), "effort in codex default");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "effort in codex default");
   });
 
   it("does NOT inject reasoning-effort into claude command (unsupported flag)", () => {
     const cmd = getProviderDefaultCommand("claude", "high");
-    assert.ok(!cmd.includes("--reasoning-effort"), "no effort flag in claude");
+    assert.ok(!cmd.includes("reasoning_effort="), "no effort flag in claude");
   });
 
   it("passes model into codex command", () => {
@@ -256,7 +256,7 @@ describe("getProviderDefaultCommand", () => {
   it("passes both reasoningEffort and model to codex", () => {
     const cmd = getProviderDefaultCommand("codex", "medium", "o4-mini");
     assert.ok(cmd.includes("--model o4-mini"), "model present");
-    assert.ok(cmd.includes("--reasoning-effort medium"), "effort present");
+    assert.ok(cmd.includes(`reasoning_effort="medium"`), "effort present");
   });
 
   it("codex default includes CLAUDE_RESULT_SCHEMA for claude", () => {
@@ -296,7 +296,7 @@ describe("resolveAgentCommand", () => {
   it("falls back to getProviderDefaultCommand for codex when no explicit commands", () => {
     const cmd = resolveAgentCommand("codex", "", "", "", "high");
     assert.ok(cmd.startsWith("codex exec"), "falls back to codex default");
-    assert.ok(cmd.includes("--reasoning-effort high"), "effort propagated in fallback");
+    assert.ok(cmd.includes(`reasoning_effort="high"`), "effort propagated in fallback");
   });
 
   it("falls back to getProviderDefaultCommand for claude when no explicit commands", () => {

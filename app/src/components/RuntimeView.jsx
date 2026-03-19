@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Cpu, Circle, Clock, Terminal, CheckCircle2, XCircle, AlertTriangle, Eye, ListOrdered, Zap, Gauge, Users, Loader } from "lucide-react";
+import { Cpu, Circle, Clock, Terminal, CheckCircle2, XCircle, AlertTriangle, Eye, ListOrdered, Zap, Gauge, Users, Loader, ChevronDown, ChevronUp } from "lucide-react";
 import { timeAgo, formatDuration } from "../utils.js";
 import { api } from "../api.js";
+import { useWorkflowConfig } from "../hooks/useWorkflowConfig.js";
 
 const STATE_BADGE = {
   Queued: "badge-info", Running: "badge-primary", Reviewing: "badge-secondary",
@@ -21,12 +22,20 @@ function formatTokens(n) {
   return String(n);
 }
 
+function formatModelName(slug) {
+  if (!slug) return null;
+  const m = slug.match(/claude-(\w+)-(\d+)-(\d+)/);
+  if (m) return `${m[1].charAt(0).toUpperCase() + m[1].slice(1)} ${m[2]}.${m[3]}`;
+  return slug.length <= 16 ? slug : slug.slice(0, 16);
+}
+
 // ── Slot live output ────────────────────────────────────────────────────────
 
 function SlotLiveInfo({ issueId, issueState }) {
   const [meta, setMeta] = useState(null);
   const [logText, setLogText] = useState("");
   const [logSize, setLogSize] = useState(0);
+  const [expanded, setExpanded] = useState(true);
   const logRef = useRef(null);
   const esRef = useRef(null);
 
@@ -92,17 +101,29 @@ function SlotLiveInfo({ issueId, issueState }) {
   return (
     <div className="mt-2 space-y-1.5">
       <div className="flex items-center gap-3 text-xs opacity-60">
-        {meta && <><span className="flex items-center gap-1"><Clock className="size-3" />{formatDuration(elapsed)}</span>
-        <span>Log: {logKb} KB</span>
-        {meta.agentPid && <span>PID {meta.agentPid}</span>}
-        {meta.agentAlive === false && meta.agentPid && <span className="text-error">dead</span>}</>}
+        {meta && (
+          <>
+            <span className="flex items-center gap-1"><Clock className="size-3" />{formatDuration(elapsed)}</span>
+            <span>Log: {logKb} KB</span>
+            {meta.agentPid && <span>PID {meta.agentPid}</span>}
+            {meta.agentAlive === false && meta.agentPid && <span className="text-error">dead</span>}
+          </>
+        )}
+        <button
+          className="ml-auto flex items-center gap-0.5 opacity-50 hover:opacity-100 transition-opacity"
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? "Collapse output" : "Expand output"}
+        >
+          {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          <span className="text-[10px]">{expanded ? "hide" : "output"}</span>
+        </button>
       </div>
-      {logText && (
+      {expanded && (
         <pre
           ref={logRef}
-          className="text-[11px] bg-base-300 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-56 overflow-y-auto font-mono opacity-80 leading-relaxed break-all w-full max-w-full"
+          className="text-[11px] bg-base-300 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto font-mono opacity-80 leading-relaxed break-all w-full max-w-full"
         >
-          {logText}
+          {logText || <span className="opacity-30">Waiting for output…</span>}
         </pre>
       )}
     </div>
@@ -111,7 +132,7 @@ function SlotLiveInfo({ issueId, issueState }) {
 
 // ── Active agent slot ───────────────────────────────────────────────────────
 
-function AgentSlot({ index, issue, total }) {
+function AgentSlot({ index, issue, total, workflow }) {
   if (!issue) {
     return (
       <div className="slot-idle rounded-box p-6 flex items-center justify-center opacity-30 transition-opacity duration-300 hover:opacity-40 border-2 border-dashed border-base-300">
@@ -131,14 +152,25 @@ function AgentSlot({ index, issue, total }) {
     ? "border-info bg-info/5"
     : "border-primary bg-primary/5";
 
+  // Resolve stage config for current phase
+  const stageKey = isPlanning ? "plan" : (issue.state === "Reviewing" || issue.state === "Reviewed") ? "review" : "execute";
+  const stageConfig = workflow?.[stageKey];
+
+  // Actual model from tokensByPhase (falls back to configured)
+  const phaseKey = isPlanning ? "planner" : (issue.state === "Reviewing" || issue.state === "Reviewed") ? "reviewer" : "executor";
+  const actualModel = issue.tokensByPhase?.[phaseKey]?.model;
+  const displayModel = formatModelName(actualModel || stageConfig?.model);
+  const displayProvider = stageConfig?.provider;
+  const displayEffort = issue.effort?.[phaseKey] || issue.effort?.default || stageConfig?.effort;
+
   return (
     <div className={`border-2 rounded-box p-5 space-y-2 animate-fade-in-scale overflow-hidden min-w-0 ${borderClass} ${isRunning ? "slot-active" : ""}`}>
       <div className="flex items-center justify-between min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           {isPlanning
-          ? <Loader className="size-4 animate-spin text-info shrink-0" />
-          : <span className="loading loading-spinner loading-sm text-primary shrink-0" />
-        }
+            ? <Loader className="size-4 animate-spin text-info shrink-0" />
+            : <span className="loading loading-spinner loading-sm text-primary shrink-0" />
+          }
           <span className="font-mono text-base font-bold truncate">{issue.identifier}</span>
           <span className={`badge badge-sm ${STATE_BADGE[issue.state] || "badge-ghost"} shrink-0`}>{issue.state}</span>
         </div>
@@ -153,6 +185,18 @@ function AgentSlot({ index, issue, total }) {
         <span>Attempt {(issue.attempts || 0) + 1}/{issue.maxAttempts}</span>
         {issue.startedAt && <span>started {timeAgo(issue.startedAt)}</span>}
       </div>
+
+      {(displayProvider || displayModel || displayEffort) && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {displayProvider && (
+            <span className="badge badge-xs badge-ghost font-mono gap-1">
+              <Terminal className="size-2.5" />{displayProvider}
+            </span>
+          )}
+          {displayModel && <span className="badge badge-xs badge-ghost font-mono">{displayModel}</span>}
+          {displayEffort && <span className="badge badge-xs badge-outline">{displayEffort}</span>}
+        </div>
+      )}
 
       <SlotLiveInfo issueId={issue.id} issueState={issue.state} />
     </div>
@@ -242,6 +286,8 @@ function CockpitSummary({ running, queued, concurrency, totalTokensToday }) {
 export function RuntimeView({ state, providers, parallelism, onRefresh, issues: allIssues = [] }) {
   const stateIssues = Array.isArray(state.issues) ? state.issues : [];
   const concurrency = Number(state.config?.workerConcurrency) || 3;
+  const { data: workflowData } = useWorkflowConfig();
+  const workflow = workflowData?.workflow || null;
 
   const activePlanning = stateIssues.filter((i) => i.state === "Planning" && i.planningStatus === "planning");
   const running = [
@@ -292,7 +338,7 @@ export function RuntimeView({ state, providers, parallelism, onRefresh, issues: 
         </div>
         <div className="grid gap-3 min-w-0" style={{ gridTemplateColumns: `repeat(${Math.min(concurrency, 3)}, 1fr)` }}>
           {slots.map((issue, i) => (
-            <AgentSlot key={i} index={i} issue={issue} total={concurrency} />
+            <AgentSlot key={i} index={i} issue={issue} total={concurrency} workflow={workflow} />
           ))}
         </div>
       </div>

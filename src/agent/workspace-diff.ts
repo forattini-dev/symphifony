@@ -7,7 +7,7 @@ export function inferChangedWorkspacePaths(workspacePath: string, limit = 32, is
   try {
     const output = execSync(
       `git diff --name-only "${issue.baseBranch}"..."${issue.branchName}"`,
-      { cwd: TARGET_ROOT, encoding: "utf8", timeout: 10_000 },
+      { cwd: TARGET_ROOT, encoding: "utf8", timeout: 10_000, stdio: "pipe" },
     );
     return output.trim().split("\n").filter(Boolean).slice(0, limit);
   } catch {
@@ -23,7 +23,7 @@ export function computeDiffStats(issue: IssueEntry): void {
     try {
       raw = execSync(
         `git diff --stat "${issue.baseBranch}"..."${issue.branchName}"`,
-        { cwd: TARGET_ROOT, encoding: "utf8", maxBuffer: 512_000, timeout: 10_000 },
+        { cwd: TARGET_ROOT, encoding: "utf8", maxBuffer: 512_000, timeout: 10_000, stdio: "pipe" },
       );
     } catch (err: any) {
       raw = err.stdout || "";

@@ -118,6 +118,7 @@ async function handleReviewStage(
   const reviewer = routedProviders.find((p) => p.role === "reviewer");
   if (!reviewer) {
     // No reviewer configured → auto-approve
+    issue.mergedReason = "Auto-approved: no reviewer configured.";
     await transitionIssueState(issue, "Done", `No reviewer configured; auto-approved for ${issue.identifier}.`);
     addEvent(state, issue.id, "runner", `Issue ${issue.identifier} auto-approved (no reviewer provider).`);
     issue.completedAt = now();
@@ -174,6 +175,7 @@ async function handleReviewStage(
   }
 
   if (reviewResult.success) {
+    issue.mergedReason = `Auto-approved by reviewer in ${reviewResult.turns} turn(s).`;
     await transitionIssueState(issue, "Reviewed", `Reviewer completed for ${issue.identifier}.`);
     await transitionIssueState(issue, "Done", `Reviewer approved ${issue.identifier} in ${reviewResult.turns} turn(s).`);
     addEvent(state, issue.id, "runner", `Issue ${issue.identifier} approved by reviewer → Done.`);
@@ -190,6 +192,7 @@ async function handleReviewStage(
     issue.lastError = reviewResult.output;
     issue.attempts += 1;
     if (issue.attempts >= issue.maxAttempts) {
+      issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): reviewer failed or blocked.`;
       await transitionIssueState(issue, "Cancelled", `Review failed, max attempts reached for ${issue.identifier}.`);
       addEvent(state, issue.id, "error", `Issue ${issue.identifier} cancelled after review failure.`);
     } else {
@@ -276,6 +279,7 @@ async function handleExecutionStage(
 
     if (issue.attempts >= issue.maxAttempts) {
       issue.commandExitCode = runResult.code;
+      issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): execution failed repeatedly.`;
       await transitionIssueState(issue, "Cancelled", `Max attempts reached (${issue.attempts}/${issue.maxAttempts}).`);
       addEvent(state, issue.id, "error", `Issue ${issue.identifier} cancelled after repeated failures.`);
     } else {
@@ -369,6 +373,7 @@ export async function runIssueOnce(
     issue.lastError = String(error);
 
     if (issue.attempts >= issue.maxAttempts) {
+      issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): unexpected failure — ${issue.lastError?.slice(0, 120) ?? "unknown error"}.`;
       await transitionIssueState(issue, "Cancelled", `Issue failed unexpectedly: ${issue.lastError}`);
       addEvent(state, issue.id, "error", `Issue ${issue.identifier} cancelled unexpectedly.`);
     } else {

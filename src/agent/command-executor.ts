@@ -85,11 +85,13 @@ export async function runCommandWithTimeout(
     let output = "";
     let timedOut = false;
     let outputBytes = 0;
+    let outputHeader = ""; // First 2KB — always contains provider header (model name, etc.)
     const liveLogFile = join(workspacePath, "live-output.log");
     writeFileSync(liveLogFile, "", "utf8");
 
     const onChunk = (chunk: Buffer | string) => {
       const text = String(chunk);
+      if (outputHeader.length < 2000) outputHeader = (outputHeader + text).slice(0, 2000);
       output = appendFileTail(output, text, config.logLinesTail);
       outputBytes += text.length;
       try { appendFileSync(liveLogFile, text); } catch {}
@@ -157,16 +159,23 @@ export async function runCommandWithTimeout(
       clearTimeout(timer);
       cleanup();
       if (watchdogKilled) return;
+      // Prepend the captured header if it was truncated out of the tail — ensures model name is always extractable
+      const buildOutput = (suffix: string) => {
+        const tail = appendFileTail(output, suffix, config.logLinesTail);
+        return outputHeader.length > 0 && !tail.startsWith(outputHeader.slice(0, 80))
+          ? `${outputHeader}\n${tail}`
+          : tail;
+      };
       if (timedOut) {
-        resolve({ success: false, code: null, output: appendFileTail(output, `\nExecution timeout after ${config.commandTimeoutMs}ms.`, config.logLinesTail) });
+        resolve({ success: false, code: null, output: buildOutput(`\nExecution timeout after ${config.commandTimeoutMs}ms.`) });
         return;
       }
       const duration = Math.max(0, Date.now() - started);
       if (code === 0) {
-        resolve({ success: true, code, output: appendFileTail(output, `\nExecution succeeded in ${duration}ms.`, config.logLinesTail) });
+        resolve({ success: true, code, output: buildOutput(`\nExecution succeeded in ${duration}ms.`) });
         return;
       }
-      resolve({ success: false, code, output: appendFileTail(output, `\nCommand exit code ${code ?? "unknown"} after ${duration}ms.`, config.logLinesTail) });
+      resolve({ success: false, code, output: buildOutput(`\nCommand exit code ${code ?? "unknown"} after ${duration}ms.`) });
     });
   });
 }

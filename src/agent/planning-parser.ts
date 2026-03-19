@@ -6,18 +6,20 @@ import { logger } from "./logger.ts";
 
 export function tryBuildPlan(parsed: any): IssuePlan | null {
   if (!parsed || typeof parsed !== "object") return null;
-  if (!parsed.summary || !Array.isArray(parsed.steps)) return null;
+  if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return null;
+  // Accept various summary field names that different models use
+  const summary = parsed.summary || parsed.issueTitle || parsed.title || parsed.issue_title || parsed.description || "";
 
   const complexities = ["trivial", "low", "medium", "high"];
 
   return {
-    summary: String(parsed.summary),
+    summary: String(summary),
     estimatedComplexity: complexities.includes(parsed.estimatedComplexity) ? parsed.estimatedComplexity
       : complexities.includes(parsed.complexity) ? parsed.complexity : "medium",
 
     steps: parsed.steps.map((s: any, i: number) => ({
-      step: s.step ?? i + 1,
-      action: String(s.action || s.description || s.title || s.task_name || ""),
+      step: typeof s.step === "number" ? s.step : i + 1,
+      action: String(s.action || s.description || s.title || s.task_name || (typeof s.step === "string" ? s.step : "") || ""),
       files: toStringArray(s.files),
       details: s.details ? String(s.details) : undefined,
       ownerType: s.ownerType || s.owner_type || undefined,
@@ -43,9 +45,9 @@ export function tryBuildPlan(parsed: any): IssuePlan | null {
     executionStrategy: parsed.executionStrategy || parsed.execution_strategy || undefined,
     toolingDecision: parsed.toolingDecision || parsed.tooling_decision || undefined,
 
-    suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.paths),
+    suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.filePaths || parsed.file_paths || parsed.paths),
     suggestedLabels: toStringArray(parsed.suggestedLabels || parsed.suggested_labels || parsed.labels),
-    suggestedEffort: parsed.suggestedEffort || parsed.suggested_effort || parsed.effort || { default: "medium" },
+    suggestedEffort: parsed.suggestedEffort || parsed.suggested_effort || parsed.effortSuggestion || parsed.effort_suggestion || parsed.effort || { default: "medium" },
 
     provider: "",
     createdAt: now(),

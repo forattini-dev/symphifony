@@ -1,5 +1,5 @@
 import React from "react";
-import { Tag, Ban, Layers, Wrench, RotateCcw, XCircle, Circle } from "lucide-react";
+import { Tag, Ban, Layers, Wrench, RotateCcw, XCircle, Circle, GitMerge, AlertOctagon } from "lucide-react";
 import { getIssueTransitions, formatDate, formatDuration } from "../../../utils.js";
 import { Section, Field } from "../shared.jsx";
 import { STATE_ICON, STATE_BTN } from "../constants.js";
@@ -12,6 +12,29 @@ export function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
 
   return (
     <div className="space-y-5">
+
+      {/* Merged reason banner */}
+      {issue.mergedReason && (
+        <div className="flex items-start gap-2 bg-success/10 border border-success/20 rounded-box px-3 py-2.5">
+          <GitMerge className="size-3.5 text-success shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-success/70 mb-0.5">Merged</div>
+            <div className="text-xs text-success/90">{issue.mergedReason}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancelled reason banner */}
+      {issue.cancelledReason && (
+        <div className="flex items-start gap-2 bg-error/10 border border-error/20 rounded-box px-3 py-2.5">
+          <AlertOctagon className="size-3.5 text-error shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-error/70 mb-0.5">Cancelled</div>
+            <div className="text-xs text-error/90">{issue.cancelledReason}</div>
+          </div>
+        </div>
+      )}
+
       {/* Details + Timing — collapsed into one compact section */}
       <Section title="Details" icon={Layers}>
         <div className="space-y-0.5">

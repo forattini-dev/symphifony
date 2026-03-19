@@ -41,6 +41,7 @@ export const REVIEW_RESULT_SCHEMA = JSON.stringify({
 
 export function buildClaudeCommand(options: {
   model?: string;
+  effort?: string;
   jsonSchema?: string;
   /** Skip --dangerously-skip-permissions (e.g. for planning where tool access breaks --json-schema) */
   noToolAccess?: boolean;
@@ -55,6 +56,10 @@ export function buildClaudeCommand(options: {
   }
 
   parts.push("--no-session-persistence", "--output-format json");
+
+  if (options.effort) {
+    parts.push(`--effort ${options.effort}`);
+  }
 
   if (options.jsonSchema) {
     parts.push(`--json-schema '${options.jsonSchema}'`);
@@ -76,7 +81,7 @@ export function buildCodexCommand(options: {
   imagePaths?: string[];
   reasoningEffort?: string;
 }): string {
-  const parts = ["codex", "exec", "--skip-git-repo-check"];
+  const parts = ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
 
   if (options.model && options.model !== "codex") {
     parts.push(`--model ${options.model}`);

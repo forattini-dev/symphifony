@@ -104,6 +104,7 @@ export function PlanningTab({ issue, onStateChange, workflowConfig }) {
     setLocalApproving(true);
     try {
       await api.post(`/issues/${encodeURIComponent(issue.id)}/approve`);
+      await api.post(`/issues/${encodeURIComponent(issue.id)}/execute`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setLocalApproving(false);

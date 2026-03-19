@@ -80,6 +80,12 @@ export type IssueEntry = {
   mergedAt?: string;
   /** Summary of the merge result */
   mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number };
+  /** Why the issue was merged — set for both auto and manual merges */
+  mergedReason?: string;
+  /** Why the issue was cancelled — set for both auto and manual cancels */
+  cancelledReason?: string;
+  /** ISO timestamp when issue entered Reviewing state (last time, for code review turnaround KPI) */
+  reviewingAt?: string;
   /** Planning process status — driven by scheduler-managed planning job */
   planningStatus?: "idle" | "planning";
   /** ISO timestamp when planning started */
