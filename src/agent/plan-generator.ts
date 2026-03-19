@@ -80,18 +80,16 @@ export async function generatePlan(
     // Fall through to default provider selection
   }
 
-  // Provider selection: claude is always preferred for planning because it supports
-  // --json-schema for guaranteed structured output. Codex CLI is an execution agent
-  // and does not produce reliably parseable JSON via CLI for planning tasks.
+  // Provider selection: respect the user's explicit configuration. If no provider is
+  // configured (or it's unavailable), fall back to claude (best structured-output support)
+  // then whatever's available.
   const configuredProvider = planStageProvider && available.includes(planStageProvider) ? planStageProvider : null;
-  const preferred = (configuredProvider && configuredProvider !== "codex")
-    ? configuredProvider
-    : available.includes("claude") ? "claude"
-    : available[0]; // last resort: whatever's available
+  const preferred = configuredProvider
+    ?? (available.includes("claude") ? "claude" : available[0]);
   if (!preferred) throw new Error("No AI provider available for planning.");
 
-  // If we switched provider (e.g. codex → claude), the configured model belongs to the
-  // original provider and must not be forwarded — it would be rejected by the new CLI.
+  // If provider changed (configured wasn't available → fallback), the model may belong
+  // to the original provider and must not be forwarded — it would be rejected by the new CLI.
   if (preferred !== configuredProvider) planStageModel = undefined;
 
   // Fast mode: same model, effort low (embedded in prompt since CLIs don't support effort flags)
