@@ -2,10 +2,10 @@
 import { mkdirSync } from "node:fs";
 import { env, exit, argv } from "node:process";
 import { CLI_ARGS, STATE_ROOT, TARGET_ROOT } from "./constants.ts";
-import { debugBoot, fail, now } from "./helpers.ts";
+import { debugBoot, fail, now, sleep } from "./helpers.ts";
 import { initLogger, logger } from "./logger.ts";
 import { initStateStore, loadPersistedState, persistState, persistStateFull, closeStateStore } from "./store.ts";
-import { initQueueWorkers, stopQueueWorkers } from "./queue-workers.ts";
+import { initQueueWorkers, stopQueueWorkers, enqueueForPlanning, enqueueForExecution, enqueueForReview } from "./queue-workers.ts";
 import {
   applyPersistedSettings,
   loadRuntimeSettings,
@@ -20,8 +20,9 @@ import {
 } from "./providers.ts";
 import { parsePort, setSkipSource } from "./workflow.ts";
 import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./issues.ts";
+import { hasDirtyState } from "./dirty-tracker.ts";
 import { startApiServer } from "./api-server.ts";
-import { scheduler, installGracefulShutdown } from "./scheduler.ts";
+import { installGracefulShutdown, isShuttingDown, ensureNotStale, hasTerminalQueue } from "./scheduler.ts";
 import { cleanWorkspace, isAgentStillRunning, cleanStalePidFile } from "./agent.ts";
 import { startDevFrontend } from "./dev-server.ts";
 import { recoverPlanningSession } from "./issue-planner.ts";
@@ -257,8 +258,51 @@ async function main() {
   try {
     addEvent(state, undefined, "info", `Runtime started in local-only mode (filesystem tracker).`);
     const runForever = !runOnce && (Boolean(dashboardPort) || interfaceMode === "mcp");
-    logger.info({ runForever, runOnce, dashboardPort, interfaceMode }, "[Boot] Entering scheduler loop");
-    await scheduler(state, running, runForever);
+    logger.info({ runForever, runOnce, dashboardPort, interfaceMode }, "[Boot] Entering queue supervisor loop");
+
+    // Boot recovery: enqueue all in-progress issues so queue workers pick them up
+    for (const issue of state.issues) {
+      if (issue.state === "Planning" && issue.planningStatus !== "planning") {
+        await enqueueForPlanning(issue).catch(() => {});
+      } else if (issue.state === "Queued" || issue.state === "Running") {
+        await enqueueForExecution(issue).catch(() => {});
+      } else if (issue.state === "Reviewing") {
+        await enqueueForReview(issue).catch(() => {});
+      }
+    }
+
+    const PERSIST_DEBOUNCE_MS = 5_000;
+    let lastPersistAt = 0;
+
+    if (runForever) {
+      while (!isShuttingDown()) {
+        // Take a snapshot of states before stale recovery so we can detect transitions
+        const statesBefore = new Map(state.issues.map((i) => [i.id, i.state]));
+        await ensureNotStale(state, state.config.staleInProgressTimeoutMs);
+
+        // Re-enqueue any issues that just changed state due to stale recovery or retry eligibility
+        for (const issue of state.issues) {
+          const prev = statesBefore.get(issue.id);
+          if (prev !== issue.state) {
+            if (issue.state === "Queued") enqueueForExecution(issue).catch(() => {});
+            else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
+            else if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
+          }
+        }
+
+        state.updatedAt = now();
+        if (hasDirtyState() || Date.now() - lastPersistAt > PERSIST_DEBOUNCE_MS) {
+          await persistState(state);
+          lastPersistAt = Date.now();
+        }
+        await sleep(1_000);
+      }
+    } else {
+      // Batch mode: wait until all issues reach terminal states
+      while (!hasTerminalQueue(state)) {
+        await sleep(state.config.pollIntervalMs);
+      }
+    }
   } catch (error) {
     console.error("FATAL STACK TRACE:", error);
     addEvent(state, undefined, "error", `Fatal runtime error: ${String(error)}`);

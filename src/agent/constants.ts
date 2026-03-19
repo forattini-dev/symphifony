@@ -55,9 +55,7 @@ export const SOURCE_MARKER = `${SOURCE_ROOT}/.fifony-local-source-ready`;
 
 export const ATTACHMENTS_ROOT = `${STATE_ROOT}/attachments`;
 
-export const S3DB_DATABASE_PATH = `${STATE_ROOT}/s3db`;
-export const S3DB_BUCKET = env.FIFONY_STORAGE_BUCKET ?? "fifony";
-export const S3DB_KEY_PREFIX = env.FIFONY_STORAGE_KEY_PREFIX ?? "state";
+export const S3DB_DATABASE_PATH = `${STATE_ROOT}/fifony.sqlite`;
 
 export const S3DB_RUNTIME_RESOURCE = "runtime_state";
 export const S3DB_ISSUE_RESOURCE = "issues";

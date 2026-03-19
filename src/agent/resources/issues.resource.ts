@@ -7,6 +7,7 @@ import { persistState, markIssuePlanDirty } from "../store.ts";
 import { getEffectiveAgentProviders } from "../providers.ts";
 import { addEvent, createIssueFromPayload, handleStatePatch, transitionIssueState } from "../issues.ts";
 import { now } from "../helpers.ts";
+import { enqueueForPlanning, enqueueForExecution, enqueueForReview } from "../queue-workers.ts";
 
 function getIssueId(c: unknown): string | null {
   if (!c || typeof c !== "object" || !("req" in c) || !c.req || typeof (c as { req: unknown }).req !== "object") {
@@ -116,6 +117,9 @@ async function createIssue(c: unknown) {
     if (issue.plan) markIssuePlanDirty(issue.id);
     addEvent(context.state, issue.id, "info", `Issue ${issue.identifier} created via API.`);
     await persistState(context.state);
+    if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
+    else if (issue.state === "Queued" || issue.state === "Running") enqueueForExecution(issue).catch(() => {});
+    else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
     return { body: { ok: true, issue } };
   } catch (error) {
     return { status: 400, body: { ok: false, error: error instanceof Error ? error.message : String(error) } };

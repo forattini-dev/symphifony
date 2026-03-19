@@ -51,7 +51,7 @@ export type S3dbDatabase = {
 
 type S3dbModule = {
   default: new (config: Record<string, unknown>) => S3dbDatabase;
-  FileSystemClient: new (config: Record<string, unknown>) => unknown;
+  SqliteClient: new (config: Record<string, unknown>) => unknown;
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -59,9 +59,7 @@ type S3dbModule = {
 const WORKSPACE_ROOT = env.FIFONY_WORKSPACE_ROOT ?? process.cwd();
 const PERSISTENCE_ROOT = env.FIFONY_PERSISTENCE ?? WORKSPACE_ROOT;
 const STATE_ROOT = resolvePersistenceRoot(PERSISTENCE_ROOT);
-const DATABASE_PATH = join(STATE_ROOT, "s3db");
-const STORAGE_BUCKET = env.FIFONY_STORAGE_BUCKET ?? "fifony";
-const STORAGE_KEY_PREFIX = env.FIFONY_STORAGE_KEY_PREFIX ?? "state";
+const DATABASE_PATH = join(STATE_ROOT, "fifony.sqlite");
 const DEBUG_BOOT = env.FIFONY_DEBUG_BOOT === "1";
 
 function resolvePersistenceRoot(value: string): string {
@@ -118,10 +116,10 @@ export function safeRead(path: string): string {
 
 async function loadS3dbModule(): Promise<S3dbModule> {
   try {
-    const imported = await import("s3db.js/lite");
+    const imported = await import("s3db.js");
     return {
       default: imported.default,
-      FileSystemClient: imported.FileSystemClient,
+      SqliteClient: imported.SqliteClient,
     };
   } catch (error) {
     throw new Error(`Unable to load s3db.js: ${String(error)}`);
@@ -136,13 +134,7 @@ export async function initDatabase(): Promise<S3dbDatabase> {
   debugBoot("mcp:getDatabase:start");
   const s3db = await loadS3dbModule();
   debugBoot("mcp:getDatabase:module-loaded");
-  const client = new s3db.FileSystemClient({
-    basePath: DATABASE_PATH,
-    bucket: STORAGE_BUCKET,
-    keyPrefix: STORAGE_KEY_PREFIX,
-    verbose: false,
-  });
-
+  const client = new s3db.SqliteClient({ basePath: DATABASE_PATH });
   database = new s3db.default({ client, verbose: false });
   await database.connect();
   debugBoot("mcp:getDatabase:connected");

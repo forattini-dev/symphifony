@@ -12,7 +12,7 @@ import {
   transitionIssueState,
   triggerReplan,
 } from "../issues.ts";
-import { wakeScheduler } from "../scheduler.ts";
+import { enqueueForPlanning, enqueueForExecution, enqueueForReview } from "../queue-workers.ts";
 import { ATTACHMENTS_ROOT, TERMINAL_STATES, TARGET_ROOT } from "../constants.ts";
 import { isAgentStillRunning, mergeWorkspace } from "../agent.ts";
 import { readAgentPid } from "../pid-manager.ts";
@@ -114,7 +114,9 @@ export function registerStateRoutes(
         addEvent(state, issue.id, "info", `Plan: ${issue.plan.steps.length} steps, complexity: ${issue.plan.estimatedComplexity}.`);
       }
       await persistState(state);
-      wakeScheduler();
+      if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
+      else if (issue.state === "Queued" || issue.state === "Running") enqueueForExecution(issue).catch(() => {});
+      else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
       return c.json({ ok: true, issue }, 201);
     } catch (error) {
       return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
@@ -137,7 +139,9 @@ export function registerStateRoutes(
       logger.info({ issueId, identifier: issue.identifier, targetState: payload.state }, "[API] POST /api/issues/:id/state");
       await handleStatePatch(state, issue, payload);
       await persistState(state);
-      wakeScheduler();
+      if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
+      else if (issue.state === "Queued" || issue.state === "Running") enqueueForExecution(issue).catch(() => {});
+      else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
       return c.json({ ok: true, issue });
     } catch (error) {
       return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
@@ -196,7 +200,7 @@ export function registerStateRoutes(
       }
       await transitionIssueState(issue, "Queued", `Execution requested for ${issue.identifier}.`);
       addEvent(state, issue.id, "state", `Execute requested — ${issue.identifier} moved to Queued.`);
-      wakeScheduler();
+      enqueueForExecution(issue).catch(() => {});
     });
   });
 
@@ -213,7 +217,7 @@ export function registerStateRoutes(
         throw new Error(`Cannot replan issue in ${issue.state} state — wait for it to finish or cancel it first.`);
       }
       triggerReplan(issue);
-      wakeScheduler();
+      enqueueForPlanning(issue).catch(() => {});
       addEvent(state, issue.id, "manual", `Replan requested for ${issue.identifier} — now at plan v${issue.planVersion}.`);
     });
   });
@@ -353,7 +357,7 @@ export function registerStateRoutes(
       }
       await transitionIssueState(issue, "Queued", "Rolled back by user — worktree removed.");
       addEvent(state, issue.id, "manual", `${issue.identifier} rolled back. Worktree and branch removed.`);
-      wakeScheduler();
+      enqueueForExecution(issue).catch(() => {});
     });
   });
 

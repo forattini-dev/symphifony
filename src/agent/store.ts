@@ -1,4 +1,3 @@
-import { mkdirSync } from "node:fs";
 import type {
   RuntimeState,
   RuntimeStateRecord,
@@ -11,9 +10,7 @@ import type {
 } from "./types.ts";
 import {
   S3DB_DATABASE_PATH,
-  S3DB_BUCKET,
   S3DB_ISSUE_RESOURCE,
-  S3DB_KEY_PREFIX,
   S3DB_RUNTIME_RECORD_ID,
   S3DB_RUNTIME_SCHEMA_VERSION,
 } from "./constants.ts";
@@ -74,51 +71,17 @@ export async function loadS3dbModule(): Promise<S3dbModule> {
   if (loadedS3dbModule) return loadedS3dbModule;
 
   try {
-    const imported = await import("s3db.js/lite") as unknown as Record<string, unknown>;
-    const pluginModule = await import("s3db.js/plugins/index");
-
-    let ApiPluginCtor: S3dbModule["ApiPlugin"] | undefined;
-    let WebSocketPluginCtor: S3dbModule["WebSocketPlugin"] | undefined;
-    let StateMachinePluginCtor: S3dbModule["StateMachinePlugin"] | undefined;
-
-    if (typeof (pluginModule as Record<string, unknown>).ApiPlugin === "function") {
-      ApiPluginCtor = (pluginModule as { ApiPlugin: S3dbModule["ApiPlugin"] }).ApiPlugin;
-    } else if (typeof (pluginModule as Record<string, unknown>).loadApiPlugin === "function") {
-      ApiPluginCtor = await (pluginModule as { loadApiPlugin: () => Promise<S3dbModule["ApiPlugin"]> }).loadApiPlugin();
-    }
-
-    if (!ApiPluginCtor) {
-      throw new Error("ApiPlugin export not found.");
-    }
-
-    if (typeof (pluginModule as Record<string, unknown>).WebSocketPlugin === "function") {
-      WebSocketPluginCtor = (pluginModule as { WebSocketPlugin: S3dbModule["WebSocketPlugin"] }).WebSocketPlugin;
-    } else if (typeof (pluginModule as Record<string, unknown>).loadWebSocketPlugin === "function") {
-      WebSocketPluginCtor = await (pluginModule as { loadWebSocketPlugin: () => Promise<S3dbModule["WebSocketPlugin"]> }).loadWebSocketPlugin();
-    }
-
-    if (typeof (pluginModule as Record<string, unknown>).StateMachinePlugin === "function") {
-      StateMachinePluginCtor = (pluginModule as { StateMachinePlugin: S3dbModule["StateMachinePlugin"] }).StateMachinePlugin;
-    }
-
-    let EventualConsistencyPluginCtor: S3dbModule["EventualConsistencyPlugin"] | undefined;
-    if (typeof (pluginModule as Record<string, unknown>).EventualConsistencyPlugin === "function") {
-      EventualConsistencyPluginCtor = (pluginModule as { EventualConsistencyPlugin: S3dbModule["EventualConsistencyPlugin"] }).EventualConsistencyPlugin;
-    }
-
-    let S3QueuePluginCtor: S3dbModule["S3QueuePlugin"] | undefined;
-    if (typeof (pluginModule as Record<string, unknown>).S3QueuePlugin === "function") {
-      S3QueuePluginCtor = (pluginModule as { S3QueuePlugin: S3dbModule["S3QueuePlugin"] }).S3QueuePlugin;
-    }
+    const imported = await import("s3db.js");
+    const ApiPlugin = await imported.loadApiPlugin();
 
     loadedS3dbModule = {
       S3db: imported.S3db as S3dbModule["S3db"],
-      FileSystemClient: imported.FileSystemClient as S3dbModule["FileSystemClient"],
-      ApiPlugin: ApiPluginCtor,
-      WebSocketPlugin: WebSocketPluginCtor,
-      StateMachinePlugin: StateMachinePluginCtor,
-      EventualConsistencyPlugin: EventualConsistencyPluginCtor,
-      S3QueuePlugin: S3QueuePluginCtor,
+      SqliteClient: imported.SqliteClient as S3dbModule["SqliteClient"],
+      ApiPlugin: ApiPlugin as S3dbModule["ApiPlugin"],
+      WebSocketPlugin: imported.WebSocketPlugin as S3dbModule["WebSocketPlugin"],
+      StateMachinePlugin: imported.StateMachinePlugin as S3dbModule["StateMachinePlugin"],
+      EventualConsistencyPlugin: imported.EventualConsistencyPlugin as S3dbModule["EventualConsistencyPlugin"],
+      S3QueuePlugin: imported.S3QueuePlugin as S3dbModule["S3QueuePlugin"],
     };
     return loadedS3dbModule;
   } catch (error) {
@@ -128,17 +91,11 @@ export async function loadS3dbModule(): Promise<S3dbModule> {
 
 export async function initStateStore(): Promise<void> {
   debugBoot("initStateStore:start");
-  const { S3db, FileSystemClient, StateMachinePlugin } = await loadS3dbModule();
+  const { S3db, SqliteClient, StateMachinePlugin } = await loadS3dbModule();
   debugBoot("initStateStore:module-loaded");
 
-  mkdirSync(S3DB_DATABASE_PATH, { recursive: true });
-
   stateDb = new S3db({
-    client: new FileSystemClient({
-      basePath: S3DB_DATABASE_PATH,
-      bucket: S3DB_BUCKET,
-      keyPrefix: S3DB_KEY_PREFIX,
-    }),
+    client: new SqliteClient({ basePath: S3DB_DATABASE_PATH }),
   });
 
   await stateDb.connect();

@@ -4,7 +4,7 @@ import { logger } from "./logger.ts";
 import { now } from "./helpers.ts";
 import { getEventStateResource } from "./store.ts";
 import { persistState } from "./store.ts";
-import { wakeScheduler } from "./scheduler.ts";
+import { enqueueForPlanning, enqueueForExecution, enqueueForReview } from "./queue-workers.ts";
 
 export async function listEvents(
   state: RuntimeState,
@@ -105,7 +105,9 @@ export async function mutateIssueState(
   try {
     await updater(issue);
     await persistState(state);
-    wakeScheduler();
+    if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
+    else if (issue.state === "Queued" || issue.state === "Running") enqueueForExecution(issue).catch(() => {});
+    else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
     return c.json({ ok: true, issue });
   } catch (error) {
     logger.error({ err: error, issueId }, "[API] mutateIssueState failed");

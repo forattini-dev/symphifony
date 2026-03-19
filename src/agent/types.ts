@@ -379,10 +379,8 @@ export type RuntimeSettingRecord = {
 };
 
 
-export type FileSystemClientOptions = {
+export type SqliteClientOptions = {
   basePath: string;
-  bucket: string;
-  keyPrefix?: string;
 };
 
 export type S3dbResource = {
@@ -416,7 +414,7 @@ export type S3dbDatabase = {
 
 export type S3dbModule = {
   S3db: new (options: Record<string, unknown>) => S3dbDatabase;
-  FileSystemClient: new (options: FileSystemClientOptions) => unknown;
+  SqliteClient: new (options: SqliteClientOptions) => unknown;
   ApiPlugin: new (options: Record<string, unknown>) => {
     stop?: () => Promise<void>;
   };
