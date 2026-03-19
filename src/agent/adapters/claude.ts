@@ -1,10 +1,48 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } from "../types.ts";
-import type { CompiledExecution } from "./index.ts";
+import type { CompiledExecution } from "./types.ts";
+import type { ProviderAdapter, ProviderCommandOptions } from "./registry.ts";
 import { renderPrompt } from "../../prompting.ts";
 import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands } from "./shared.ts";
-import { buildClaudeCommand, CLAUDE_RESULT_SCHEMA } from "./commands.ts";
+import { CLAUDE_RESULT_SCHEMA, REVIEW_RESULT_SCHEMA, extractPlanDirs } from "./commands.ts";
 
-export async function compileForClaude(
+// ── Command builder ───────────────────────────────────────────────────────────
+
+export function buildClaudeCommand(options: ProviderCommandOptions): string {
+  const parts = ["claude", "--print"];
+
+  if (!options.noToolAccess) {
+    parts.push("--dangerously-skip-permissions");
+  }
+
+  parts.push("--no-session-persistence", "--output-format json");
+
+  if (options.effort) {
+    parts.push(`--effort ${options.effort}`);
+  }
+
+  if (options.jsonSchema) {
+    parts.push(`--json-schema '${options.jsonSchema}'`);
+  }
+
+  if (options.addDirs?.length) {
+    for (const dir of options.addDirs) {
+      parts.push(`--add-dir "${dir}"`);
+    }
+  }
+
+  if (options.model && options.model !== "claude") {
+    parts.splice(1, 0, `--model ${options.model}`);
+  }
+
+  parts.push("< \"$FIFONY_PROMPT_FILE\"");
+  return parts.join(" ");
+}
+
+// ── Adapter ───────────────────────────────────────────────────────────────────
+
+async function compile(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
   plan: IssuePlan,
@@ -30,8 +68,14 @@ export async function compileForClaude(
     validationItems: (plan.validation ?? []).map((value) => ({ value })),
   });
 
+  const relativeDirs = extractPlanDirs(plan);
+  const codePath = existsSync(join(workspacePath, "worktree")) ? join(workspacePath, "worktree") : workspacePath;
+  const absoluteDirs = relativeDirs.map((d) => join(codePath, d));
+
   const command = buildClaudeCommand({
     model: provider.model,
+    effort,
+    addDirs: absoluteDirs,
     jsonSchema: CLAUDE_RESULT_SCHEMA,
   });
 
@@ -65,3 +109,13 @@ export async function compileForClaude(
     },
   };
 }
+
+export const claudeAdapter: ProviderAdapter = {
+  buildCommand: buildClaudeCommand,
+  buildReviewCommand: (reviewer) => buildClaudeCommand({
+    model: reviewer.model,
+    effort: reviewer.reasoningEffort,
+    jsonSchema: REVIEW_RESULT_SCHEMA,
+  }),
+  compile,
+};

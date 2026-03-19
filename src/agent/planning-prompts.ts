@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { appendFileTail } from "./helpers.ts";
 import type { IssuePlan, RuntimeConfig, PipelineStageConfig } from "./types.ts";
 import { PLAN_JSON_SCHEMA } from "./planning-schema.ts";
-import { buildClaudeCommand, buildCodexCommand } from "./adapters/commands.ts";
+import { ADAPTERS } from "./adapters/registry.ts";
+import { CLAUDE_RESULT_SCHEMA } from "./adapters/commands.ts";
 import { renderPrompt } from "../prompting.ts";
 import { STATE_ROOT } from "./constants.ts";
 import { detectAvailableProviders } from "./providers.ts";
@@ -38,9 +39,10 @@ export async function buildRefinePrompt(
 // ── Provider command ──────────────────────────────────────────────────────────
 
 export function getPlanCommand(provider: string, model?: string, imagePaths?: string[]): string {
-  if (provider === "claude") return buildClaudeCommand({ model, jsonSchema: PLAN_JSON_SCHEMA, noToolAccess: true });
-  if (provider === "codex") return buildCodexCommand({ model, imagePaths });
-  return "";
+  const adapter = ADAPTERS[provider];
+  if (!adapter) return "";
+  const jsonSchema = provider === "claude" ? PLAN_JSON_SCHEMA : undefined;
+  return adapter.buildCommand({ model, imagePaths, jsonSchema, noToolAccess: provider === "claude" });
 }
 
 // ── Shared: debug file saving ─────────────────────────────────────────────────

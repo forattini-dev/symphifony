@@ -403,6 +403,55 @@ function collectCodexUsage(): ProviderUsage | null {
   };
 }
 
+// ── Gemini usage (stub — CLI has no local usage DB yet) ───────────────────────
+
+function collectGeminiUsage(): ProviderUsage | null {
+  let available = false;
+  try {
+    execSync("which gemini", { encoding: "utf8", timeout: 3000 });
+    available = true;
+  } catch {}
+
+  if (!available) return null;
+
+  const todayStart = computeTodayStart();
+  const weekStart = computeWeekStart();
+  const nextResetAt = computeNextMonday().toISOString();
+
+  const models: ModelInfo[] = [
+    { slug: "gemini-2.5-pro",   displayName: "Gemini 2.5 Pro",   description: "Most capable model" },
+    { slug: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", description: "Balanced performance" },
+    { slug: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", description: "Fast and efficient" },
+  ];
+
+  let currentModel = "";
+  const settingsPath = join(homedir(), ".gemini", "settings.json");
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+      if (typeof settings.model === "string" && settings.model.trim()) {
+        currentModel = settings.model.trim();
+      }
+    } catch {}
+  }
+
+  return {
+    name: "gemini",
+    available,
+    models,
+    currentModel,
+    usage: {
+      today: makePeriod(0, 0, 0, todayStart.toISOString()),
+      thisWeek: makePeriod(0, 0, 0, weekStart.toISOString()),
+      allTime: makePeriod(0, 0, 0, ""),
+    },
+    resetInfo: "Usage data not available for Gemini CLI",
+    nextResetAt,
+    weeklyLimitEstimate: null,
+    percentUsed: null,
+  };
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export function collectProvidersUsage(): ProvidersUsageResult {
@@ -413,6 +462,9 @@ export function collectProvidersUsage(): ProvidersUsageResult {
 
   const codex = collectCodexUsage();
   if (codex) providers.push(codex);
+
+  const gemini = collectGeminiUsage();
+  if (gemini) providers.push(gemini);
 
   return {
     providers,

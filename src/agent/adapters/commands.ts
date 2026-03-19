@@ -1,14 +1,15 @@
 /**
- * CLI command builders for each provider.
+ * Shared schemas and helpers used by all provider adapters.
  *
- * Single source of truth for how we invoke Claude Code and Codex CLI.
- * Every caller (execution, review, planning) uses these builders
- * so flag changes only need to happen in one place.
+ * Provider-specific command builders live in their own adapter files:
+ *   adapters/claude.ts → buildClaudeCommand
+ *   adapters/codex.ts  → buildCodexCommand
+ *   adapters/gemini.ts → buildGeminiCommand
  */
 
 import type { IssuePlan } from "../types.ts";
 
-// ── Result schemas ───────────────────────────────────────────────────────────
+// ── Result schemas ────────────────────────────────────────────────────────────
 
 export const CLAUDE_RESULT_SCHEMA = JSON.stringify({
   type: "object",
@@ -37,80 +38,9 @@ export const REVIEW_RESULT_SCHEMA = JSON.stringify({
   required: ["status"],
 });
 
-// ── Claude command builder ───────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-export function buildClaudeCommand(options: {
-  model?: string;
-  effort?: string;
-  jsonSchema?: string;
-  /** Skip --dangerously-skip-permissions (e.g. for planning where tool access breaks --json-schema) */
-  noToolAccess?: boolean;
-}): string {
-  const parts = [
-    "claude",
-    "--print",
-  ];
-
-  if (!options.noToolAccess) {
-    parts.push("--dangerously-skip-permissions");
-  }
-
-  parts.push("--no-session-persistence", "--output-format json");
-
-  if (options.effort) {
-    parts.push(`--effort ${options.effort}`);
-  }
-
-  if (options.jsonSchema) {
-    parts.push(`--json-schema '${options.jsonSchema}'`);
-  }
-
-  if (options.model && options.model !== "claude") {
-    parts.splice(1, 0, `--model ${options.model}`);
-  }
-
-  parts.push("< \"$FIFONY_PROMPT_FILE\"");
-  return parts.join(" ");
-}
-
-// ── Codex command builder ────────────────────────────────────────────────────
-
-export function buildCodexCommand(options: {
-  model?: string;
-  addDirs?: string[];
-  imagePaths?: string[];
-  reasoningEffort?: string;
-}): string {
-  const parts = ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
-
-  if (options.model && options.model !== "codex") {
-    parts.push(`--model ${options.model}`);
-  }
-
-  if (options.reasoningEffort) {
-    // Codex uses -c config overrides, not a dedicated --reasoning-effort flag
-    parts.push(`-c reasoning_effort="${options.reasoningEffort}"`);
-  }
-
-  if (options.addDirs?.length) {
-    for (const dir of options.addDirs) {
-      parts.push(`--add-dir "${dir}"`);
-    }
-  }
-
-  if (options.imagePaths?.length) {
-    for (const img of options.imagePaths) {
-      parts.push(`--image "${img}"`);
-    }
-  }
-
-  parts.push("< \"$FIFONY_PROMPT_FILE\"");
-  return parts.join(" ");
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Extract unique directory paths from plan suggested paths (for --add-dir). */
+/** Extract unique directory paths from plan suggested paths (for --add-dir / --include-directories). */
 export function extractPlanDirs(plan: IssuePlan): string[] {
   if (!plan.suggestedPaths?.length) return [];
   const dirs = new Set<string>();

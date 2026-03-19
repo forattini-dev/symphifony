@@ -57,7 +57,7 @@ export function resolveAgentProfile(name: string): { profilePath: string; instru
 
 export function normalizeAgentProvider(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "claude" || normalized === "codex") return normalized;
+  if (normalized === "claude" || normalized === "codex" || normalized === "gemini") return normalized;
   if (!normalized) return "codex";
   return normalized;
 }
@@ -100,12 +100,15 @@ export function resolveEffort(
   return globalEffort?.default;
 }
 
-import { buildClaudeCommand, buildCodexCommand, CLAUDE_RESULT_SCHEMA } from "./adapters/commands.ts";
+import { ADAPTERS } from "./adapters/registry.ts";
+import { CLAUDE_RESULT_SCHEMA } from "./adapters/commands.ts";
 
 export function getProviderDefaultCommand(provider: string, reasoningEffort?: string, model?: string): string {
-  if (provider === "codex") return buildCodexCommand({ model, reasoningEffort });
-  if (provider === "claude") return buildClaudeCommand({ model, jsonSchema: CLAUDE_RESULT_SCHEMA });
-  return "";
+  const adapter = ADAPTERS[provider];
+  if (!adapter) return "";
+  // Claude needs a JSON schema in its default command; pass effort for all providers
+  const jsonSchema = provider === "claude" ? CLAUDE_RESULT_SCHEMA : undefined;
+  return adapter.buildCommand({ model, effort: reasoningEffort, jsonSchema });
 }
 
 let cachedProviders: DetectedProvider[] | null = null;
@@ -119,7 +122,7 @@ export function detectAvailableProviders(): DetectedProvider[] {
 
   const providers: DetectedProvider[] = [];
 
-  for (const name of ["claude", "codex"]) {
+  for (const name of ["claude", "codex", "gemini"]) {
     try {
       const path = execFileSync("which", [name], { encoding: "utf8", timeout: 5000 }).trim();
       providers.push({ name, available: true, path });
@@ -195,6 +198,31 @@ function readClaudeConfig(): { model?: string } {
   } catch {
     return {};
   }
+}
+
+/**
+ * Read the user's configured default model from ~/.gemini/settings.json.
+ */
+export function readGeminiConfig(): { model?: string } {
+  try {
+    const settingsPath = join(homedir(), ".gemini", "settings.json");
+    if (!existsSync(settingsPath)) return {};
+    const raw = readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(raw) as { model?: string; selectedAuthType?: string };
+    return { model: typeof settings.model === "string" ? settings.model : undefined };
+  } catch {
+    return {};
+  }
+}
+
+async function fetchGeminiModels(): Promise<DiscoveredModel[]> {
+  // Gemini CLI does not cache a local models file like Codex does.
+  // Return the well-known stable model aliases — always valid.
+  return [
+    { id: "gemini-2.5-pro",    provider: "gemini", label: "gemini-2.5-pro (latest)",   tier: "Most capable" },
+    { id: "gemini-2.5-flash",  provider: "gemini", label: "gemini-2.5-flash (latest)",  tier: "Balanced" },
+    { id: "gemini-2.0-flash",  provider: "gemini", label: "gemini-2.0-flash (latest)",  tier: "Fast" },
+  ];
 }
 
 async function fetchCodexModels(): Promise<DiscoveredModel[]> {
@@ -288,6 +316,7 @@ export async function discoverModels(providers: DetectedProvider[]): Promise<Rec
     }
     if (p.name === "codex") tasks.push({ name: "codex", fetch: fetchCodexModels });
     if (p.name === "claude") tasks.push({ name: "claude", fetch: fetchAnthropicModels });
+    if (p.name === "gemini") tasks.push({ name: "gemini", fetch: fetchGeminiModels });
   }
 
   const settled = await Promise.allSettled(tasks.map((t) => t.fetch()));
@@ -317,6 +346,18 @@ export async function discoverModels(providers: DetectedProvider[]): Promise<Rec
         const idx = models.findIndex((m) => m.id === configuredModel || m.id.includes(configuredModel));
         if (idx > 0) {
           models = [models[idx], ...models.slice(0, idx), ...models.slice(idx + 1)];
+        }
+      }
+    }
+
+    if (tasks[i].name === "gemini") {
+      const { model: configuredModel } = readGeminiConfig();
+      if (configuredModel) {
+        const idx = models.findIndex((m) => m.id === configuredModel);
+        if (idx > 0) {
+          models = [models[idx], ...models.slice(0, idx), ...models.slice(idx + 1)];
+        } else if (idx === -1) {
+          models = [{ id: configuredModel, provider: "gemini", label: configuredModel, tier: "Configured default" }, ...models];
         }
       }
     }

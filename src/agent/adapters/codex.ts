@@ -1,12 +1,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } from "../types.ts";
-import type { CompiledExecution } from "./index.ts";
+import type { CompiledExecution } from "./types.ts";
+import type { ProviderAdapter, ProviderCommandOptions } from "./registry.ts";
 import { renderPrompt } from "../../prompting.ts";
 import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands } from "./shared.ts";
-import { buildCodexCommand, extractPlanDirs } from "./commands.ts";
+import { REVIEW_RESULT_SCHEMA, extractPlanDirs } from "./commands.ts";
 
-// Codex uses a textual result contract embedded in the prompt (no --json-schema flag)
+// ── Result contract (embedded in prompt — no --json-schema flag in codex) ────
+
 const CODEX_RESULT_CONTRACT = `
 Return a JSON object with this exact schema when finished:
 {
@@ -21,7 +23,39 @@ Return a JSON object with this exact schema when finished:
 }
 `.trim();
 
-export async function compileForCodex(
+// ── Command builder ───────────────────────────────────────────────────────────
+
+export function buildCodexCommand(options: ProviderCommandOptions): string {
+  const parts = ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+
+  if (options.model && options.model !== "codex") {
+    parts.push(`--model ${options.model}`);
+  }
+
+  if (options.effort) {
+    // Codex uses -c config overrides, not a dedicated --effort flag
+    parts.push(`-c reasoning_effort="${options.effort}"`);
+  }
+
+  if (options.addDirs?.length) {
+    for (const dir of options.addDirs) {
+      parts.push(`--add-dir "${dir}"`);
+    }
+  }
+
+  if (options.imagePaths?.length) {
+    for (const img of options.imagePaths) {
+      parts.push(`--image "${img}"`);
+    }
+  }
+
+  parts.push("< \"$FIFONY_PROMPT_FILE\"");
+  return parts.join(" ");
+}
+
+// ── Adapter ───────────────────────────────────────────────────────────────────
+
+async function compile(
   issue: IssueEntry,
   provider: AgentProviderDefinition,
   plan: IssuePlan,
@@ -52,7 +86,6 @@ export async function compileForCodex(
     outputContract: CODEX_RESULT_CONTRACT,
   });
 
-  // Resolve plan dirs to absolute paths against the worktree (code dir), not the management dir
   const relativeDirs = extractPlanDirs(plan);
   const codePath = existsSync(join(workspacePath, "worktree")) ? join(workspacePath, "worktree") : workspacePath;
   const absoluteDirs = relativeDirs.map((d) => join(codePath, d));
@@ -60,7 +93,7 @@ export async function compileForCodex(
   const command = buildCodexCommand({
     model: provider.model,
     addDirs: absoluteDirs,
-    reasoningEffort: effort,
+    effort,
   });
 
   const env: Record<string, string> = {
@@ -91,3 +124,12 @@ export async function compileForCodex(
     },
   };
 }
+
+export const codexAdapter: ProviderAdapter = {
+  buildCommand: buildCodexCommand,
+  buildReviewCommand: (reviewer) => buildCodexCommand({
+    model: reviewer.model,
+    effort: reviewer.reasoningEffort,
+  }),
+  compile,
+};

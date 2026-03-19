@@ -3,36 +3,34 @@ import { Zap, Gauge, Brain, Flame, Search } from "lucide-react";
 // ── Step labels ───────────────────────────────────────────────────────────────
 
 export const BASE_STEP_LABELS = [
-  "Welcome", "Project", "Branch", "Providers", "Scan Project", "Domains",
-  "Agents & Skills", "Effort", "Workers & Theme", "Launch",
+  "Welcome", "Setup", "Pipeline", "Analyze", "Agents & Skills", "Preferences", "Launch",
 ];
 
 export function getStepLabels(wantsDiscovery) {
   if (!wantsDiscovery) return BASE_STEP_LABELS;
   return [
-    ...BASE_STEP_LABELS.slice(0, 4),
+    ...BASE_STEP_LABELS.slice(0, 4), // Welcome, Setup, Pipeline, Analyze
     "Discover Issues",
-    ...BASE_STEP_LABELS.slice(4),
+    ...BASE_STEP_LABELS.slice(4),    // Agents & Skills, Preferences, Launch
   ];
 }
 
 export function getStepCount(wantsDiscovery) {
-  return wantsDiscovery ? 11 : 10;
+  return wantsDiscovery ? 8 : 7;
 }
 
 // ── Stepper labels ────────────────────────────────────────────────────────────
 
 export const BASE_STEPPER_LABELS = [
-  "Project", "Branch", "Pipeline", "Scan", "Domains", "Agents",
-  "Effort", "Workers & Theme", "Launch",
+  "Setup", "Pipeline", "Analyze", "Agents", "Preferences", "Launch",
 ];
 
 export function getStepperLabels(wantsDiscovery) {
   if (!wantsDiscovery) return BASE_STEPPER_LABELS;
   return [
-    ...BASE_STEPPER_LABELS.slice(0, 3),
+    ...BASE_STEPPER_LABELS.slice(0, 3), // Setup, Pipeline, Analyze
     "Discover",
-    ...BASE_STEPPER_LABELS.slice(3),
+    ...BASE_STEPPER_LABELS.slice(3),    // Agents, Preferences, Launch
   ];
 }
 
@@ -45,10 +43,11 @@ export const EFFORT_OPTIONS = [
   { value: "extra-high", label: "Extra High", icon: Flame, description: "Maximum depth -- most thorough, slowest", color: "text-error" },
 ];
 
-// Effort availability depends on the CLI: codex supports extra-high, claude does not
+// Effort availability depends on the CLI: codex supports extra-high, claude/gemini do not
 export const PROVIDER_EFFORT_SUPPORT = {
   codex: EFFORT_OPTIONS,
   claude: EFFORT_OPTIONS.filter((option) => option.value !== "extra-high"),
+  gemini: EFFORT_OPTIONS.filter((option) => option.value !== "extra-high"),
 };
 
 export function getEffortOptionsForRole(role, pipeline) {

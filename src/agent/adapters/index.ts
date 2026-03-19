@@ -1,52 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, AgentTokenUsage } from "../types.ts";
-import { compileForClaude } from "./plan-to-claude.ts";
-import { compileForCodex } from "./plan-to-codex.ts";
-import { buildFullPlanPrompt, buildExecutionPayload } from "./shared.ts";
+import type { CompiledExecution, CompiledReview, ExecutionAudit } from "./types.ts";
+import { buildExecutionPayload } from "./shared.ts";
 import type { ExecutionPayload } from "./shared.ts";
-import { buildClaudeCommand, buildCodexCommand, REVIEW_RESULT_SCHEMA } from "./commands.ts";
+import { ADAPTERS } from "./registry.ts";
 import { renderPrompt } from "../../prompting.ts";
+import { buildFullPlanPrompt } from "./shared.ts";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export type CompiledExecution = {
-  prompt: string;
-  command: string;
-  env: Record<string, string>;
-  preHooks: string[];
-  postHooks: string[];
-  outputSchema: string;
-  payload: ExecutionPayload | null;
-  meta: {
-    adapter: "claude" | "codex" | "passthrough";
-    reasoningEffort: string;
-    model: string;
-    skillsActivated: string[];
-    subagentsRequested: string[];
-    phasesCount: number;
-  };
-};
-
-export type CompiledReview = {
-  prompt: string;
-  command: string;
-};
-
-export type ExecutionAudit = {
-  runtime: string;
-  model: string;
-  effort: string;
-  role: string;
-  skillsActivated: string[];
-  subagentsRequested: string[];
-  durationMs: number;
-  tokenUsage: AgentTokenUsage | null;
-  diffStats: { filesChanged: number; linesAdded: number; linesRemoved: number } | null;
-  result: string;
-  compiledAt: string;
-  completedAt: string;
-};
+export type { CompiledExecution, CompiledReview, ExecutionAudit };
 
 // ── Compile execution ────────────────────────────────────────────────────────
 
@@ -60,19 +22,12 @@ export async function compileExecution(
   const plan = issue.plan;
   if (!plan?.steps?.length) return null;
 
+  const adapter = ADAPTERS[provider.provider];
+  if (!adapter) return null;
+
   const payload = buildExecutionPayload(issue, provider, plan, workspacePath);
-
-  let compiled: CompiledExecution | null = null;
-  if (provider.provider === "claude") {
-    compiled = await compileForClaude(issue, provider, plan, config, workspacePath, skillContext);
-  } else if (provider.provider === "codex") {
-    compiled = await compileForCodex(issue, provider, plan, config, workspacePath, skillContext);
-  }
-
-  if (compiled) {
-    compiled.payload = payload;
-  }
-
+  const compiled = await adapter.compile(issue, provider, plan, config, workspacePath, skillContext);
+  compiled.payload = payload;
   return compiled;
 }
 
@@ -96,15 +51,10 @@ export async function compileReview(
     diffSummary,
   });
 
-  // Build command using shared builder — single source of truth for CLI flags
-  let command = reviewer.command;
-  if (!command.trim() || command.includes("$FIFONY_PROMPT_FILE")) {
-    if (reviewer.provider === "claude") {
-      command = buildClaudeCommand({ model: reviewer.model, jsonSchema: REVIEW_RESULT_SCHEMA });
-    } else if (reviewer.provider === "codex") {
-      command = buildCodexCommand({ model: reviewer.model, reasoningEffort: reviewer.reasoningEffort });
-    }
-  }
+  const adapter = ADAPTERS[reviewer.provider];
+  const command = adapter
+    ? adapter.buildReviewCommand(reviewer)
+    : reviewer.command;
 
   return { prompt, command };
 }
@@ -161,13 +111,8 @@ export function persistCompilationArtifacts(workspacePath: string, compiled: Com
     );
   } catch { /* optional audit data */ }
 
-  // Save full prompt for debugging
   try {
-    writeFileSync(
-      join(workspacePath, "prompt.md"),
-      compiled.prompt,
-      "utf8",
-    );
+    writeFileSync(join(workspacePath, "prompt.md"), compiled.prompt, "utf8");
   } catch { /* optional */ }
 
   if (compiled.payload) {
