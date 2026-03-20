@@ -1,6 +1,6 @@
 {
   "name": "fifony",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "private": false,
   "type": "module",
   "description": "Filesystem-backed local fifony orchestrator with a TypeScript CLI, MCP mode, and multi-agent Codex or Claude workflows.",
