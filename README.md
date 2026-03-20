@@ -1,17 +1,16 @@
-<div align="center">
-<img src="app/public/dinofffaur.png" alt="fifony mascot" width="140" />
-<br><br>
+<p>
+  <img src="app/public/dinofffaur.png" alt="fifony mascot" width="120" align="left" />
+</p>
 
-# fifony
+## fifony
 
 **AI agents that actually ship code. You just watch.**
 
 Point at a repo. Open the dashboard. AI plans, builds, and reviews — you approve and merge.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D23-brightgreen.svg)]()
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D23-brightgreen.svg)]()
 
-</div>
+<br clear="left" />
 
 ---
 
