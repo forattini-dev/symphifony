@@ -69,7 +69,7 @@ export function deriveConfig(args: string[]): RuntimeConfig {
 
   return {
     pollIntervalMs: clamp(pollIntervalMs, 200, 10_000),
-    workerConcurrency: clamp(workerConcurrency, 1, 16),
+    workerConcurrency: clamp(workerConcurrency, 1, 10),
     commandTimeoutMs: clamp(commandTimeoutMs, 1_000, 3_600_000),
     maxAttemptsDefault: clamp(maxAttemptsDefault, 1, 10),
     maxTurns: clamp(parseEnvNumber("FIFONY_AGENT_MAX_TURNS", 4), 1, 16),
@@ -107,7 +107,7 @@ export function applyWorkflowConfig(
 export function validateConfig(config: RuntimeConfig): string[] {
   const errors: string[] = [];
   if (config.pollIntervalMs < 200) errors.push(`pollIntervalMs too low: ${config.pollIntervalMs} (min 200)`);
-  if (config.workerConcurrency < 1 || config.workerConcurrency > 16) errors.push(`workerConcurrency out of range: ${config.workerConcurrency} (1-16)`);
+  if (config.workerConcurrency < 1 || config.workerConcurrency > 10) errors.push(`workerConcurrency out of range: ${config.workerConcurrency} (1-10)`);
   if (config.maxAttemptsDefault < 1 || config.maxAttemptsDefault > 10) errors.push(`maxAttemptsDefault out of range: ${config.maxAttemptsDefault} (1-10)`);
   if (config.maxTurns < 1 || config.maxTurns > 16) errors.push(`maxTurns out of range: ${config.maxTurns} (1-16)`);
   if (config.commandTimeoutMs < 1000) errors.push(`commandTimeoutMs too low: ${config.commandTimeoutMs} (min 1000)`);

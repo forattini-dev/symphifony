@@ -64,14 +64,14 @@ function ConcurrencySection({ concurrency, setConcurrency, saveConcurrency, save
           Worker Concurrency
         </h3>
         <p className="text-xs opacity-50">
-          Number of parallel workers executing issues simultaneously (1–16).
+          Number of parallel workers executing issues simultaneously (1–10).
         </p>
         <div className="flex items-center gap-2">
           <input
             className="input input-bordered input-sm w-20"
             type="number"
             min={1}
-            max={16}
+            max={10}
             value={concurrency}
             onChange={(e) => setConcurrency(e.target.value)}
           />
@@ -376,4 +376,3 @@ function SetupWizardSection() {
 
 // Export individual sections for use in tabbed layout
 export { ThemeSection, ConcurrencySection, ConnectionSection, PwaSection, NotificationsSection, SetupWizardSection };
-
