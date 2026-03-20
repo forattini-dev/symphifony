@@ -1,6 +1,6 @@
 import type { IssueEntry, IssueState } from "../../types.ts";
 import { S3DB_ISSUE_RESOURCE, TERMINAL_STATES } from "../../concerns/constants.ts";
-import { computeDiffStats, syncIssueDiffStatsToStore } from "../../domains/workspace.ts";
+import { computeDiffStats } from "../../domains/workspace.ts";
 import { invalidateMetrics } from "../metrics-cache.ts";
 import { markIssueDirty } from "../dirty-tracker.ts";
 import { isoWeek, now } from "../../concerns/helpers.ts";
@@ -222,9 +222,9 @@ export const issueStateMachineConfig = {
         issue.terminalWeek = week;
         issue.nextRetryAt = undefined;
         issue.lastError = undefined;
-        if (issue.id) {
-          syncIssueDiffStatsToStore(issue).catch(() => {});
-        }
+        // NOTE: Do NOT call syncIssueDiffStatsToStore here — it's already called
+        // by the issue-runner after execution and by merge-workspace at merge time.
+        // Calling it here would race with those and produce delta=0 (no EC tracking).
         emitFsmEvent(issue.id, "state", `${issue.identifier} completed.`);
       }
       const res = issueResource(machine);

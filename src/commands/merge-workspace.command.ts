@@ -50,12 +50,12 @@ export async function mergeWorkspaceCommand(
     throw new Error("No workspace found for this issue.");
   }
 
-  // Compute line stats from git diff before merge
+  // Compute line stats from git diff before merge (use --stat for file-level detail)
   if (issue.branchName && issue.baseBranch) {
     try {
       const stat = execSync(
-        `git diff --shortstat "${issue.baseBranch}"..."${issue.branchName}"`,
-        { encoding: "utf8", cwd: TARGET_ROOT, stdio: "pipe", timeout: 10_000 },
+        `git diff --stat "${issue.baseBranch}"..."${issue.branchName}"`,
+        { encoding: "utf8", cwd: TARGET_ROOT, stdio: "pipe", maxBuffer: 512_000, timeout: 10_000 },
       );
       parseDiffStats(issue, stat);
       await syncIssueDiffStatsToStore(issue);

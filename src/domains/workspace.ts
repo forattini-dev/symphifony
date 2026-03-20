@@ -354,13 +354,16 @@ export function parseDiffStats(issue: IssueEntry, raw: string): void {
   const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
   const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
 
+  // Filter internal files from --stat output (not present in --shortstat)
   const internalRe = /fifony[-_]|\.fifony-|WORKFLOW\.local/;
   const fileLines = lines.slice(0, -1).filter((l) => {
     const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
     return !internalRe.test(name);
   });
 
-  issue.filesChanged = fileLines.length || (filesMatch ? parseInt(filesMatch[1], 10) : 0);
+  // Use filtered file count from --stat when available, fall back to regex for --shortstat
+  const regexFiles = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+  issue.filesChanged = fileLines.length > 0 ? fileLines.length : regexFiles;
   issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
   issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
 }
@@ -385,6 +388,7 @@ export async function syncIssueDiffStatsToStore(issue: IssueEntry): Promise<void
     return;
   }
 
+  // Read current resource values to compute delta for EC add/sub
   const current = await (issueResource as any).get?.(issue.id).catch(() => null) as
     | null
     | { linesAdded?: unknown; linesRemoved?: unknown; filesChanged?: unknown };
@@ -393,33 +397,45 @@ export async function syncIssueDiffStatsToStore(issue: IssueEntry): Promise<void
   const previousLinesRemoved = toNumber(current?.linesRemoved);
   const previousFilesChanged = toNumber(current?.filesChanged);
 
-  const resourcePatch = {
+  // Always patch the resource with the latest values
+  await (issueResource as any).patch(issue.id, {
     linesAdded: nextLinesAdded,
     linesRemoved: nextLinesRemoved,
     filesChanged: nextFilesChanged,
     branchName: issue.branchName,
-  };
+  });
 
-  await (issueResource as any).patch(issue.id, resourcePatch);
-
+  // EC delta tracking: only call add/sub when there's an actual change
   const add = (issueResource as any).add;
   const sub = (issueResource as any).sub;
-  if (typeof add !== "function" || typeof sub !== "function") return;
+  if (typeof add !== "function" || typeof sub !== "function") {
+    logger.debug({ issueId: issue.id }, "[DiffStats] resource.add/sub not available — EC plugin may not be installed");
+    return;
+  }
+
+  const deltaAdded = nextLinesAdded - previousLinesAdded;
+  const deltaRemoved = nextLinesRemoved - previousLinesRemoved;
+  const deltaFiles = nextFilesChanged - previousFilesChanged;
+
+  if (deltaAdded === 0 && deltaRemoved === 0 && deltaFiles === 0) {
+    logger.debug({ issueId: issue.id, nextLinesAdded, previousLinesAdded }, "[DiffStats] No delta to send to EC (values already synced)");
+    return;
+  }
+
+  logger.debug({ issueId: issue.id, deltaAdded, deltaRemoved, deltaFiles }, "[DiffStats] Sending deltas to EC");
 
   const applyDelta = async (field: string, delta: number): Promise<void> => {
     if (delta > 0) {
       await add.call(issueResource, issue.id, field, delta);
-      return;
-    }
-    if (delta < 0) {
+    } else if (delta < 0) {
       await sub.call(issueResource, issue.id, field, Math.abs(delta));
     }
   };
 
   await Promise.all([
-    applyDelta("linesAdded", nextLinesAdded - previousLinesAdded),
-    applyDelta("linesRemoved", nextLinesRemoved - previousLinesRemoved),
-    applyDelta("filesChanged", nextFilesChanged - previousFilesChanged),
+    applyDelta("linesAdded", deltaAdded),
+    applyDelta("linesRemoved", deltaRemoved),
+    applyDelta("filesChanged", deltaFiles),
   ]);
 }
 
