@@ -171,7 +171,6 @@ export async function startApiServer(
       "GET /onboarding": () => serveAppShell(),
       "GET /kanban": () => serveAppShell(),
       "GET /issues": () => serveAppShell(),
-      "GET /discover": () => serveAppShell(),
       "GET /agents": () => serveAppShell(),
       "GET /settings": () => serveAppShell(),
       "GET /settings/general": () => serveAppShell(),

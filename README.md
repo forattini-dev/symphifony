@@ -81,9 +81,8 @@ Supported build files include: `package.json`, `Cargo.toml`, `pyproject.toml`, `
 | Route | What you see |
 |-------|-------------|
 | `/kanban` | Drag-and-drop board. Cards flow through pipeline stages. Desktop click+drag, mobile long-press. |
-| `/issues` | Searchable list with state, label, and capability filters. Shows token usage and duration per issue. |
+| `/issues` | Searchable list with multi-state filters, sort options, and capability filters. Shows token usage and duration per issue. |
 | `/agents` | Live cockpit: worker slots, queue depth, real-time log tail, token sparklines per agent. |
-| `/discover` | Import TODOs from your codebase, GitHub issues, or AI-suggested tasks. |
 | `/analytics` | Token usage trends, daily and weekly rollups, top issues by cost, per-model breakdown. |
 | `/settings` | General, Workflow pipeline config, Notifications, Providers. |
 
