@@ -22,7 +22,7 @@ import { generatePlan } from "./planning/issue-planner.ts";
 import { persistState } from "../persistence/store.ts";
 import { addTokenUsage } from "./directive-parser.ts";
 import { runAgentSession, runAgentPipeline } from "./agent-pipeline.ts";
-import { computeDiffStats } from "../domains/workspace.ts";
+import { computeDiffStats, syncIssueDiffStatsToStore } from "../domains/workspace.ts";
 import { ensureWorktreeCommitted, hydrateIssuePathsFromWorkspace, describeRoutingSignals } from "../domains/workspace.ts";
 import { prepareWorkspace } from "../domains/workspace.ts";
 import { inferCapabilityPaths } from "../routing/capability-resolver.ts";
@@ -124,9 +124,7 @@ async function handleReviewStage(
     // No reviewer configured → auto-approve
     issue.mergedReason = "Auto-approved: no reviewer configured.";
     await transitionIssueCommand({ issue, target: "Done", note: `No reviewer configured; auto-approved for ${issue.identifier}.` }, container);
-    container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} auto-approved (no reviewer provider).`);
-    issue.completedAt = now();
-    issue.lastError = undefined;
+    // completedAt and lastError handled by FSM onEnterDone
     return;
   }
 
@@ -182,14 +180,11 @@ async function handleReviewStage(
     issue.mergedReason = `Auto-approved by reviewer in ${reviewResult.turns} turn(s).`;
     await transitionIssueCommand({ issue, target: "Reviewed", note: `Reviewer completed for ${issue.identifier}.` }, container);
     await transitionIssueCommand({ issue, target: "Done", note: `Reviewer approved ${issue.identifier} in ${reviewResult.turns} turn(s).` }, container);
-    container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} approved by reviewer → Done.`);
-    issue.completedAt = now();
-    issue.lastError = undefined;
+    // completedAt and lastError are set by FSM onEnterDone
   } else if (reviewResult.continueRequested) {
     await transitionIssueCommand({ issue, target: "Reviewed", note: `Reviewer completed for ${issue.identifier}.` }, container);
     await transitionIssueCommand({ issue, target: "Queued", note: `Reviewer requested rework for ${issue.identifier}.` }, container);
-    issue.nextRetryAt = new Date(Date.now() + 1000).toISOString();
-    issue.lastError = undefined;
+    // nextRetryAt and lastError are cleared by FSM onEnterQueued
     container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} sent back for rework by reviewer.`);
   } else {
     // Reviewer blocked or failed
@@ -198,11 +193,9 @@ async function handleReviewStage(
     if (issue.attempts >= issue.maxAttempts) {
       issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): reviewer failed or blocked.`;
       await transitionIssueCommand({ issue, target: "Cancelled", note: `Review failed, max attempts reached for ${issue.identifier}.` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} cancelled after review failure.`);
     } else {
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       await transitionIssueCommand({ issue, target: "Blocked", note: `Review failed for ${issue.identifier}. Retry at ${issue.nextRetryAt}.` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} blocked after review failure.`);
     }
   }
 }
@@ -241,19 +234,7 @@ async function handleExecutionStage(
 
     computeDiffStats(issue);
     container.issueRepository.markDirty(issue.id);
-    // Patch resource directly so EventualConsistency plugin captures diff stats for analytics
-    try {
-      const { getIssueStateResource } = await import("../persistence/store.ts");
-      const res = getIssueStateResource();
-      if (res && issue.filesChanged) {
-        await (res as any).patch(issue.id, {
-          linesAdded: issue.linesAdded || 0,
-          linesRemoved: issue.linesRemoved || 0,
-          filesChanged: issue.filesChanged || 0,
-          branchName: issue.branchName,
-        });
-      }
-    } catch { /* non-critical */ }
+    await syncIssueDiffStatsToStore(issue).catch(() => {});
     if (issue.filesChanged) {
       container.eventStore.addEvent(issue.id, "info", `Diff: ${issue.filesChanged} files, +${issue.linesAdded || 0} -${issue.linesRemoved || 0} lines.`);
     }
@@ -282,8 +263,6 @@ async function handleExecutionStage(
     }
 
     await transitionIssueCommand({ issue, target: "Reviewing", note: `Agent execution finished in ${runResult.turns} turn(s) for ${issue.identifier}. Awaiting review.` }, container);
-    issue.lastError = undefined;
-    container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} moved to Reviewing.`);
   } else if (runResult.continueRequested) {
     issue.updatedAt = now();
     issue.commandExitCode = runResult.code;
@@ -300,11 +279,11 @@ async function handleExecutionStage(
       issue.commandExitCode = runResult.code;
       issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): execution failed repeatedly.`;
       await transitionIssueCommand({ issue, target: "Cancelled", note: `Max attempts reached (${issue.attempts}/${issue.maxAttempts}).` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} cancelled after repeated failures.`);
+      // FSM onEnterCancelled emits the state event
     } else {
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       await transitionIssueCommand({ issue, target: "Blocked", note: `${runResult.blocked ? "Agent requested manual intervention" : "Failure"} on attempt ${issue.attempts}/${issue.maxAttempts}; retry scheduled at ${issue.nextRetryAt}.` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} blocked waiting for retry.`);
+      // FSM onEnterBlocked emits the error event
     }
   }
 }
@@ -408,11 +387,9 @@ export async function runIssueOnce(
     if (issue.attempts >= issue.maxAttempts) {
       issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): unexpected failure — ${issue.lastError?.slice(0, 120) ?? "unknown error"}.`;
       await transitionIssueCommand({ issue, target: "Cancelled", note: `Issue failed unexpectedly: ${issue.lastError}` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} cancelled unexpectedly.`);
     } else {
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       await transitionIssueCommand({ issue, target: "Blocked", note: `Unexpected failure. Retry scheduled at ${issue.nextRetryAt}.` }, container);
-      container.eventStore.addEvent(issue.id, "error", `Issue ${issue.identifier} blocked after unexpected failure.`);
     }
   } finally {
     const elapsedMs = Date.now() - startTs;

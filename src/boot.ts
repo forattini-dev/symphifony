@@ -22,6 +22,7 @@ import {
 import { setSkipSource, detectDefaultBranch } from "./domains/workspace.ts";
 import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./domains/issues.ts";
 import { hasDirtyState } from "./persistence/dirty-tracker.ts";
+import { executeTransition } from "./persistence/plugins/issue-state-machine.ts";
 import { startApiServer } from "./persistence/plugins/api-server.ts";
 import { installGracefulShutdown, isShuttingDown, ensureNotStale, hasTerminalQueue } from "./persistence/plugins/scheduler.ts";
 import { cleanWorkspace, isAgentStillRunning, cleanStalePidFile } from "./agents/agent.ts";
@@ -319,14 +320,17 @@ async function main() {
         const { alive, pid } = isAgentStillRunning(issue);
         if (alive && pid) {
           logger.info(`Agent for ${issue.identifier} still alive (PID ${pid.pid}), keeping state as Running.`);
-          issue.state = "Running";
+          if (issue.state !== "Running") {
+            try { await executeTransition(issue, "RUN", { issue, note: `Orphaned agent detected (PID ${pid.pid}), still alive — tracking resumed.` }); }
+            catch { issue.state = "Running"; }
+          }
           addEvent(state, issue.id, "info", `Orphaned agent detected (PID ${pid.pid}), still alive — tracking resumed.`);
         } else {
           // Agent died — clean PID file, mark as Queued for resumption
           if (issue.workspacePath) cleanStalePidFile(issue.workspacePath);
           if (issue.state === "Running") {
-            issue.state = "Queued";
-            issue.history.push(`[${now()}] Agent process not found on boot — marked Queued.`);
+            try { await executeTransition(issue, "REQUEUE", { issue, note: `Agent process not found on boot — marked Queued.` }); }
+            catch { issue.state = "Queued"; }
             addEvent(state, issue.id, "info", `Agent for ${issue.identifier} not found, marked Queued.`);
           }
         }

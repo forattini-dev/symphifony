@@ -130,14 +130,10 @@ export function registerStateRoutes(
       }
       const container = getContainer();
       await transitionIssueCommand({ issue, target: nextState, note: `Manual state update: ${nextState}` }, container);
-      if (nextState === "Planned") {
-        issue.nextRetryAt = undefined;
-        issue.lastError = undefined;
-      }
-      if (nextState === "Cancelled") {
+      // nextRetryAt/lastError are now handled by FSM entry actions
+      if (nextState === "Cancelled" && payload.reason) {
         issue.lastError = toStringValue(payload.reason);
       }
-      addEvent(state, issue.id, "manual", `Manual state transition to ${nextState}`);
       await persistState(state);
       return c.json({ ok: true, issue });
     } catch (error) {
@@ -150,20 +146,23 @@ export function registerStateRoutes(
     return mutateIssueState(state, c, async (issue) => {
       const container = getContainer();
       if (TERMINAL_STATES.has(issue.state)) {
-        // Terminal → REOPEN → Planning, then if plan exists → Planned (auto-queues via FSM)
+        // Terminal → REOPEN → Planning, then if plan exists → Planned → Queued
         await transitionIssueCommand(
           { issue, target: "Planning", note: "Manual retry — reopened." },
           container,
         );
         if (issue.plan?.steps?.length) {
           await transitionIssueCommand(
-            { issue, target: "Planned", note: "Existing plan found — auto-queued." },
+            { issue, target: "Planned", note: "Existing plan found." },
+            container,
+          );
+          await transitionIssueCommand(
+            { issue, target: "Queued", note: "Auto-queued after plan approval." },
             container,
           );
         }
       } else if (issue.state === "Blocked") {
-        issue.lastError = undefined;
-        issue.nextRetryAt = undefined;
+        // lastError/nextRetryAt cleared by FSM onEnterQueued
         await transitionIssueCommand(
           { issue, target: "Queued", note: "Manual retry from Blocked." },
           container,

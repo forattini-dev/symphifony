@@ -10,6 +10,7 @@ import type {
 import { createS3dbIssueRepository } from "./s3db-issue-repository.ts";
 import { createS3dbEventStore } from "./s3db-event-store.ts";
 import { createS3QueueAdapter } from "./s3queue-adapter.ts";
+import { setFsmEventEmitter } from "./plugins/issue-state-machine.ts";
 
 // Store
 import { persistState } from "./store.ts";
@@ -38,6 +39,12 @@ export function createContainer(state: RuntimeState): Container {
   };
 
   _container = container;
+
+  // Wire FSM event emitter so entry actions can emit events through the event store
+  setFsmEventEmitter((issueId, kind, message) => {
+    eventStore.addEvent(issueId, kind as any, message);
+  });
+
   return container;
 }
 

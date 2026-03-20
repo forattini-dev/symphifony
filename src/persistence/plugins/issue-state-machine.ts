@@ -1,10 +1,25 @@
 import type { IssueEntry, IssueState } from "../../types.ts";
 import { S3DB_ISSUE_RESOURCE, TERMINAL_STATES } from "../../concerns/constants.ts";
-import { computeDiffStats } from "../../domains/workspace.ts";
+import { computeDiffStats, syncIssueDiffStatsToStore } from "../../domains/workspace.ts";
 import { invalidateMetrics } from "../metrics-cache.ts";
 import { markIssueDirty } from "../dirty-tracker.ts";
-import { isoWeek } from "../../concerns/helpers.ts";
+import { isoWeek, now } from "../../concerns/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
+
+// ── Event emitter callback (set after container init to avoid circular deps) ──
+type FsmEventEmitter = (issueId: string, kind: string, message: string) => void;
+let fsmEventEmitter: FsmEventEmitter | null = null;
+
+export function setFsmEventEmitter(emitter: FsmEventEmitter | null): void {
+  fsmEventEmitter = emitter;
+}
+
+/** Emit an event from FSM actions. No-op if container isn't ready yet (early boot). */
+function emitFsmEvent(issueId: string, kind: string, message: string): void {
+  if (fsmEventEmitter) {
+    try { fsmEventEmitter(issueId, kind, message); } catch { /* non-critical */ }
+  }
+}
 
 // Lazy imports to avoid circular dependency (queue-workers → issue-runner → transition-issue → this)
 async function lazyEnqueueForPlanning(issue: IssueEntry): Promise<void> {
@@ -140,6 +155,9 @@ export const issueStateMachineConfig = {
       if (issue) {
         issue.planningStatus = "idle";
         issue.planningError = undefined;
+        issue.nextRetryAt = undefined;
+        issue.lastError = undefined;
+        emitFsmEvent(issue.id, "state", `${issue.identifier} entered Planning.`);
         lazyEnqueueForPlanning(issue).catch(() => {});
       }
     },
@@ -147,23 +165,20 @@ export const issueStateMachineConfig = {
     onEnterPlanned: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
-        logger.info({ issueId: issue.id, identifier: issue.identifier }, "[FSM] onEnterPlanned — scheduling auto-queue");
-        setImmediate(async () => {
-          try {
-            const { executeTransition } = await import("./issue-state-machine.ts");
-            await executeTransition(issue, "QUEUE", { issue });
-            logger.info({ issueId: issue.id }, "[FSM] onEnterPlanned — QUEUE transition succeeded");
-          } catch (err) {
-            logger.warn({ err, issueId: issue.id }, "[FSM] Auto-transition Planned → Queued failed");
-          }
-        });
+        issue.nextRetryAt = undefined;
+        issue.lastError = undefined;
+        emitFsmEvent(issue.id, "state", `Plan approved — ${issue.identifier} moved to Planned.`);
+        // No auto-queue hack — callers (approve command) handle Planned → Queued explicitly
       }
     },
 
     onEnterQueued: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
+        issue.nextRetryAt = undefined;
+        issue.lastError = undefined;
         logger.info({ issueId: issue.id, identifier: issue.identifier }, "[FSM] onEnterQueued — enqueuing for execution");
+        emitFsmEvent(issue.id, "state", `${issue.identifier} queued for execution.`);
         lazyEnqueueForExecution(issue).catch((err) => {
           logger.error({ err, issueId: issue.id }, "[FSM] onEnterQueued — enqueue FAILED");
         });
@@ -175,6 +190,8 @@ export const issueStateMachineConfig = {
       const ts = new Date().toISOString();
       if (issue) {
         issue.reviewingAt = ts;
+        issue.lastError = undefined;
+        emitFsmEvent(issue.id, "state", `${issue.identifier} moved to Reviewing.`);
         lazyEnqueueForReview(issue).catch(() => {});
       }
       const res = issueResource(machine);
@@ -188,6 +205,8 @@ export const issueStateMachineConfig = {
       const note = typeof context.note === "string" ? context.note : "Blocked";
       if (issue) {
         issue.lastError = note;
+        // nextRetryAt is set by the caller before transition (they know the delay)
+        emitFsmEvent(issue.id, "error", `${issue.identifier} blocked: ${note}`);
       }
     },
 
@@ -196,11 +215,17 @@ export const issueStateMachineConfig = {
       const ts = new Date().toISOString();
       const week = isoWeek();
       if (issue) {
-        if (!issue.linesAdded && !issue.linesRemoved) computeDiffStats(issue);
+        if (!issue.linesAdded && !issue.linesRemoved && issue.baseBranch && issue.branchName) {
+          computeDiffStats(issue);
+        }
         issue.completedAt = ts;
         issue.terminalWeek = week;
         issue.nextRetryAt = undefined;
         issue.lastError = undefined;
+        if (issue.id) {
+          syncIssueDiffStatsToStore(issue).catch(() => {});
+        }
+        emitFsmEvent(issue.id, "state", `${issue.identifier} completed.`);
       }
       const res = issueResource(machine);
       if (res) {
@@ -220,6 +245,7 @@ export const issueStateMachineConfig = {
         issue.completedAt = ts;
         issue.terminalWeek = week;
         issue.nextRetryAt = undefined;
+        emitFsmEvent(issue.id, "state", `${issue.identifier} cancelled.`);
       }
       const res = issueResource(machine);
       if (res) {

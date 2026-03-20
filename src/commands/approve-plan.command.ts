@@ -23,6 +23,11 @@ export async function approvePlanCommand(
     { issue, target: "Planned", note: `Plan approved for ${issue.identifier}. Ready for execution.` },
     deps,
   );
+  // Event emitted by FSM onEnterPlanned
 
-  deps.eventStore.addEvent(issue.id, "state", `Plan approved — ${issue.identifier} moved to Planned.`);
+  // Explicitly queue for execution (no auto-queue hack in FSM)
+  await transitionIssueCommand(
+    { issue, target: "Queued", note: `${issue.identifier} queued for execution after plan approval.` },
+    deps,
+  );
 }

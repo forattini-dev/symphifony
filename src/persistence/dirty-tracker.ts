@@ -35,14 +35,36 @@ export function getDirtyEventIds(): Set<string> {
   return dirtyEventIds;
 }
 
+/** Snapshot current dirty IDs, then delete only those from the live set. */
+export function snapshotAndClearDirtyIssueIds(): Set<string> {
+  const snapshot = new Set(dirtyIssueIds);
+  for (const id of snapshot) dirtyIssueIds.delete(id);
+  return snapshot;
+}
+
+export function snapshotAndClearDirtyIssuePlanIds(): Set<string> {
+  const snapshot = new Set(dirtyIssuePlanIds);
+  for (const id of snapshot) dirtyIssuePlanIds.delete(id);
+  return snapshot;
+}
+
+export function snapshotAndClearDirtyEventIds(): Set<string> {
+  const snapshot = new Set(dirtyEventIds);
+  for (const id of snapshot) dirtyEventIds.delete(id);
+  return snapshot;
+}
+
+/** @deprecated Use snapshotAndClearDirtyIssueIds() to avoid race conditions */
 export function clearDirtyIssueIds(): void {
   dirtyIssueIds.clear();
 }
 
+/** @deprecated Use snapshotAndClearDirtyIssuePlanIds() to avoid race conditions */
 export function clearDirtyIssuePlanIds(): void {
   dirtyIssuePlanIds.clear();
 }
 
+/** @deprecated Use snapshotAndClearDirtyEventIds() to avoid race conditions */
 export function clearDirtyEventIds(): void {
   dirtyEventIds.clear();
 }

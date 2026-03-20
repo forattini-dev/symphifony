@@ -8,6 +8,7 @@ import { cleanWorkspace } from "../domains/workspace.ts";
 import { TARGET_ROOT } from "../concerns/constants.ts";
 import { now } from "../concerns/helpers.ts";
 import { logger } from "../concerns/logger.ts";
+import { parseDiffStats, syncIssueDiffStatsToStore } from "../domains/workspace.ts";
 
 export type MergeWorkspaceInput = {
   issue: IssueEntry;
@@ -56,12 +57,8 @@ export async function mergeWorkspaceCommand(
         `git diff --shortstat "${issue.baseBranch}"..."${issue.branchName}"`,
         { encoding: "utf8", cwd: TARGET_ROOT, stdio: "pipe", timeout: 10_000 },
       );
-      const addMatch = stat.match(/(\d+) insertion/);
-      const delMatch = stat.match(/(\d+) deletion/);
-      const filesMatch = stat.match(/(\d+) file/);
-      issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
-      issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
-      issue.filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+      parseDiffStats(issue, stat);
+      await syncIssueDiffStatsToStore(issue);
     } catch { /* non-critical */ }
   }
 

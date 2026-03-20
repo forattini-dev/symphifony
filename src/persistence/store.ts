@@ -49,9 +49,9 @@ import {
   getDirtyIssueIds,
   getDirtyIssuePlanIds,
   getDirtyEventIds,
-  clearDirtyIssueIds,
-  clearDirtyIssuePlanIds,
-  clearDirtyEventIds,
+  snapshotAndClearDirtyIssueIds,
+  snapshotAndClearDirtyIssuePlanIds,
+  snapshotAndClearDirtyEventIds,
   markAllIssuesDirty,
   markAllIssuePlansDirty,
   markAllEventsDirty,
@@ -313,7 +313,8 @@ export async function persistState(state: RuntimeState): Promise<void> {
     } satisfies RuntimeStateRecord);
   }
 
-  const dirtyIssues = getDirtyIssueIds();
+  // Snapshot dirty IDs before iterating to avoid losing IDs added during persist
+  const dirtyIssues = issueStateResource ? snapshotAndClearDirtyIssueIds() : new Set<string>();
   if (issueStateResource && dirtyIssues.size > 0) {
     for (const issue of state.issues) {
       if (!dirtyIssues.has(issue.id)) continue;
@@ -334,10 +335,9 @@ export async function persistState(state: RuntimeState): Promise<void> {
         logger.warn(`Failed to persist issue ${issue.id}: ${String(error)}`);
       }
     }
-    clearDirtyIssueIds();
   }
 
-  const dirtyIssuePlans = getDirtyIssuePlanIds();
+  const dirtyIssuePlans = issuePlanResource ? snapshotAndClearDirtyIssuePlanIds() : new Set<string>();
   if (issuePlanResource && dirtyIssuePlans.size > 0) {
     for (const issue of state.issues) {
       if (!dirtyIssuePlans.has(issue.id)) continue;
@@ -352,16 +352,14 @@ export async function persistState(state: RuntimeState): Promise<void> {
         logger.warn(`Failed to persist issue plan ${issue.id}: ${String(error)}`);
       }
     }
-    clearDirtyIssuePlanIds();
   }
 
-  const dirtyEvents = getDirtyEventIds();
+  const dirtyEvents = eventStateResource ? snapshotAndClearDirtyEventIds() : new Set<string>();
   if (eventStateResource && dirtyEvents.size > 0) {
     for (const event of state.events) {
       if (!dirtyEvents.has(event.id)) continue;
       await eventStateResource.replace(event.id, event satisfies RuntimeEvent);
     }
-    clearDirtyEventIds();
   }
 
   // Push state to connected WebSocket clients

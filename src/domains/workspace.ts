@@ -365,6 +365,64 @@ export function parseDiffStats(issue: IssueEntry, raw: string): void {
   issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
 }
 
+export async function syncIssueDiffStatsToStore(issue: IssueEntry): Promise<void> {
+  if (!issue?.id) return;
+
+  const { getIssueStateResource } = await import("../persistence/store.ts");
+  const issueResource = getIssueStateResource();
+  if (!issueResource) return;
+
+  const toNumber = (value: unknown): number => {
+    const parsed = typeof value === "number" ? value : Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const nextLinesAdded = toNumber(issue.linesAdded);
+  const nextLinesRemoved = toNumber(issue.linesRemoved);
+  const nextFilesChanged = toNumber(issue.filesChanged);
+
+  if (nextLinesAdded === 0 && nextLinesRemoved === 0 && nextFilesChanged === 0 && !issue.branchName) {
+    return;
+  }
+
+  const current = await (issueResource as any).get?.(issue.id).catch(() => null) as
+    | null
+    | { linesAdded?: unknown; linesRemoved?: unknown; filesChanged?: unknown };
+
+  const previousLinesAdded = toNumber(current?.linesAdded);
+  const previousLinesRemoved = toNumber(current?.linesRemoved);
+  const previousFilesChanged = toNumber(current?.filesChanged);
+
+  const resourcePatch = {
+    linesAdded: nextLinesAdded,
+    linesRemoved: nextLinesRemoved,
+    filesChanged: nextFilesChanged,
+    branchName: issue.branchName,
+  };
+
+  await (issueResource as any).patch(issue.id, resourcePatch);
+
+  const add = (issueResource as any).add;
+  const sub = (issueResource as any).sub;
+  if (typeof add !== "function" || typeof sub !== "function") return;
+
+  const applyDelta = async (field: string, delta: number): Promise<void> => {
+    if (delta > 0) {
+      await add.call(issueResource, issue.id, field, delta);
+      return;
+    }
+    if (delta < 0) {
+      await sub.call(issueResource, issue.id, field, Math.abs(delta));
+    }
+  };
+
+  await Promise.all([
+    applyDelta("linesAdded", nextLinesAdded - previousLinesAdded),
+    applyDelta("linesRemoved", nextLinesRemoved - previousLinesRemoved),
+    applyDelta("filesChanged", nextFilesChanged - previousFilesChanged),
+  ]);
+}
+
 // ── Workspace merge ─────────────────────────────────────────────────────────
 
 export interface MergeResult {

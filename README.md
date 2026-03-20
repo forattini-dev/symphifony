@@ -239,18 +239,37 @@ FIFONY_AGENT_MAX_TURNS=4
 
 fifony is split into an explicit runtime contract:
 
-- **Persistence is filesystem native and durable**: [s3db.js](https://github.com/forattini-dev/s3db.js) stores issues, events, sessions, settings, and runtime metadata in `.fifony/s3db/` only. There is no external DB dependency.
-- **Eventual consistency is explicit**: `EventualConsistencyPlugin` is used to keep analytical counters and derived metrics updated through async batching. This lets us handle parallel processing without blocking the hot execution path.
-- **State machine is the single source of truth for issue behavior**: `StateMachinePlugin` owns all issue states, transitions, actions, guards, and transitions triggers (Plan/Queue/Run/Review/Done, terminal handling, retry eligibility, rollback, interruption recovery). API handlers and commands only ask the state machine to transition; the workflow rules stay centralized.
-- **Queue is persistence-backed and simple**: `s3queue` is used as the runtime queue adapter with polling. Workers consume planning/execution/review work from queue state and can run concurrently according to configured concurrency.
-- **Agent abstraction is a smart wrapper over local CLIs**: fifony does not own model logic. It wraps whatever CLI is available on the host (`claude`, `codex`, or others added by adapters). For each stage we can choose `cli`, `model`, and `effort` independently (planning, execute, review).
-- **Prompt contracts are first-class behavior**: each stage uses curated prompts and schemas to force the same agent to behave consistently (plan shape, execution format, review rigor, failure reporting).
-- **Interruption-safe execution**: orchestration is designed for long-running CLI calls; the controller keeps side-channel visibility and handles restart/recovery using persisted state so execution can continue after process interrupts.
-- **Isolation by issue workspace**: each issue gets its own Git worktree/workspace and runs in an isolated path, which prevents cross-agent file conflicts and lets multiple agents operate in parallel on the same repository.
-
-- **Token tracking**: O(1) in-memory ledger, no I/O on the hot path. Per-phase and per-model breakdown. Daily and hourly rollups via the `EventualConsistencyPlugin`. Cost estimates when the provider reports them.
-- **Capability routing**: fifony infers task type from the issue description and target file paths. It derives `capability:<category>` and `overlay:<name>` labels for queue triage. When `paths[]` is omitted, routing falls back to path mentions in the issue text and files changed in an existing workspace.
-- **Graceful shutdown**: running issues are marked `Interrupted` on SIGTERM. They resume from the last completed turn on the next boot.
+- **Persistence layer (s3db.js + resource config):**
+  - Issues, events, sessions, states, and settings are first-class resources under `.fifony/s3db/`.
+  - No external DB is required in normal mode.
+- **Eventual consistency analytics:**  
+  - `EventualConsistencyPlugin` is enabled for issue metrics and supports counters, incremental updates, and analytics rollups.
+  - Metrics tracked include:
+    - `usage.tokens` and `tokenUsage` by phase/model,
+    - `eventsCount`,
+    - `linesAdded`, `linesRemoved`, `filesChanged`.
+  - We query this through `getLastNDays/getLastNHours` to feed `/api/analytics/lines` and `/api/analytics/tokens`.
+- **Issue lifecycle in StateMachinePlugin (single source of truth):**
+  - States, guarded transitions, actions, and triggers are centralized in `issue-state-machine.ts`.
+  - Public commands (`approve`, `execute`, `queue`, `retry`, `merge`) only emit transitions; the workflow behavior is not duplicated in route handlers.
+  - The machine also owns interruption recovery, retry delays, terminal transitions, and rollback edges.
+- **Queue and execution pool:**  
+  - `s3queue` is the runtime queue adapter with polling workers.
+  - Workers consume planning/execution/review jobs and run concurrently respecting configured concurrency.
+- **Agent abstraction:**  
+  - fifony wraps local CLIs, not proprietary model logic.
+  - Per stage we configure `cli`, `model`, and `reasoningEffort` independently (`planning`, `execute`, `review`).
+  - This lets you swap providers by issue without changing core orchestration.
+- **Per-issue isolation:**  
+  - Each issue has its own execution workspace and Git worktree branch.
+  - That avoids file conflicts and enables parallel work on the same repo safely.
+- **Review and execution observability:**  
+  - Diff stats are computed from git `--stat` output (`linesAdded`, `linesRemoved`, `filesChanged`).
+  - Runtime events are emitted for state transitions, review path decisions, and merge outcomes.
+  - CLI output and audit trails are stored to make mid-run interruptions recoverable.
+- **Capability routing:**  
+  - Routing derives issue labels (`capability:<category>`, `overlay:<name>`) from issue text and inferred file paths.
+  - This improves queue triage and worker assignment.
 
 ---
 
