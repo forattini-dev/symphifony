@@ -1,12 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildRuntimeState, deriveConfig } from "../src/agent/issues.ts";
+import { buildRuntimeState } from "../src/domains/issues.ts";
+import { deriveConfig } from "../src/domains/config.ts";
 import {
   SETTING_ID_PROJECT_NAME,
   buildQueueTitle as buildBackendQueueTitle,
   detectProjectName,
   resolveProjectMetadata,
-} from "../src/agent/project-meta.ts";
+} from "../src/domains/project.ts";
 import {
   buildProjectDraft,
   buildQueueTitle as buildFrontendQueueTitle,

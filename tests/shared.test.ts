@@ -15,8 +15,8 @@ import {
   resolveEffortForProvider,
   extractValidationCommands,
   buildExecutionPayload,
-} from "../src/agent/adapters/shared.ts";
-import type { IssuePlan, IssueEntry, AgentProviderDefinition } from "../src/agent/types.ts";
+} from "../src/agents/adapters/shared.ts";
+import type { IssuePlan, IssueEntry, AgentProviderDefinition } from "../src/types.ts";
 
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 

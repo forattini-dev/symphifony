@@ -10,17 +10,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildClaudeCommand,
-  buildCodexCommand,
   extractPlanDirs,
   CLAUDE_RESULT_SCHEMA,
   REVIEW_RESULT_SCHEMA,
-} from "../src/agent/adapters/commands.ts";
+} from "../src/agents/adapters/commands.ts";
+import { buildClaudeCommand } from "../src/agents/adapters/claude.ts";
+import { buildCodexCommand } from "../src/agents/adapters/codex.ts";
 import {
   getProviderDefaultCommand,
   resolveAgentCommand,
-} from "../src/agent/providers.ts";
-import type { IssuePlan } from "../src/agent/types.ts";
+} from "../src/agents/providers.ts";
+import type { IssuePlan } from "../src/types.ts";
 
 // ── buildClaudeCommand ────────────────────────────────────────────────────────
 
@@ -110,17 +110,17 @@ describe("buildCodexCommand", () => {
   });
 
   it("includes reasoning_effort config when provided", () => {
-    const cmd = buildCodexCommand({ reasoningEffort: "high" });
+    const cmd = buildCodexCommand({ effort: "high" });
     assert.ok(cmd.includes(`reasoning_effort="high"`), "has reasoning_effort high");
   });
 
   it("includes reasoning_effort medium config", () => {
-    const cmd = buildCodexCommand({ reasoningEffort: "medium" });
+    const cmd = buildCodexCommand({ effort: "medium" });
     assert.ok(cmd.includes(`reasoning_effort="medium"`), "has reasoning_effort medium");
   });
 
   it("includes reasoning_effort low config", () => {
-    const cmd = buildCodexCommand({ reasoningEffort: "low" });
+    const cmd = buildCodexCommand({ effort: "low" });
     assert.ok(cmd.includes(`reasoning_effort="low"`), "has reasoning_effort low");
   });
 
@@ -130,7 +130,7 @@ describe("buildCodexCommand", () => {
   });
 
   it("omits reasoning_effort when empty string", () => {
-    const cmd = buildCodexCommand({ reasoningEffort: "" });
+    const cmd = buildCodexCommand({ effort: "" });
     assert.ok(!cmd.includes("reasoning_effort="), "no reasoning_effort for empty string");
   });
 
@@ -148,7 +148,7 @@ describe("buildCodexCommand", () => {
   it("combines model + reasoningEffort + addDirs correctly", () => {
     const cmd = buildCodexCommand({
       model: "o4-mini",
-      reasoningEffort: "high",
+      effort: "high",
       addDirs: ["/workspace/src"],
     });
     assert.ok(cmd.includes("--model o4-mini"), "has model");
@@ -158,11 +158,13 @@ describe("buildCodexCommand", () => {
 
   it("reasoning_effort config appears before --add-dir flags", () => {
     const cmd = buildCodexCommand({
-      reasoningEffort: "medium",
+      effort: "medium",
       addDirs: ["/src"],
     });
-    const effortIdx = cmd.indexOf("reasoning_effort=");
+    const effortIdx = cmd.indexOf('reasoning_effort="medium"');
     const addDirIdx = cmd.indexOf("--add-dir");
+    assert.ok(effortIdx >= 0, "reasoning_effort should be present");
+    assert.ok(addDirIdx >= 0, "add-dir should be present");
     assert.ok(effortIdx < addDirIdx, "reasoning_effort precedes --add-dir");
   });
 });

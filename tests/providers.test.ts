@@ -11,8 +11,8 @@ import {
   resolveEffort,
   resolveAgentCommand,
   getProviderDefaultCommand,
-} from "../src/agent/providers.ts";
-import type { EffortConfig } from "../src/agent/types.ts";
+} from "../src/agents/providers.ts";
+import type { EffortConfig } from "../src/types.ts";
 
 // ── normalizeAgentProvider() ──────────────────────────────────────────────────
 

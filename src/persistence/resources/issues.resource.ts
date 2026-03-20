@@ -1,0 +1,283 @@
+import { S3DB_ISSUE_RESOURCE } from "../../concerns/constants.ts";
+import type { JsonRecord, RuntimeState } from "../../types.ts";
+import { TERMINAL_STATES } from "../../concerns/constants.ts";
+import { loadAgentPipelineSnapshotForIssue, loadAgentSessionSnapshotsForIssue } from "../../agents/agent.ts";
+import { getApiRuntimeContextOrThrow } from "../plugins/api-runtime-context.ts";
+import { persistState } from "../store.ts";
+import { getEffectiveAgentProviders } from "../../agents/providers.ts";
+import { addEvent, handleStatePatch } from "../../domains/issues.ts";
+import { now } from "../../concerns/helpers.ts";
+import { getContainer } from "../container.ts";
+import { createIssueCommand } from "../../commands/create-issue.command.ts";
+import { cancelIssueCommand } from "../../commands/cancel-issue.command.ts";
+import { transitionIssueCommand } from "../../commands/transition-issue.command.ts";
+
+function getIssueId(c: unknown): string | null {
+  if (!c || typeof c !== "object" || !("req" in c) || !c.req || typeof (c as { req: unknown }).req !== "object") {
+    return null;
+  }
+  const req = (c as { req: { param: (name: string) => unknown } }).req;
+  const value = req.param("id");
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function findIssue(state: RuntimeState, issueId: string) {
+  return state.issues.find((issue) => issue.id === issueId || issue.identifier === issueId);
+}
+
+async function getIssuePipeline(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  const issueId = getIssueId(c);
+  if (!issueId) {
+    return { status: 400, body: { ok: false, error: "Issue id is required." } };
+  }
+
+  const issue = findIssue(context.state, issueId);
+  if (!issue) {
+    return { status: 404, body: { ok: false, error: "Issue not found" } };
+  }
+
+  const providers = getEffectiveAgentProviders(context.state, issue, null);
+  const pipeline = await loadAgentPipelineSnapshotForIssue(issue, providers);
+  return { body: { ok: true, issueId: issue.id, pipeline } };
+}
+
+async function getIssueSessions(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  const issueId = getIssueId(c);
+  if (!issueId) {
+    return { status: 400, body: { ok: false, error: "Issue id is required." } };
+  }
+
+  const issue = findIssue(context.state, issueId);
+  if (!issue) {
+    return { status: 404, body: { ok: false, error: "Issue not found" } };
+  }
+
+  const providers = getEffectiveAgentProviders(context.state, issue, null);
+  const pipeline = await loadAgentPipelineSnapshotForIssue(issue, providers);
+  const sessions = await loadAgentSessionSnapshotsForIssue(issue, providers, pipeline, null);
+  return { body: { ok: true, issueId: issue.id, pipeline, sessions } };
+}
+
+async function patchIssueState(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  const issueId = getIssueId(c);
+  if (!issueId) {
+    return { status: 400, body: { ok: false, error: "Issue id is required." } };
+  }
+
+  const issue = findIssue(context.state, issueId);
+  if (!issue) {
+    return { status: 404, body: { ok: false, error: "Issue not found" } };
+  }
+
+  try {
+    const payload = await (c as { req: { json: () => Promise<unknown> } }).req.json() as JsonRecord;
+    await handleStatePatch(context.state, issue, payload);
+    await persistState(context.state);
+    return { body: { ok: true, issue } };
+  } catch (error) {
+    return { status: 400, body: { ok: false, error: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function retryIssue(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  const issueId = getIssueId(c);
+  if (!issueId) {
+    return { status: 400, body: { ok: false, error: "Issue id is required." } };
+  }
+
+  const issue = findIssue(context.state, issueId);
+  if (!issue) {
+    return { status: 404, body: { ok: false, error: "Issue not found" } };
+  }
+  const container = getContainer();
+
+  if (TERMINAL_STATES.has(issue.state)) {
+    issue.lastError = undefined;
+    issue.nextRetryAt = undefined;
+    await transitionIssueCommand(
+      { issue, target: "Queued", note: "Manual retry requested." },
+      container,
+    );
+  } else {
+    issue.nextRetryAt = undefined;
+    issue.lastError = undefined;
+    issue.updatedAt = now();
+  }
+
+  addEvent(context.state, issue.id, "manual", `Manual retry requested for ${issue.id}.`);
+  await persistState(context.state);
+  return { body: { ok: true, issue } };
+}
+
+async function createIssue(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  try {
+    const payload = await (c as { req: { json: () => Promise<unknown> } }).req.json() as JsonRecord;
+    const container = getContainer();
+    const { issue } = await createIssueCommand(
+      { payload, state: context.state },
+      container,
+    );
+    return { body: { ok: true, issue } };
+  } catch (error) {
+    return { status: 400, body: { ok: false, error: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function cancelIssue(c: unknown) {
+  const context = getApiRuntimeContextOrThrow();
+  const issueId = getIssueId(c);
+  if (!issueId) {
+    return { status: 400, body: { ok: false, error: "Issue id is required." } };
+  }
+
+  const issue = findIssue(context.state, issueId);
+  if (!issue) {
+    return { status: 404, body: { ok: false, error: "Issue not found" } };
+  }
+
+  await cancelIssueCommand(
+    { issue },
+    getContainer(),
+  );
+  addEvent(context.state, issue.id, "manual", `Manual cancel requested for ${issue.id}.`);
+  await persistState(context.state);
+  return { body: { ok: true, issue } };
+}
+
+export default {
+  name: S3DB_ISSUE_RESOURCE,
+  attributes: {
+    id: "string|required",
+    identifier: "string|required",
+    title: "string|required",
+    description: "string|optional",
+    priority: "number|required",
+    state: "string|required",
+    branchName: "string|optional",
+    url: "string|optional",
+    assigneeId: "string|optional",
+    labels: "json|required",
+    paths: "json|optional",
+    inferredPaths: "json|optional",
+    capabilityCategory: "string|optional",
+    capabilityOverlays: "json|optional",
+    capabilityRationale: "json|optional",
+    blockedBy: "json|required",
+    assignedToWorker: "boolean|required",
+    createdAt: "datetime|required",
+    updatedAt: "datetime|required",
+    history: "json|required",
+    startedAt: "datetime|optional",
+    completedAt: "datetime|optional",
+    attempts: "number|required",
+    maxAttempts: "number|required",
+    nextRetryAt: "datetime|optional",
+    workspacePath: "string|optional",
+    worktreePath: "string|optional",
+    baseBranch: "string|optional",
+    headCommitAtStart: "string|optional",
+    mergedAt: "datetime|optional",
+    mergeResult: "json|optional",
+    mergedReason: "string|optional",
+    cancelledReason: "string|optional",
+    reviewingAt: "datetime|optional",
+    workspacePreparedAt: "datetime|optional",
+    lastError: "string|optional",
+    durationMs: "number|optional",
+    commandExitCode: "number|optional",
+    commandOutputTail: "string|optional",
+    terminalWeek: "string|optional",
+    usage: "json|optional",
+    tokenUsage: "json|optional",
+    tokensByPhase: "json|optional",
+    tokensByModel: "json|optional",
+    plan: "json|optional",
+    planHistory: "json|optional",
+    planVersion: "number|optional",
+    planningStatus: "string|optional",
+    planningStartedAt: "datetime|optional",
+    planningError: "string|optional",
+    executeAttempt: "number|optional",
+    reviewAttempt: "number|optional",
+    issueType: "string|optional",
+    eventsCount: "number|optional",
+    images: "json|optional",
+    linesAdded: "number|optional",
+    linesRemoved: "number|optional",
+    filesChanged: "number|optional",
+    effort: "json|optional",
+  },
+  partitions: {
+    byState: { fields: { state: "string" } },
+    byCapabilityCategory: { fields: { capabilityCategory: "string" } },
+    byStateAndCapability: {
+      fields: { state: "string", capabilityCategory: "string" },
+    },
+    byTerminalWeek: { fields: { terminalWeek: "string" } },
+  },
+  asyncPartitions: true,
+  behavior: "body-overflow",
+  paranoid: false,
+  timestamps: true,
+  api: {
+    auth: false,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    description: "Issue registry for orchestration runtime",
+    "POST /create": async (c: unknown) => {
+      const result = await createIssue(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return c.json(result.body, 201);
+    },
+    "POST /": async (c: unknown) => {
+      const result = await createIssue(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return c.json(result.body, 201);
+    },
+    "GET /:id/pipeline": async (c: unknown) => {
+      const result = await getIssuePipeline(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return result.body;
+    },
+    "GET /:id/sessions": async (c: unknown) => {
+      const result = await getIssueSessions(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return result.body;
+    },
+    "POST /:id/state": async (c: unknown) => {
+      const result = await patchIssueState(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return result.body;
+    },
+    "POST /:id/retry": async (c: unknown) => {
+      const result = await retryIssue(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return result.body;
+    },
+    "POST /:id/cancel": async (c: unknown) => {
+      const result = await cancelIssue(c);
+      if (result.status) {
+        return c.json(result.body, result.status);
+      }
+      return result.body;
+    },
+  },
+};

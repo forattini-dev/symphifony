@@ -4,7 +4,8 @@ import { api } from "../api";
 import { SETTINGS_QUERY_KEY, upsertSettingPayload } from "../hooks";
 
 const OnboardingWizard = lazy(() => import("./OnboardingWizard"));
-import { Sun, Moon, Wifi, WifiOff, CircleDot, Palette, Cpu, Radio, Download, RefreshCw, Smartphone, Bell, BellOff, Wand2 } from "lucide-react";
+import { Sun, Moon, Wifi, WifiOff, CircleDot, Palette, Cpu, Radio, Download, RefreshCw, Smartphone, Bell, BellOff, Wand2, Volume2, VolumeX } from "lucide-react";
+import { NOTIFICATION_GROUPS } from "../lib/notification-catalog.js";
 
 const PINNED_THEMES = ["auto", "light", "dark"];
 const ALL_DAISYUI_THEMES = [
@@ -200,68 +201,111 @@ function NotificationsSection({ notifications }) {
 
   const isDenied = notifications.permission === "denied";
   const isGranted = notifications.permission === "granted";
+  const eventSettings = notifications.eventSettings || [];
 
   return (
-    <div className="card bg-base-200">
-      <div className="card-body gap-4 p-6">
-        <h3 className="card-title text-sm flex items-center gap-2">
-          <Bell className="size-4 opacity-50" />
-          Desktop Notifications
-        </h3>
-        <p className="text-xs opacity-50">
-          Get notified when issues change state — reviews needed, agents blocked, work completed.
-        </p>
+    <div className="space-y-4">
+      {/* Master toggle */}
+      <div className="card bg-base-200">
+        <div className="card-body gap-4 p-6">
+          <h3 className="card-title text-sm flex items-center gap-2">
+            <Bell className="size-4 opacity-50" />
+            Desktop Notifications
+          </h3>
+          <p className="text-xs opacity-50">
+            Get notified when issues change state — reviews needed, agents blocked, work completed.
+          </p>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-box bg-base-300 p-3">
-            <div className="text-xs opacity-50">Permission</div>
-            <div className={`text-sm font-medium mt-1 ${isGranted ? "text-success" : isDenied ? "text-error" : "text-warning"}`}>
-              {notifications.permission === "default" ? "Not asked yet" : notifications.permission}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-box bg-base-300 p-3">
+              <div className="text-xs opacity-50">Permission</div>
+              <div className={`text-sm font-medium mt-1 ${isGranted ? "text-success" : isDenied ? "text-error" : "text-warning"}`}>
+                {notifications.permission === "default" ? "Not asked yet" : notifications.permission}
+              </div>
+            </div>
+            <div className="rounded-box bg-base-300 p-3">
+              <div className="text-xs opacity-50">Status</div>
+              <div className={`text-sm font-medium mt-1 ${notifications.enabled ? "text-success" : ""}`}>
+                {notifications.enabled ? "Enabled" : "Disabled"}
+              </div>
             </div>
           </div>
-          <div className="rounded-box bg-base-300 p-3">
-            <div className="text-xs opacity-50">Status</div>
-            <div className={`text-sm font-medium mt-1 ${notifications.enabled ? "text-success" : ""}`}>
-              {notifications.enabled ? "Enabled" : "Disabled"}
-            </div>
-          </div>
-        </div>
 
-        <div className="flex flex-wrap gap-2">
-          {!isGranted && !isDenied && (
-            <button
-              className="btn btn-sm btn-primary gap-1"
-              onClick={notifications.requestPermission}
-            >
-              <Bell className="size-3.5" /> Enable notifications
-            </button>
-          )}
-          {isGranted && (
-            <label className="label cursor-pointer gap-2">
-              <span className="text-sm">Notify on state changes</span>
-              <input
-                type="checkbox"
-                className="toggle toggle-sm toggle-primary"
-                checked={notifications.enabled}
-                onChange={(e) => notifications.setEnabled(e.target.checked)}
-              />
-            </label>
-          )}
-          {isDenied && (
-            <p className="text-xs text-error">
-              Notifications were denied. Reset permission in your browser settings to re-enable.
-            </p>
-          )}
-          {isGranted && notifications.enabled && (
-            <button
-              className="btn btn-xs btn-ghost"
-              onClick={() => new Notification("fifony", { body: "Notifications are working!", icon: "/icon.svg" })}
-            >
-              Send test
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {!isGranted && !isDenied && (
+              <button className="btn btn-sm btn-primary gap-1" onClick={notifications.requestPermission}>
+                <Bell className="size-3.5" /> Enable notifications
+              </button>
+            )}
+            {isGranted && (
+              <label className="label cursor-pointer gap-2">
+                <span className="text-sm">Notify on state changes</span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-sm toggle-primary"
+                  checked={notifications.enabled}
+                  onChange={(e) => notifications.setEnabled(e.target.checked)}
+                />
+              </label>
+            )}
+            {isDenied && (
+              <p className="text-xs text-error">
+                Notifications were denied. Reset permission in your browser settings to re-enable.
+              </p>
+            )}
+            {isGranted && notifications.enabled && (
+              <button
+                className="btn btn-xs btn-ghost"
+                onClick={() => new Notification("fifony", { body: "Notifications are working!", icon: "/icon.svg" })}
+              >
+                Send test
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Per-event toggles */}
+      {isGranted && notifications.enabled && eventSettings.length > 0 && (
+        <div className="card bg-base-200">
+          <div className="card-body gap-4 p-6">
+            <h3 className="card-title text-sm flex items-center gap-2">
+              <Wand2 className="size-4 opacity-50" />
+              Event Types
+            </h3>
+            <p className="text-xs opacity-50">
+              Choose which events trigger notifications.
+            </p>
+
+            {NOTIFICATION_GROUPS.map((group) => {
+              const groupEvents = eventSettings.filter((e) => e.group === group.id);
+              if (groupEvents.length === 0) return null;
+              return (
+                <div key={group.id} className="space-y-1">
+                  <div className="text-xs font-semibold opacity-40 uppercase tracking-wider">{group.label}</div>
+                  {groupEvents.map((event) => (
+                    <label key={event.id} className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-base-300 transition-colors cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-xs toggle-primary"
+                        checked={event.enabled}
+                        onChange={(e) => notifications.setEventEnabled(event.id, e.target.checked)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium flex items-center gap-2">
+                          {event.label}
+                          {event.sound && <Volume2 className="size-3 opacity-30" title="Plays sound" />}
+                        </div>
+                        <div className="text-xs opacity-40">{event.description}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

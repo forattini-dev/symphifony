@@ -32,81 +32,44 @@ function formatModelName(slug) {
 // ── Slot live output ────────────────────────────────────────────────────────
 
 function SlotLiveInfo({ issueId, issueState }) {
-  const [meta, setMeta] = useState(null);
-  const [logText, setLogText] = useState("");
-  const [logSize, setLogSize] = useState(0);
+  const [live, setLive] = useState(null);
   const [expanded, setExpanded] = useState(true);
   const logRef = useRef(null);
-  const esRef = useRef(null);
 
-  // Poll metadata (elapsed, pid, etc) every 3s
-  const fetchMeta = useCallback(async () => {
+  const fetchLive = useCallback(async () => {
     try {
       const res = await api.get(`/live/${encodeURIComponent(issueId)}`);
-      setMeta(res);
+      setLive(res);
     } catch { /* ignore */ }
   }, [issueId]);
 
   useEffect(() => {
-    fetchMeta();
-    const interval = setInterval(fetchMeta, 3000);
+    fetchLive();
+    const interval = setInterval(fetchLive, 2000);
     return () => clearInterval(interval);
-  }, [fetchMeta]);
-
-  // Stream log output via SSE
-  useEffect(() => {
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    setLogText("");
-    setLogSize(0);
-
-    const es = new EventSource(`/api/live/${encodeURIComponent(issueId)}/stream`);
-    esRef.current = es;
-
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "init") {
-          setLogText(msg.text || "");
-          setLogSize(msg.size || 0);
-        } else if (msg.type === "chunk") {
-          setLogText((prev) => {
-            const combined = prev + (msg.text || "");
-            // Keep last 24KB to avoid memory bloat
-            return combined.length > 24_000 ? combined.slice(-24_000) : combined;
-          });
-          setLogSize(msg.size || 0);
-        } else if (msg.type === "done") {
-          es.close();
-        }
-      } catch {}
-    };
-
-    es.onerror = () => { es.close(); esRef.current = null; };
-
-    return () => { es.close(); esRef.current = null; };
-  }, [issueId]);
+  }, [fetchLive]);
 
   // Auto-scroll to bottom when new content arrives
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [logText]);
+  }, [live?.logTail]);
 
-  const elapsed = meta && Number.isFinite(Number(meta.elapsed))
-    ? Number(meta.elapsed)
-    : meta?.startedAt ? Math.max(Date.now() - new Date(meta.startedAt).getTime(), 0) : 0;
-  const logKb = (logSize / 1024).toFixed(1);
+  const elapsed = live && Number.isFinite(Number(live.elapsed))
+    ? Number(live.elapsed)
+    : live?.startedAt ? Math.max(Date.now() - new Date(live.startedAt).getTime(), 0) : 0;
+  const logKb = live?.logSize ? (live.logSize / 1024).toFixed(1) : "0";
 
   return (
     <div className="mt-2 space-y-1.5">
       <div className="flex items-center gap-3 text-xs opacity-60">
-        {meta && (
+        {live && (
           <>
             <span className="flex items-center gap-1"><Clock className="size-3" />{formatDuration(elapsed)}</span>
             <span>Log: {logKb} KB</span>
-            {meta.agentPid && <span>PID {meta.agentPid}</span>}
-            {meta.agentAlive === false && meta.agentPid && <span className="text-error">dead</span>}
+            {live.agentPid && <span>PID {live.agentPid}</span>}
+            {live.agentAlive === false && live.agentPid && <span className="text-error">dead</span>}
           </>
         )}
         <button
@@ -123,7 +86,7 @@ function SlotLiveInfo({ issueId, issueState }) {
           ref={logRef}
           className="text-[11px] bg-base-300 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto font-mono opacity-80 leading-relaxed break-all w-full max-w-full"
         >
-          {logText || <span className="opacity-30">Waiting for output…</span>}
+          {live?.logTail || <span className="opacity-30">Waiting for output…</span>}
         </pre>
       )}
     </div>

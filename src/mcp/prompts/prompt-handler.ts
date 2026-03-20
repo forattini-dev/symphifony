@@ -1,5 +1,5 @@
-import { renderPrompt } from "../../prompting.js";
-import { buildIntegrationSnippet } from "../../integrations/catalog.js";
+import { renderPrompt } from "../../agents/prompting.js";
+import { buildIntegrationSnippet } from "../../agents/integrations/catalog.js";
 import { resolveTaskCapabilities } from "../../routing/capability-resolver.js";
 import { getIssue, getIssues, listEvents, WORKSPACE_ROOT } from "../database.js";
 import { apiGet, apiPost } from "../api-client.js";

@@ -10,16 +10,44 @@ import IssueDetailDrawer from "../components/IssueDetailDrawer";
 import PwaBanner from "../components/PwaBanner";
 import Confetti from "../components/Confetti";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { CheckCircle, AlertTriangle, Info, Music, RotateCcw, ChevronDown } from "lucide-react";
-import OnboardingParticles from "../components/OnboardingParticles";
+import { CheckCircle, AlertTriangle, Info, RotateCcw, ChevronDown } from "lucide-react";
 
 const KeyboardShortcutsHelp = lazy(() => import("../components/KeyboardShortcutsHelp"));
 
 function ViewTransition({ children }) {
   const routerState = useRouterState();
-  const key = routerState.location.pathname;
+  const pathname = routerState.location.pathname;
+  const containerRef = useRef(null);
+  const prevPathRef = useRef(pathname);
+
+  useEffect(() => {
+    if (prevPathRef.current === pathname) return;
+    prevPathRef.current = pathname;
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Native View Transitions API (Chrome 111+)
+    if (document.startViewTransition) {
+      document.startViewTransition(() => {
+        el.style.opacity = "1";
+      });
+      return;
+    }
+
+    // Fallback: quick CSS fade
+    el.style.opacity = "0";
+    el.style.transform = "translateY(4px)";
+    requestAnimationFrame(() => {
+      el.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+      el.style.opacity = "1";
+      el.style.transform = "translateY(0)";
+      const cleanup = () => { el.style.transition = ""; };
+      el.addEventListener("transitionend", cleanup, { once: true });
+    });
+  }, [pathname]);
+
   return (
-    <div key={key} className="flex-1 flex flex-col min-h-0 animate-view-enter">
+    <div ref={containerRef} className="flex-1 flex flex-col min-h-0">
       {children}
     </div>
   );
@@ -59,8 +87,30 @@ function RootLayout() {
 
   useKeyboardShortcuts(shortcuts);
 
-  // Only show skeleton on very first load (no data yet, not errored)
-  if (ctx.runtime.isLoading && !ctx.runtime.data && !ctx.runtime.isError) {
+  // Splash screen with minimum duration so it doesn't flash
+  const [splashDone, setSplashDone] = useState(false);
+  const [splashFading, setSplashFading] = useState(false);
+  const splashTimerRef = useRef(null);
+  const isFirstLoad = ctx.runtime.isLoading && !ctx.runtime.data && !ctx.runtime.isError;
+
+  useEffect(() => {
+    if (!splashDone && !splashTimerRef.current) {
+      splashTimerRef.current = setTimeout(() => {
+        setSplashFading(true);
+        setTimeout(() => setSplashDone(true), 400); // fade-out duration
+      }, 1000); // minimum splash duration
+    }
+    return () => {};
+  }, [splashDone]);
+
+  if (!splashDone && isFirstLoad) {
+    return <LoadingHero />;
+  }
+  if (!splashDone && splashFading) {
+    return <LoadingHero fadeOut />;
+  }
+  if (!splashDone && !isFirstLoad) {
+    // Data arrived but timer hasn't finished — show splash until timer completes
     return <LoadingHero />;
   }
 
@@ -134,20 +184,41 @@ function RootLayout() {
   );
 }
 
-function LoadingHero() {
+function LoadingHero({ fadeOut = false }) {
   return (
-    <div className="fixed inset-0 z-50 bg-base-100 flex flex-col items-center justify-center overflow-hidden">
-      <OnboardingParticles />
-      <div className="relative z-10 flex flex-col items-center gap-6 animate-fade-in">
-        <div className="relative">
-          <Music className="size-16 sm:size-20 text-primary animate-bounce-in" />
-          <span className="absolute -bottom-1 -right-1 size-5 bg-primary rounded-full animate-ping opacity-50" />
+    <div
+      className="fixed inset-0 z-50 bg-base-100 flex flex-col items-center justify-center overflow-hidden"
+      style={{
+        opacity: fadeOut ? 0 : 1,
+        transition: "opacity 0.4s ease-out",
+      }}
+    >
+      <div className="relative z-10 flex flex-col items-center gap-5">
+        <div className="flex items-end gap-4">
+          <img
+            src="/dinofffaur.png"
+            alt=""
+            className="h-20 sm:h-28 object-contain select-none pointer-events-none"
+            style={{
+              filter: "drop-shadow(0 6px 20px rgba(128, 0, 255, 0.25))",
+              animation: "splash-dino 0.6s cubic-bezier(0.22, 1, 0.36, 1) both",
+            }}
+          />
+          <h1
+            className="text-4xl sm:text-5xl font-bold tracking-tight leading-none pb-1"
+            style={{
+              fontFamily: "'Space Grotesk', system-ui, sans-serif",
+              animation: "splash-title 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both",
+            }}
+          >
+            <span className="text-primary">fifony</span>
+          </h1>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-          <span className="text-primary">fifony</span>
-        </h1>
-        <div className="flex items-center gap-3 text-base-content/50">
-          <span className="loading loading-dots loading-md" />
+        <div
+          className="flex items-center gap-3 text-base-content/40"
+          style={{ animation: "splash-subtitle 0.4s ease-out 0.4s both" }}
+        >
+          <span className="loading loading-dots loading-sm" />
           <span className="text-sm">Warming up the orchestra...</span>
         </div>
       </div>

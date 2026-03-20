@@ -93,14 +93,14 @@ function PhaseBreakdownLarge({ byPhase }) {
           );
         })}
       </div>
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap text-xs">
         {PHASES.map((p) => {
           const tokens = byPhase[p.key]?.totalTokens || 0;
           const pct = total > 0 ? Math.round((tokens / total) * 100) : 0;
           if (tokens === 0) return null;
           return (
-            <span key={p.key} className="flex items-center gap-1.5 text-sm">
-              <span className={`inline-block w-3 h-3 rounded-full ${p.color} shrink-0`} />
+            <span key={p.key} className="flex items-center gap-1">
+              <span className={`inline-block size-2 rounded-full ${p.color} shrink-0`} />
               <span className="opacity-60">{p.label}</span>
               <span className="font-mono font-semibold">{formatTokens(tokens)}</span>
               <span className="opacity-40">({pct}%)</span>
@@ -629,7 +629,7 @@ function AnalyticsPage() {
 
         {/* Section 1: Overview stats */}
         <section>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
             {/* Total tokens */}
             <div className="stat bg-base-200 rounded-box">
               <div className="stat-figure text-primary">
@@ -669,7 +669,7 @@ function AnalyticsPage() {
             </div>
 
             {/* Phase breakdown summary */}
-            <div className="stat bg-base-200 rounded-box">
+            <div className="stat bg-base-200 rounded-box xl:col-span-2 overflow-hidden">
               <div className="stat-figure text-info">
                 <Layers className="size-6" />
               </div>

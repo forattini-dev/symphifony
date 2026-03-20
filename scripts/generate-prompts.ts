@@ -3,10 +3,10 @@ import { join, relative, resolve } from "node:path";
 import { TemplateEngine } from "recker";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const PROMPTS_DIR = join(ROOT, "src", "prompts");
-const OUTPUT_DIR = join(ROOT, "src", "generated");
+const PROMPTS_DIR = join(ROOT, "src", "agents", "prompts");
+const OUTPUT_DIR = join(ROOT, "src", "agents", "generated");
 const OUTPUT_FILE = join(OUTPUT_DIR, "prompts.ts");
-const FIXTURES_DIR = join(ROOT, "src", "fixtures");
+const FIXTURES_DIR = join(ROOT, "src", "agents", "fixtures");
 
 const engine = new TemplateEngine();
 

@@ -74,6 +74,7 @@ export const STATES = [
   "Planning", "Planned", "Queued", "Running",
   "Reviewing", "Reviewed", "Blocked", "Done", "Cancelled"
 ];
+// Must match backend state machine in persistence/plugins/issue-state-machine.ts
 export const ISSUE_STATE_MACHINE = {
   Planning:  ["Planned", "Cancelled"],
   Planned:   ["Queued", "Planning", "Cancelled"],
@@ -82,8 +83,8 @@ export const ISSUE_STATE_MACHINE = {
   Reviewing: ["Reviewed", "Queued", "Blocked"],
   Reviewed:  ["Done", "Queued", "Planning", "Cancelled"],
   Blocked:   ["Queued", "Planning", "Cancelled"],
-  Done:      ["Planning", "Queued"],
-  Cancelled: ["Planning", "Planned"],
+  Done:      ["Planning"],
+  Cancelled: ["Planning"],
 };
 
 export function getIssueTransitions(state) {

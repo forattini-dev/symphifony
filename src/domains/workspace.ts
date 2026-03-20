@@ -1,0 +1,542 @@
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
+import { execSync } from "node:child_process";
+import type { IssueEntry, RuntimeState } from "../types.ts";
+import {
+  SOURCE_ROOT,
+  SOURCE_MARKER,
+  TARGET_ROOT,
+  WORKSPACE_ROOT,
+} from "../concerns/constants.ts";
+import {
+  now,
+  idToSafePath,
+} from "../concerns/helpers.ts";
+import { logger } from "../concerns/logger.ts";
+import { runHook } from "../agents/command-executor.ts";
+import { buildPrompt } from "../agents/prompt-builder.ts";
+import { inferCapabilityPaths } from "../routing/capability-resolver.ts";
+
+// ── Source bootstrap ────────────────────────────────────────────────────────
+
+const SKIP_DIRS = new Set([
+  ".git", ".fifony", "node_modules", ".venv", "data",
+  "dist", "build", ".turbo", ".next", ".nuxt", ".tanstack",
+  "coverage", "artifacts", "captures", "tmp", "temp",
+]);
+
+function shouldSkipPath(relativePath: string): boolean {
+  const parts = relativePath.split("/");
+  if (parts.some((segment) => SKIP_DIRS.has(segment))) return true;
+  const base = parts.at(-1) ?? "";
+  if (base.startsWith("map_scan_") && extname(base) === ".json") return true;
+  if (extname(base) === ".xlsx") return true;
+  return false;
+}
+
+export function bootstrapSource(): void {
+  if (existsSync(SOURCE_MARKER)) return;
+
+  logger.info("Creating local source snapshot for Fifony (local-only runtime)...");
+
+  const copyRecursive = (source: string, target: string, rel = "") => {
+    mkdirSync(target, { recursive: true });
+    const items = readdirSync(source, { withFileTypes: true });
+
+    for (const item of items) {
+      const nextRel = rel ? `${rel}/${item.name}` : item.name;
+      if (shouldSkipPath(nextRel)) continue;
+
+      const sourcePath = `${source}/${item.name}`;
+      const targetPath = `${target}/${item.name}`;
+      const itemStat = statSync(sourcePath);
+
+      if (item.isDirectory()) {
+        copyRecursive(sourcePath, targetPath, nextRel);
+        continue;
+      }
+
+      if (item.isSymbolicLink() || itemStat.isSymbolicLink()) continue;
+
+      if (itemStat.isFile() || itemStat.isFIFO()) {
+        try {
+          const file = readFileSync(sourcePath);
+          writeFileSync(targetPath, file);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            logger.debug(`Skipped missing source file: ${sourcePath}`);
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+  };
+
+  mkdirSync(SOURCE_ROOT, { recursive: true });
+  copyRecursive(TARGET_ROOT, SOURCE_ROOT);
+  writeFileSync(SOURCE_MARKER, `${now()}\n`, "utf8");
+}
+
+let sourceReadyPromise: Promise<void> | null = null;
+let skipSourceFlag = false;
+
+export function setSkipSource(skip: boolean): void {
+  skipSourceFlag = skip;
+}
+
+/**
+ * Async, lazy version of bootstrapSource().
+ * Only runs the copy once, on first call. Subsequent calls resolve immediately.
+ * Emits progress via optional callback.
+ */
+export async function ensureSourceReady(
+  onProgress?: (status: "copying" | "ready") => void,
+): Promise<void> {
+  if (skipSourceFlag) {
+    onProgress?.("ready");
+    return;
+  }
+  if (existsSync(SOURCE_MARKER)) {
+    onProgress?.("ready");
+    return;
+  }
+
+  // Deduplicate concurrent calls
+  if (sourceReadyPromise) return sourceReadyPromise;
+
+  sourceReadyPromise = (async () => {
+    onProgress?.("copying");
+    logger.info("Creating local source snapshot (async) for Fifony...");
+
+    const copyRecursiveAsync = async (source: string, target: string, rel = "") => {
+      await mkdir(target, { recursive: true });
+      const items = await readdir(source, { withFileTypes: true });
+
+      for (const item of items) {
+        const nextRel = rel ? `${rel}/${item.name}` : item.name;
+        if (shouldSkipPath(nextRel)) continue;
+
+        const sourcePath = `${source}/${item.name}`;
+        const targetPath = `${target}/${item.name}`;
+        const itemStat = await stat(sourcePath);
+
+        if (item.isDirectory()) {
+          await copyRecursiveAsync(sourcePath, targetPath, nextRel);
+          continue;
+        }
+
+        if (item.isSymbolicLink() || itemStat.isSymbolicLink()) continue;
+
+        if (itemStat.isFile() || itemStat.isFIFO()) {
+          try {
+            await copyFile(sourcePath, targetPath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+              logger.debug(`Skipped missing source file: ${sourcePath}`);
+            } else {
+              throw error;
+            }
+          }
+        }
+      }
+    };
+
+    await mkdir(SOURCE_ROOT, { recursive: true });
+    await copyRecursiveAsync(TARGET_ROOT, SOURCE_ROOT);
+    await writeFile(SOURCE_MARKER, `${now()}\n`, "utf8");
+    onProgress?.("ready");
+    logger.info("Source snapshot ready (async).");
+  })();
+
+  return sourceReadyPromise;
+}
+
+// ── Workspace setup ─────────────────────────────────────────────────────────
+
+/** Check if a directory is inside a git repository. */
+function isGitRepo(dir: string): boolean {
+  try {
+    execSync("git rev-parse --git-dir", { cwd: dir, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Detect the default branch for a git repo using multiple fallback strategies. */
+export function detectDefaultBranch(dir: string): string {
+  try {
+    const current = execSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, encoding: "utf8" }).trim();
+    if (current && current !== "HEAD") return current;
+    // HEAD = detached state, fall through to remote detection
+    const remote = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd: dir, encoding: "utf8" }).trim();
+    return remote.replace("refs/remotes/origin/", "");
+  } catch {
+    return "main";
+  }
+}
+
+/** Create a git worktree for the issue at the given path. */
+export async function createGitWorktree(issue: IssueEntry, worktreePath: string, baseBranch?: string): Promise<void> {
+  let headCommitAtStart = "";
+  const resolvedBaseBranch = baseBranch ?? detectDefaultBranch(TARGET_ROOT);
+  try {
+    headCommitAtStart = execSync("git rev-parse HEAD", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  } catch {}
+
+  const branchName = `fifony/${issue.id}`;
+
+  // -B creates or resets the branch (handles retry scenarios)
+  execSync(`git worktree add "${worktreePath}" -B "${branchName}"`, {
+    cwd: TARGET_ROOT,
+    stdio: "pipe",
+  });
+
+  // Register fifony runtime files as ignored in the worktree's local excludes
+  try {
+    const gitFileContent = readFileSync(join(worktreePath, ".git"), "utf8").trim();
+    const gitDirRel = gitFileContent.replace("gitdir: ", "").trim();
+    const gitDirPath = resolve(worktreePath, gitDirRel);
+    mkdirSync(join(gitDirPath, "info"), { recursive: true });
+    writeFileSync(join(gitDirPath, "info", "exclude"), "fifony-*\n.fifony-*\nfifony_*\n", "utf8");
+  } catch (err) {
+    logger.warn({ err: String(err) }, "[Agent] Failed to write worktree excludes");
+  }
+
+  issue.branchName = branchName;
+  issue.baseBranch = resolvedBaseBranch;
+  issue.headCommitAtStart = headCommitAtStart;
+  issue.worktreePath = worktreePath;
+
+  logger.debug({ issueId: issue.id, branchName, baseBranch: resolvedBaseBranch, worktreePath }, "[Agent] Git worktree created");
+}
+
+export async function prepareWorkspace(
+  issue: IssueEntry,
+  state: RuntimeState,
+  defaultBranch?: string,
+): Promise<{ workspacePath: string; promptText: string; promptFile: string }> {
+  const safeId = idToSafePath(issue.id);
+  const workspaceRoot = join(WORKSPACE_ROOT, safeId);    // management dir
+  const worktreePath = join(workspaceRoot, "worktree");   // code dir (git worktree)
+  const createdNow = !existsSync(worktreePath);
+
+  if (createdNow) {
+    mkdirSync(workspaceRoot, { recursive: true });
+    logger.debug({ issueId: issue.id, identifier: issue.identifier, workspacePath: workspaceRoot }, "[Agent] Creating workspace");
+
+    if (state.config.afterCreateHook) {
+      mkdirSync(worktreePath, { recursive: true });
+      await runHook(state.config.afterCreateHook, worktreePath, issue, "after_create");
+    } else if (isGitRepo(TARGET_ROOT)) {
+      await createGitWorktree(issue, worktreePath, defaultBranch);
+    } else {
+      // Fallback: copy SOURCE_ROOT snapshot
+      await ensureSourceReady();
+      mkdirSync(worktreePath, { recursive: true });
+      cpSync(SOURCE_ROOT, worktreePath, {
+        recursive: true,
+        force: true,
+        filter: (sourcePath) => !sourcePath.startsWith(WORKSPACE_ROOT),
+      });
+    }
+
+    logger.debug({ issueId: issue.id, workspacePath: workspaceRoot, worktreePath }, "[Agent] Workspace created");
+  } else {
+    logger.debug({ issueId: issue.id, workspacePath: workspaceRoot }, "[Agent] Reusing existing workspace");
+  }
+
+  const metaPath = join(workspaceRoot, "issue.json");
+  const promptText = await buildPrompt(issue, null);
+  const promptFile = join(workspaceRoot, "prompt.md");
+  writeFileSync(metaPath, JSON.stringify({ ...issue, runtimeSource: SOURCE_ROOT, bootstrapAt: now() }, null, 2), "utf8");
+  writeFileSync(promptFile, `${promptText}\n`, "utf8");
+
+  issue.workspacePath = workspaceRoot;
+  issue.worktreePath = worktreePath;
+  issue.workspacePreparedAt = now();
+
+  return { workspacePath: workspaceRoot, promptText, promptFile };
+}
+
+export async function cleanWorkspace(
+  issueId: string,
+  issue: IssueEntry | null,
+  state: RuntimeState,
+): Promise<void> {
+  const safeId = idToSafePath(issueId);
+  const workspacePath = issue?.workspacePath ?? join(WORKSPACE_ROOT, safeId);
+  if (!existsSync(workspacePath)) return;
+
+  // Run before_remove hook (failure is logged but ignored)
+  if (state.config.beforeRemoveHook) {
+    try {
+      const dummyIssue = issue ?? { id: issueId, identifier: issueId } as IssueEntry;
+      await runHook(state.config.beforeRemoveHook, workspacePath, dummyIssue, "before_remove");
+    } catch (error) {
+      logger.warn(`before_remove hook failed for ${issueId}: ${String(error)}`);
+    }
+  }
+
+  // Git worktree cleanup
+  if (issue?.branchName && issue.worktreePath) {
+    try {
+      execSync(`git worktree remove --force "${issue.worktreePath}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+      logger.info(`Removed worktree for ${issueId}: ${issue.worktreePath}`);
+    } catch (error) {
+      logger.warn(`Failed to remove worktree for ${issueId}: ${String(error)}`);
+      try { rmSync(issue.worktreePath, { recursive: true, force: true }); } catch {}
+    }
+    try {
+      execSync(`git branch -D "${issue.branchName}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+    } catch { /* branch may already be gone */ }
+    // Also remove the management dir
+    try { rmSync(workspacePath, { recursive: true, force: true }); } catch {}
+    return;
+  }
+
+  // Legacy: remove the whole workspace dir
+  try {
+    rmSync(workspacePath, { recursive: true, force: true });
+    logger.info(`Cleaned workspace for ${issueId}: ${workspacePath}`);
+  } catch (error) {
+    logger.warn(`Failed to clean workspace for ${issueId}: ${String(error)}`);
+  }
+}
+
+// ── Workspace diff ──────────────────────────────────────────────────────────
+
+export function inferChangedWorkspacePaths(workspacePath: string, limit = 32, issue?: IssueEntry): string[] {
+  if (!issue?.baseBranch || !issue.branchName) return [];
+  try {
+    const output = execSync(
+      `git diff --name-only "${issue.baseBranch}"..."${issue.branchName}"`,
+      { cwd: TARGET_ROOT, encoding: "utf8", timeout: 10_000, stdio: "pipe" },
+    );
+    return output.trim().split("\n").filter(Boolean).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Compute lines added/removed/files changed from workspace diff. */
+export function computeDiffStats(issue: IssueEntry): void {
+  if (!issue.baseBranch || !issue.branchName) return;
+  try {
+    let raw = "";
+    try {
+      raw = execSync(
+        `git diff --stat "${issue.baseBranch}"..."${issue.branchName}"`,
+        { cwd: TARGET_ROOT, encoding: "utf8", maxBuffer: 512_000, timeout: 10_000, stdio: "pipe" },
+      );
+    } catch (err: any) {
+      raw = err.stdout || "";
+    }
+    if (raw) parseDiffStats(issue, raw);
+  } catch {}
+}
+
+export function parseDiffStats(issue: IssueEntry, raw: string): void {
+  const lines = raw.trim().split("\n");
+  const summary = lines[lines.length - 1] || "";
+  const filesMatch = summary.match(/(\d+)\s+files?\s+changed/);
+  const addMatch = summary.match(/(\d+)\s+insertions?\(\+\)/);
+  const delMatch = summary.match(/(\d+)\s+deletions?\(-\)/);
+
+  const internalRe = /fifony[-_]|\.fifony-|WORKFLOW\.local/;
+  const fileLines = lines.slice(0, -1).filter((l) => {
+    const name = l.trim().split("|")[0]?.trim().split("/").pop() || "";
+    return !internalRe.test(name);
+  });
+
+  issue.filesChanged = fileLines.length || (filesMatch ? parseInt(filesMatch[1], 10) : 0);
+  issue.linesAdded = addMatch ? parseInt(addMatch[1], 10) : 0;
+  issue.linesRemoved = delMatch ? parseInt(delMatch[1], 10) : 0;
+}
+
+// ── Workspace merge ─────────────────────────────────────────────────────────
+
+export interface MergeResult {
+  copied: string[];
+  deleted: string[];
+  skipped: string[];
+  conflicts: string[];
+}
+
+function ensureWorktreeCommitted(issue: IssueEntry): void {
+  const worktreePath = issue.worktreePath;
+  if (!worktreePath || !issue.branchName) return;
+
+  execSync("git add -A", { cwd: worktreePath, stdio: "pipe" });
+  const statusBeforeCommit = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf8" }).trim();
+  if (!statusBeforeCommit) return;
+
+  try {
+    execSync(`git commit -m "fifony: agent changes for ${issue.identifier}"`, { cwd: worktreePath, stdio: "pipe" });
+  } catch (error) {
+    const remaining = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf8" }).trim();
+    if (remaining) {
+      throw new Error(`Failed to commit agent changes for ${issue.identifier}: ${String(error)}`);
+    }
+  }
+
+  const statusAfterCommit = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf8" }).trim();
+  if (statusAfterCommit) {
+    throw new Error(`Worktree for ${issue.identifier} still has uncommitted changes after commit.`);
+  }
+}
+
+export { ensureWorktreeCommitted };
+
+/** Merge a worktree branch into TARGET_ROOT using git merge --no-ff. */
+function mergeWorktree(issue: IssueEntry, worktreePath: string): MergeResult {
+  const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
+  ensureWorktreeCommitted(issue);
+
+  const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (currentBranch !== issue.baseBranch) {
+    throw new Error(`Cannot merge ${issue.identifier}: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
+  }
+
+  const targetStatus = execSync("git status --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (targetStatus) {
+    throw new Error(`Cannot merge ${issue.identifier}: target repository has uncommitted changes.`);
+  }
+
+  // Collect changed files before merging (for the result summary)
+  try {
+    const diffOut = execSync(
+      `git diff --name-status "${issue.baseBranch}"..."${issue.branchName}"`,
+      { cwd: TARGET_ROOT, encoding: "utf8" },
+    );
+    for (const line of diffOut.trim().split("\n").filter(Boolean)) {
+      const [statusChar, ...parts] = line.split("\t");
+      const filePath = parts.join("\t");
+      if (statusChar === "D") result.deleted.push(filePath);
+      else result.copied.push(filePath);
+    }
+  } catch { /* best-effort */ }
+
+  try {
+    execSync(
+      `git merge --no-ff "${issue.branchName}" -m "fifony: merge ${issue.identifier}"`,
+      { cwd: TARGET_ROOT, stdio: "pipe" },
+    );
+  } catch (err: any) {
+    // Merge failed — collect conflict files and abort
+    try {
+      const conflictOut = execSync(
+        "git diff --name-only --diff-filter=U",
+        { cwd: TARGET_ROOT, encoding: "utf8" },
+      );
+      result.conflicts.push(...conflictOut.trim().split("\n").filter(Boolean));
+    } catch {}
+    try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+    logger.warn({ issueId: issue.id, err: String(err) }, "[Agent] Git merge failed, aborted");
+  }
+
+  return result;
+}
+
+export function shouldSkipMergePath(relativePath: string): boolean {
+  const parts = relativePath.split("/");
+  if (parts.some((s) => s === ".git" || s === "node_modules" || s === ".fifony" || s === "dist" || s === ".tanstack")) {
+    return true;
+  }
+  const base = parts.at(-1) ?? "";
+  return base === "WORKFLOW.local.md"
+    || base === ".fifony-env.sh"
+    || base === ".fifony-compiled-env.sh"
+    || base === ".fifony-local-source-ready"
+    || base.startsWith("fifony-")
+    || base.startsWith("fifony_");
+}
+
+/** Push the issue worktree branch to origin and attempt to create a PR via gh CLI. */
+export function pushWorktreeBranch(issue: IssueEntry): string {
+  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
+    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot push.`);
+  }
+
+  ensureWorktreeCommitted(issue);
+  execSync(`git push -u origin "${issue.branchName}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+
+  // Try to create PR via gh CLI if available
+  try {
+    const prUrl = execSync(
+      `gh pr create --head "${issue.branchName}" --base "${issue.baseBranch}" --title "${issue.title.replace(/"/g, '\\"')}" --body "Automated by fifony"`,
+      { cwd: TARGET_ROOT, encoding: "utf8" },
+    ).trim();
+    return prUrl;
+  } catch {
+    // gh not available or PR already exists — return a best-effort compare URL
+    try {
+      const remote = execSync("git remote get-url origin", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+      const cleanRemote = remote.replace(/\.git$/, "");
+      return `${cleanRemote}/compare/${issue.baseBranch}...${issue.branchName}`;
+    } catch {
+      return `(branch: ${issue.branchName})`;
+    }
+  }
+}
+
+/** Merge a worktree branch into TARGET_ROOT. */
+export function mergeWorkspace(issue: IssueEntry): MergeResult {
+  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
+    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot merge.`);
+  }
+  return mergeWorktree(issue, issue.worktreePath);
+}
+
+export function hydrateIssuePathsFromWorkspace(issue: IssueEntry): string[] {
+  const inferredPaths = inferChangedWorkspacePaths(issue.workspacePath ?? "", 32, issue);
+  if (inferredPaths.length === 0) return [];
+  issue.paths = [...new Set([...(issue.paths ?? []), ...inferredPaths])];
+  issue.inferredPaths = [...new Set([...(issue.inferredPaths ?? []), ...inferredPaths])];
+  return inferredPaths;
+}
+
+export function describeRoutingSignals(issue: IssueEntry, workspaceDerivedPaths: string[]): string {
+  const explicitPaths = issue.paths ?? [];
+  const textDerivedPaths = inferCapabilityPaths({
+    id: issue.id,
+    identifier: issue.identifier,
+    title: issue.title,
+    description: issue.description,
+    labels: issue.labels,
+  }).filter((path) => !explicitPaths.includes(path));
+
+  const parts: string[] = [];
+  if (explicitPaths.length > 0) parts.push(`payload paths=${explicitPaths.join(", ")}`);
+  if (textDerivedPaths.length > 0) parts.push(`text hints=${textDerivedPaths.join(", ")}`);
+  if (workspaceDerivedPaths.length > 0) parts.push(`workspace diff=${workspaceDerivedPaths.join(", ")}`);
+  return parts.join(" | ");
+}
+
+/** Write versioned review artifacts to workspace (also used for execute artifacts). */
+export function writeVersionedArtifacts(
+  workspacePath: string,
+  prefix: string,
+  planVersion: number,
+  attempt: number,
+  sources: Array<{ srcFile: string; destSuffix: string }>,
+): void {
+  const { writeFileSync: _wfs, readFileSync: _rfs, existsSync: _es } = { writeFileSync, readFileSync, existsSync };
+  for (const { srcFile, destSuffix } of sources) {
+    const src = join(workspacePath, srcFile);
+    if (_es(src)) {
+      _wfs(join(workspacePath, `${prefix}.v${planVersion}a${attempt}.${destSuffix}`), _rfs(src, "utf8"), "utf8");
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { discoverIntegrations, buildIntegrationSnippet } from "../../integrations/catalog.js";
+import { discoverIntegrations, buildIntegrationSnippet } from "../../agents/integrations/catalog.js";
 import { inferCapabilityPaths, resolveTaskCapabilities } from "../../routing/capability-resolver.js";
 import {
   initDatabase,
@@ -14,7 +14,7 @@ import {
 } from "../database.js";
 import { apiGet, apiPost } from "../api-client.js";
 import { buildStateSummary } from "../resources/resource-builder.js";
-import { parseIssueState } from "../../agent/helpers.js";
+import { parseIssueState } from "../../concerns/helpers.js";
 
 function hashInput(value: string): string {
   return createHash("sha1").update(value).digest("hex").slice(0, 10);

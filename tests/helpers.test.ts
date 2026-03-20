@@ -23,7 +23,7 @@ import {
   withRetryBackoff,
   extractJsonObjects,
   repairTruncatedJson,
-} from "../src/agent/helpers.ts";
+} from "../src/concerns/helpers.ts";
 
 // ── now() ─────────────────────────────────────────────────────────────────────
 

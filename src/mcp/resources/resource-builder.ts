@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderPrompt } from "../../prompting.js";
+import { renderPrompt } from "../../agents/prompting.js";
 import { resolveTaskCapabilities } from "../../routing/capability-resolver.js";
 import {
   type IssueRecord,

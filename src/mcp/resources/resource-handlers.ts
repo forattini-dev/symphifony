@@ -1,4 +1,4 @@
-import { discoverIntegrations } from "../../integrations/catalog.js";
+import { discoverIntegrations } from "../../agents/integrations/catalog.js";
 import { inferCapabilityPaths, resolveTaskCapabilities } from "../../routing/capability-resolver.js";
 import {
   getIssues,

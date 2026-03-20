@@ -201,6 +201,14 @@ export function upsertSettingPayload(current, setting) {
   return { ...payload, settings: [...settings, setting] };
 }
 
+export async function persistUiSetting(settingId, value) {
+  return api.post(`/settings/${encodeURIComponent(settingId)}`, {
+    scope: "ui",
+    value,
+    source: "user",
+  });
+}
+
 export function useSettings() {
   return useQuery({
     queryKey: SETTINGS_QUERY_KEY,

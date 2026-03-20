@@ -15,13 +15,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { resolveTaskCapabilities } from "../src/routing/capability-resolver.ts";
-import { compileExecution, compileReview } from "../src/agent/adapters/index.ts";
+import { compileExecution, compileReview } from "../src/agents/adapters/index.ts";
 import type {
   IssueEntry,
   IssuePlan,
   AgentProviderDefinition,
   RuntimeConfig,
-} from "../src/agent/types.ts";
+} from "../src/types.ts";
 
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 

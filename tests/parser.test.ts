@@ -7,7 +7,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractPlanTokenUsage, parsePlanOutput } from "../src/agent/planning-parser.ts";
+import { extractPlanTokenUsage, parsePlanOutput } from "../src/agents/planning/planning-parser.ts";
 
 // ── extractPlanTokenUsage ─────────────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractPlanTokenUsage } from "../src/agent/planning-parser.ts";
+import { extractPlanTokenUsage } from "../src/agents/planning/planning-parser.ts";
 
 const TIMEOUT_MS = 90_000;
 const PROMPT = "Reply with the exact text: PONG";
