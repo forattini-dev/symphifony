@@ -146,7 +146,7 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
       case SETTING_ID_WORKER_CONCURRENCY: {
         const parsed = parseIntegerSetting(setting.value);
         if (parsed !== null) {
-          nextConfig.workerConcurrency = clamp(parsed, 1, 16);
+          nextConfig.workerConcurrency = clamp(parsed, 1, 10);
         }
         break;
       }
@@ -262,7 +262,7 @@ export async function persistSetting(
 export async function persistWorkerConcurrencySetting(value: number, source: RuntimeSettingRecord["source"] = "user"): Promise<void> {
   await persistSetting(
     SETTING_ID_WORKER_CONCURRENCY,
-    clamp(Math.round(value), 1, 16),
+    clamp(Math.round(value), 1, 10),
     { scope: "runtime", source },
   );
 }

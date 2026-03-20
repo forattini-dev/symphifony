@@ -84,10 +84,10 @@ export function registerSettingsRoutes(
   app.post("/api/config/concurrency", async (c: any) => {
     const payload = await c.req.json() as JsonRecord;
     const value = typeof payload.concurrency === "number" ? payload.concurrency : undefined;
-    if (!value || value < 1 || value > 16) {
-      return c.json({ ok: false, error: "concurrency must be between 1 and 16" }, 400);
+    if (!value || value < 1 || value > 10) {
+      return c.json({ ok: false, error: "concurrency must be between 1 and 10" }, 400);
     }
-    state.config.workerConcurrency = clamp(Math.round(value), 1, 16);
+    state.config.workerConcurrency = clamp(Math.round(value), 1, 10);
     state.updatedAt = now();
     addEvent(state, undefined, "manual", `Worker concurrency updated to ${state.config.workerConcurrency}.`);
     await persistWorkerConcurrencySetting(state.config.workerConcurrency);

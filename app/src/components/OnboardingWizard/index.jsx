@@ -109,7 +109,7 @@ export default function OnboardingWizard({ onComplete }) {
 
     const parsedConcurrency = Number.parseInt(String(savedConcurrency ?? 2), 10);
     if (Number.isFinite(parsedConcurrency)) {
-      setConcurrency(Math.min(5, Math.max(1, parsedConcurrency)));
+      setConcurrency(Math.min(10, Math.max(1, parsedConcurrency)));
     }
   }, [settings, settingsQuery.isLoading]);
 

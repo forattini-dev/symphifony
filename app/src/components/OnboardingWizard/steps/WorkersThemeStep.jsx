@@ -50,8 +50,7 @@ function ThemeSwatch({ theme, selected, onClick }) {
 }
 
 function WorkersThemeStep({ concurrency, setConcurrency, selectedTheme, setSelectedTheme }) {
-  const safeConcurrency = Number.isFinite(concurrency) ? Math.max(1, Math.min(5, concurrency)) : 1;
-  const sliderPosition = (safeConcurrency - 1) * 25;
+  const safeConcurrency = Number.isFinite(concurrency) ? Math.max(1, Math.min(10, concurrency)) : 1;
 
   return (
     <div className="flex flex-col gap-6 stagger-children">
@@ -74,27 +73,23 @@ function WorkersThemeStep({ concurrency, setConcurrency, selectedTheme, setSelec
           <div className="w-full max-w-xs">
             <input
               type="range"
-              min={0}
-              max={100}
-              step={25}
-              value={sliderPosition}
-              onChange={(e) => setConcurrency(Math.round(Number(e.target.value) / 25) + 1)}
+              min={1}
+              max={10}
+              step={1}
+              value={safeConcurrency}
+              onChange={(e) => setConcurrency(Math.round(Number(e.target.value)))}
               aria-label="Number of parallel workers"
               className="range range-primary range-sm w-full"
             />
             <div className="flex justify-between px-2.5 mt-2 text-xs">
-              <span>|</span>
-              <span>|</span>
-              <span>|</span>
-              <span>|</span>
-              <span>|</span>
+              {Array.from({ length: 10 }, (_, index) => (
+                <span key={index}>|</span>
+              ))}
             </div>
             <div className="flex justify-between px-2.5 mt-2 text-xs">
-              <span>1</span>
-              <span>2</span>
-              <span>3</span>
-              <span>4</span>
-              <span>5</span>
+              {Array.from({ length: 10 }, (_, index) => (
+                <span key={index}>{index + 1}</span>
+              ))}
             </div>
           </div>
           <p className="text-xs text-base-content/50 bg-base-100 rounded-lg px-3 py-2 mt-1">
