@@ -1,8 +1,8 @@
-<table align="center" border="0" cellspacing="0" cellpadding="0"><tr>
-<td style="border:none"><img src="dinofffaur.png" alt="fifony mascot" width="140" /></td>
-<td style="border:none">
+<div align="center">
+<img src="dinofffaur.png" alt="fifony mascot" width="140" />
+<br><br>
 
-<h1>fifony</h1>
+# fifony
 
 **AI agents that actually ship code. You just watch.**
 
@@ -11,8 +11,7 @@ Point at a repo. Open the dashboard. AI plans, builds, and reviews — you appro
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D23-brightgreen.svg)]()
 
-</td>
-</tr></table>
+</div>
 
 ---
 
