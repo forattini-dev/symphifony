@@ -67,11 +67,9 @@ export function tryBuildPlan(parsed: any): IssuePlan | null {
     validation: toStringArray(parsed.validation),
     deliverables: toStringArray(parsed.deliverables),
 
-    executionStrategy: parsed.executionStrategy || parsed.execution_strategy || undefined,
-    toolingDecision: parsed.toolingDecision || parsed.tooling_decision || undefined,
-
     suggestedPaths: toStringArray(parsed.suggestedPaths || parsed.suggested_paths || parsed.suggestedFilePaths || parsed.filePaths || parsed.file_paths || parsed.paths),
-    suggestedLabels: toStringArray(parsed.suggestedLabels || parsed.suggested_labels || parsed.labels),
+    suggestedSkills: toStringArray(parsed.suggestedSkills || parsed.suggested_skills),
+    suggestedAgents: toStringArray(parsed.suggestedAgents || parsed.suggested_agents),
     suggestedEffort: parsed.suggestedEffort || parsed.suggested_effort || parsed.effortSuggestion || parsed.effort_suggestion || parsed.effort || { default: "medium" },
 
     provider: "",

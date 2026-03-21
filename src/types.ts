@@ -156,14 +156,6 @@ export type IssuePlanRisk = {
   mitigation: string;
 };
 
-export type IssuePlanToolingDecision = {
-  shouldUseSkills: boolean;
-  skillsToUse: { name: string; why: string }[];
-  shouldUseSubagents: boolean;
-  subagentsToUse: { name: string; role: string; why: string }[];
-  decisionSummary: string;
-};
-
 export type IssuePlan = {
   // Core
   summary: string;
@@ -183,13 +175,10 @@ export type IssuePlan = {
   validation?: string[];
   deliverables?: string[];
 
-  // Tooling
-  executionStrategy?: { approach: string; whyThisApproach: string; alternativesConsidered?: string[] };
-  toolingDecision?: IssuePlanToolingDecision;
-
   // Suggestions
   suggestedPaths: string[];
-  suggestedLabels: string[];
+  suggestedSkills: string[];
+  suggestedAgents: string[];
   suggestedEffort: EffortConfig;
 
   // Refinement history

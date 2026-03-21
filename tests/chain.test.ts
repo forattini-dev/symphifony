@@ -73,7 +73,7 @@ function makePlan(overrides: Partial<IssuePlan> = {}): IssuePlan {
     successCriteria: ["All tests pass", "No TypeScript errors"],
     validation: ["pnpm typecheck", "pnpm test"],
     suggestedPaths: ["src/index.ts", "src/core.ts"],
-    suggestedLabels: ["backend"],
+    suggestedSkills: [], suggestedAgents: [],
     suggestedEffort: { executor: "medium", reviewer: "low" },
     provider: "claude",
     createdAt: "2026-03-17T00:00:00.000Z",

@@ -91,7 +91,7 @@ function makePlan(overrides: Partial<IssuePlan> = {}): IssuePlan {
     successCriteria: ["All tests pass", "Connection pool uses pgBouncer"],
     validation: ["pnpm typecheck", "pnpm test"],
     suggestedPaths: ["src/db/pool.ts", "tests/db.test.ts"],
-    suggestedLabels: ["backend"],
+    suggestedSkills: [], suggestedAgents: [],
     suggestedEffort: { executor: "medium", reviewer: "low", planner: "low" },
     assumptions: ["pgBouncer is available"],
     constraints: ["No breaking API changes"],

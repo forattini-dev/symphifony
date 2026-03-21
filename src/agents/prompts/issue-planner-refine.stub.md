@@ -25,6 +25,6 @@ Rules:
 - If feedback asks to remove steps, renumber remaining steps sequentially.
 - Update the summary if the overall direction changed.
 - Re-evaluate estimatedComplexity if the scope changed significantly.
-- Update suggestedPaths and suggestedLabels if affected by the changes.
+- Update suggestedPaths, suggestedSkills, and suggestedAgents if affected by the changes.
 
 Return strict JSON. No text outside JSON.

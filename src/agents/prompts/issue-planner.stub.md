@@ -4,18 +4,20 @@ Produce the best possible plan for the issue below, filling the JSON schema prec
 
 FAST MODE: Be brief and direct. Minimize reasoning depth.
 - 2-4 steps maximum. Skip optional fields (unknowns, risks, alternatives).
-- No tooling reflection needed — set shouldUseSkills: false, shouldUseSubagents: false.
-- Focus only on: summary, steps, estimatedComplexity, suggestedPaths, suggestedLabels.
+- Focus only on: summary, steps, estimatedComplexity, suggestedPaths.
 {{/if}}
 
 {{#if availableCapabilities}}
-## Installed Capabilities (choose from these in toolingDecision)
+## Installed Capabilities (recommend from these lists)
 
 {{#if availableSkills.length}}Skills available: {{#each availableSkills}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
 {{#if availableAgents.length}}Agents available: {{#each availableAgents}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
 {{#if availableCommands.length}}Commands available: {{#each availableCommands}}/{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
 
-ONLY recommend skills/subagents from this list. Do not invent names.
+Recommend skills and agents ONLY from these lists. Do not invent names.
+Skills improve execution quality by providing specialized instructions.
+Agents provide domain expertise (e.g., "Senior Developer", "Frontend Designer").
+Only recommend when there is a concrete benefit — not everything needs skills or agents.
 {{/if}}
 
 Issue title: {{title}}
@@ -42,12 +44,6 @@ Complexity estimation:
 - medium: 15-60 min, multi-file change with testing
 - high: > 1 hour, architectural change or new feature
 
-Tooling reflection (REQUIRED):
-- Evaluate whether the task benefits from using skills (specialized instructions for quality/consistency).
-- Evaluate whether subtasks should use subagents (parallel work, isolated context, specialization).
-- Only recommend skills/agents when there is a concrete justification.
-- For each step, set ownerType: 'agent' for automated work, 'human' for manual review, 'skill' for specialized skills, 'subagent' for delegated work.
-
 Effort suggestion:
 - low: simple fixes, no deep reasoning needed
 - medium: standard development work
@@ -68,7 +64,6 @@ IMPORTANT: Replace ALL placeholder values with real content specific to the issu
       "action": "<YOUR concrete action here>",
       "files": ["<real/path/to/file.ts>"],
       "details": "<YOUR additional context>",
-      "ownerType": "agent|human|skill|subagent|tool",
       "doneWhen": "<YOUR acceptance criterion>"
     }
   ],
@@ -82,7 +77,8 @@ IMPORTANT: Replace ALL placeholder values with real content specific to the issu
     { "risk": "<YOUR risk>", "impact": "<YOUR impact>", "mitigation": "<YOUR mitigation>" }
   ],
   "suggestedPaths": ["<real/path/to/relevant/file.ts>"],
-  "suggestedLabels": ["frontend", "bug", "feature"],
+  "suggestedSkills": ["<skill-name-from-list-above>"],
+  "suggestedAgents": ["<agent-name-from-list-above>"],
   "suggestedEffort": { "default": "medium", "planner": "low", "executor": "medium", "reviewer": "medium" }
 }
 ```

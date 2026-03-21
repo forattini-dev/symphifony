@@ -87,23 +87,22 @@ export function buildValidationSection(plan: IssuePlan): string {
   return parts.join("\n");
 }
 
-/** Render tooling/delegation decisions */
+/** Render suggested skills and agents */
 export function buildToolingSection(plan: IssuePlan): string {
-  const td = plan.toolingDecision;
-  if (!td) return "";
+  const skills = plan.suggestedSkills ?? [];
+  const agents = plan.suggestedAgents ?? [];
+  if (skills.length === 0 && agents.length === 0) return "";
 
-  const parts = ["## Tooling & Delegation Strategy"];
+  const parts = ["## Recommended Skills & Agents"];
 
-  if (td.decisionSummary) parts.push("", td.decisionSummary);
-
-  if (td.shouldUseSkills && td.skillsToUse?.length) {
+  if (skills.length > 0) {
     parts.push("", "**Skills to activate:**");
-    td.skillsToUse.forEach((s) => parts.push(`- **${s.name}**: ${s.why}`));
+    skills.forEach((s) => parts.push(`- ${s}`));
   }
 
-  if (td.shouldUseSubagents && td.subagentsToUse?.length) {
-    parts.push("", "**Subagents to use:**");
-    td.subagentsToUse.forEach((a) => parts.push(`- **${a.name}** (${a.role}): ${a.why}`));
+  if (agents.length > 0) {
+    parts.push("", "**Agents to use:**");
+    agents.forEach((a) => parts.push(`- ${a}`));
   }
 
   return parts.join("\n");
@@ -340,11 +339,7 @@ export function buildExecutionPayload(
       complexity: plan.estimatedComplexity,
       approach: strategy?.approach || "",
       rationale: strategy?.whyThisApproach || "",
-      workPattern: hasPhases
-        ? "phased"
-        : plan.toolingDecision?.shouldUseSubagents
-          ? "parallel_subtasks"
-          : "sequential",
+      workPattern: hasPhases ? "phased" : "sequential",
     },
 
     plan: {
@@ -382,8 +377,8 @@ export function buildExecutionPayload(
     })),
 
     tooling: {
-      skills: plan.toolingDecision?.skillsToUse || [],
-      subagents: plan.toolingDecision?.subagentsToUse || [],
+      skills: plan.suggestedSkills || [],
+      agents: plan.suggestedAgents || [],
     },
 
     targetPaths: plan.suggestedPaths || [],

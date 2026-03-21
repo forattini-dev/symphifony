@@ -29,7 +29,8 @@ function makePlan(overrides: Partial<IssuePlan> = {}): IssuePlan {
       { step: 2, action: "Add JWT validation", files: ["src/middleware.ts"] },
     ],
     suggestedPaths: ["src/auth.ts", "src/middleware.ts"],
-    suggestedLabels: ["auth", "backend"],
+    suggestedSkills: [],
+    suggestedAgents: [],
     suggestedEffort: { executor: "medium" },
     provider: "claude",
     createdAt: "2026-03-17T00:00:00.000Z",
@@ -232,39 +233,23 @@ describe("buildValidationSection", () => {
 // ── buildToolingSection() ─────────────────────────────────────────────────────
 
 describe("buildToolingSection", () => {
-  it("returns empty string when no toolingDecision", () => {
+  it("returns empty string when no suggestions", () => {
     assert.equal(buildToolingSection(makePlan()), "");
   });
 
-  it("renders skills when shouldUseSkills is true", () => {
-    const plan = makePlan({
-      toolingDecision: {
-        shouldUseSkills: true,
-        skillsToUse: [{ name: "testing", why: "Ensure coverage" }],
-        shouldUseSubagents: false,
-        subagentsToUse: [],
-        decisionSummary: "Use testing skill for this task.",
-      },
-    });
+  it("renders suggested skills", () => {
+    const plan = makePlan({ suggestedSkills: ["testing", "review-pr"] });
     const result = buildToolingSection(plan);
-    assert.ok(result.includes("## Tooling"), "has header");
+    assert.ok(result.includes("## Recommended"), "has header");
     assert.ok(result.includes("testing"), "has skill name");
-    assert.ok(result.includes("Ensure coverage"), "has why");
+    assert.ok(result.includes("review-pr"), "has second skill");
   });
 
-  it("renders subagents when shouldUseSubagents is true", () => {
-    const plan = makePlan({
-      toolingDecision: {
-        shouldUseSkills: false,
-        skillsToUse: [],
-        shouldUseSubagents: true,
-        subagentsToUse: [{ name: "code-reviewer", role: "reviewer", why: "Critical review" }],
-        decisionSummary: "Delegate review.",
-      },
-    });
+  it("renders suggested agents", () => {
+    const plan = makePlan({ suggestedAgents: ["Senior Developer", "Frontend Designer"] });
     const result = buildToolingSection(plan);
-    assert.ok(result.includes("code-reviewer"), "has subagent name");
-    assert.ok(result.includes("reviewer"), "has role");
+    assert.ok(result.includes("Senior Developer"), "has agent name");
+    assert.ok(result.includes("Frontend Designer"), "has second agent");
   });
 });
 
@@ -440,18 +425,10 @@ describe("buildExecutionPayload", () => {
     assert.equal(payload.executionIntent.workPattern, "phased");
   });
 
-  it("sets workPattern to parallel_subtasks when using subagents (no phases)", () => {
-    const plan = makePlan({
-      toolingDecision: {
-        shouldUseSkills: false,
-        skillsToUse: [],
-        shouldUseSubagents: true,
-        subagentsToUse: [{ name: "sub", role: "executor", why: "parallel" }],
-        decisionSummary: "Use subagents",
-      },
-    });
+  it("sets workPattern to sequential when no phases", () => {
+    const plan = makePlan();
     const payload = buildExecutionPayload(makeIssue(), makeProvider(), plan, "/workspace");
-    assert.equal(payload.executionIntent.workPattern, "parallel_subtasks");
+    assert.equal(payload.executionIntent.workPattern, "sequential");
   });
 
   it("maps plan steps into payload", () => {

@@ -344,9 +344,9 @@ describe("parsePlanOutput", () => {
       assert.ok(plan!.suggestedPaths.includes("app/src/routes/agents.jsx"));
     });
 
-    it("parses labels as suggestedLabels", () => {
+    it("parses suggestedSkills as empty array when not present", () => {
       const plan = parsePlanOutput(JSON.stringify(GPT54_MINI_OUTPUT));
-      assert.ok(plan!.suggestedLabels.includes("mobile"));
+      assert.deepEqual(plan!.suggestedSkills, []);
     });
 
     it("parses when output has codex preamble header + JSON + token count", () => {

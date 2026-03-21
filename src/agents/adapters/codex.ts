@@ -87,7 +87,7 @@ async function compile(
       outputs: phase.outputs ?? [],
     })),
     suggestedPaths: plan.suggestedPaths ?? [],
-    skillsToUse: plan.toolingDecision?.shouldUseSkills ? (plan.toolingDecision.skillsToUse ?? []) : [],
+    suggestedSkills: plan.suggestedSkills ?? [],
     validationItems: (plan.validation ?? []).map((value) => ({ value })),
     outputContract: CODEX_RESULT_CONTRACT,
   });
@@ -125,7 +125,7 @@ async function compile(
       adapter: "codex",
       reasoningEffort: effort || "default",
       model: provider.model || "default",
-      skillsActivated: plan.toolingDecision?.skillsToUse?.map((s) => s.name) || [],
+      skillsActivated: plan.suggestedSkills || [],
       subagentsRequested: [],
       phasesCount: plan.phases?.length || 0,
     },

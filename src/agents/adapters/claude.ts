@@ -67,8 +67,8 @@ async function compile(
     skillContext,
     capabilitiesManifest: capabilitiesManifest || "",
     planPrompt: buildFullPlanPrompt(plan),
-    subagentsToUse: plan.toolingDecision?.shouldUseSubagents ? (plan.toolingDecision.subagentsToUse ?? []) : [],
-    skillsToUse: plan.toolingDecision?.shouldUseSkills ? (plan.toolingDecision.skillsToUse ?? []) : [],
+    suggestedSkills: plan.suggestedSkills ?? [],
+    suggestedAgents: plan.suggestedAgents ?? [],
     suggestedPaths: plan.suggestedPaths ?? [],
     workspacePath,
     issueIdentifier: issue.identifier,
@@ -104,8 +104,8 @@ async function compile(
     FIFONY_EXECUTION_PAYLOAD_FILE: "fifony-execution-payload.json",
   };
   if (plan.suggestedPaths?.length) env.FIFONY_PLAN_PATHS = plan.suggestedPaths.join(",");
-  if (plan.toolingDecision?.skillsToUse?.length) {
-    env.FIFONY_PLAN_SKILLS = plan.toolingDecision.skillsToUse.map((s) => s.name).join(",");
+  if (plan.suggestedSkills?.length) {
+    env.FIFONY_PLAN_SKILLS = plan.suggestedSkills.join(",");
   }
 
   const { pre, post } = extractValidationCommands(plan);
@@ -122,8 +122,8 @@ async function compile(
       adapter: "claude",
       reasoningEffort: effort || "default",
       model: provider.model || "default",
-      skillsActivated: plan.toolingDecision?.skillsToUse?.map((s) => s.name) || [],
-      subagentsRequested: plan.toolingDecision?.subagentsToUse?.map((a) => a.name) || [],
+      skillsActivated: plan.suggestedSkills || [],
+      subagentsRequested: plan.suggestedAgents || [],
       phasesCount: plan.phases?.length || 0,
     },
   };

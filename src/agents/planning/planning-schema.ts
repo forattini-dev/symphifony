@@ -4,13 +4,12 @@
 export const STEP_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["step", "action", "files", "details", "ownerType", "doneWhen"],
+  required: ["step", "action", "files", "details", "doneWhen"],
   properties: {
     step: { type: "number" },
     action: { type: "string" },
     files: { type: "array", items: { type: "string" } },
     details: { type: "string" },
-    ownerType: { type: "string", enum: ["human", "agent", "skill", "subagent", "tool"] },
     doneWhen: { type: "string" },
   },
 };
@@ -18,7 +17,7 @@ export const STEP_SCHEMA = {
 export const PLAN_JSON_SCHEMA = JSON.stringify({
   type: "object",
   additionalProperties: false,
-  required: ["summary", "steps", "phases", "estimatedComplexity", "suggestedPaths", "suggestedLabels", "assumptions", "constraints", "unknowns", "successCriteria", "executionStrategy", "toolingDecision", "risks", "validation", "deliverables", "suggestedEffort"],
+  required: ["summary", "steps", "estimatedComplexity", "suggestedPaths", "suggestedEffort"],
   properties: {
     summary: { type: "string" },
     estimatedComplexity: { type: "string", enum: ["trivial", "low", "medium", "high"] },
@@ -26,16 +25,8 @@ export const PLAN_JSON_SCHEMA = JSON.stringify({
     constraints: { type: "array", items: { type: "string" } },
     unknowns: { type: "array", items: { type: "object", additionalProperties: false, properties: { question: { type: "string" }, whyItMatters: { type: "string" }, howToResolve: { type: "string" } }, required: ["question", "whyItMatters", "howToResolve"] } },
     successCriteria: { type: "array", items: { type: "string" } },
-    executionStrategy: { type: "object", additionalProperties: false, required: ["approach", "whyThisApproach", "alternativesConsidered"], properties: { approach: { type: "string" }, whyThisApproach: { type: "string" }, alternativesConsidered: { type: "array", items: { type: "string" } } } },
-    toolingDecision: { type: "object", additionalProperties: false, required: ["shouldUseSkills", "skillsToUse", "shouldUseSubagents", "subagentsToUse", "decisionSummary"], properties: {
-      shouldUseSkills: { type: "boolean" },
-      skillsToUse: { type: "array", items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, why: { type: "string" } }, required: ["name", "why"] } },
-      shouldUseSubagents: { type: "boolean" },
-      subagentsToUse: { type: "array", items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, role: { type: "string" }, why: { type: "string" } }, required: ["name", "role", "why"] } },
-      decisionSummary: { type: "string" },
-    } },
     steps: { type: "array", items: STEP_SCHEMA },
-    phases: { type: "array", items: { type: "object", additionalProperties: false, required: ["phaseName", "goal", "tasks", "dependencies", "outputs"], properties: {
+    phases: { type: "array", items: { type: "object", additionalProperties: false, required: ["phaseName", "goal", "tasks"], properties: {
       phaseName: { type: "string" },
       goal: { type: "string" },
       tasks: { type: "array", items: STEP_SCHEMA },
@@ -46,8 +37,9 @@ export const PLAN_JSON_SCHEMA = JSON.stringify({
     validation: { type: "array", items: { type: "string" } },
     deliverables: { type: "array", items: { type: "string" } },
     suggestedPaths: { type: "array", items: { type: "string" } },
-    suggestedLabels: { type: "array", items: { type: "string" } },
-    suggestedEffort: { type: "object", additionalProperties: false, required: ["default", "planner", "executor", "reviewer"], properties: { default: { type: "string" }, planner: { type: "string" }, executor: { type: "string" }, reviewer: { type: "string" } } },
+    suggestedSkills: { type: "array", items: { type: "string" } },
+    suggestedAgents: { type: "array", items: { type: "string" } },
+    suggestedEffort: { type: "object", additionalProperties: false, required: ["default"], properties: { default: { type: "string" }, planner: { type: "string" }, executor: { type: "string" }, reviewer: { type: "string" } } },
   },
 });
 
