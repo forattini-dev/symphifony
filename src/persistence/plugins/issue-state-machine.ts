@@ -302,6 +302,7 @@ export const issueStateMachineConfig = {
           nextRetryAt: undefined, lastError: undefined,
           linesAdded: churnAdded, linesRemoved: churnRemoved, filesChanged: churnFiles,
           branchName: issue?.branchName, workspacePath: issue?.workspacePath, worktreePath: issue?.worktreePath,
+          mergedReason: issue?.mergedReason,
         }).catch(() => {});
 
         if (churnAdded || churnRemoved || churnFiles) {
@@ -318,12 +319,14 @@ export const issueStateMachineConfig = {
         issue.completedAt = ts;
         issue.terminalWeek = week;
         issue.nextRetryAt = undefined;
+        issue.lastError = undefined;
         emitFsmEvent(issue.id, "state", `${issue.identifier} cancelled.`);
       }
       const res = issueResource(machine);
       if (res) {
         res.patch(machine.entityId, {
-          completedAt: ts, terminalWeek: week, nextRetryAt: undefined,
+          completedAt: ts, terminalWeek: week, nextRetryAt: undefined, lastError: undefined,
+          cancelledReason: issue?.cancelledReason,
         }).catch(() => {});
       }
     },
