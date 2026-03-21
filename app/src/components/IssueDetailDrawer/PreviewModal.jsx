@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   X, GitMerge, RotateCcw, Copy, Check, AlertTriangle, Loader,
-  FlaskConical, Undo2, Terminal,
+  FlaskConical, Undo2, Terminal, CheckCircle2, GitPullRequest,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
@@ -52,6 +52,18 @@ export function PreviewModal({ issue, onClose }) {
   const [actionError, setActionError] = useState(null);
 
   const [showCmds, setShowCmds] = useState(false);
+  const [mergePreview, setMergePreview] = useState(null);
+
+  const fetchMergePreview = useCallback(async () => {
+    try {
+      const res = await api.get(`/issues/${encodeURIComponent(issue.id)}/merge-preview`);
+      setMergePreview(res);
+    } catch {
+      setMergePreview(null);
+    }
+  }, [issue.id]);
+
+  useEffect(() => { fetchMergePreview(); }, [fetchMergePreview]);
 
   const fetchDiff = useCallback(async () => {
     setLoading(true);
@@ -169,6 +181,28 @@ export function PreviewModal({ issue, onClose }) {
             <GitMerge className="size-3.5 opacity-40 shrink-0" />
             <span className="font-mono text-xs bg-base-200 px-2 py-0.5 rounded">{baseBranch}</span>
           </div>
+
+          {/* Pre-merge conflict detection */}
+          {mergePreview?.willConflict && (
+            <div className="alert alert-warning text-xs py-2 gap-1.5">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <div>
+                <span className="font-semibold">Merge will conflict</span>
+                <span className="opacity-70"> — {mergePreview.conflictFiles.length} file{mergePreview.conflictFiles.length !== 1 ? "s" : ""}</span>
+                {mergePreview.conflictFiles.length > 0 && (
+                  <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono opacity-80">
+                    {mergePreview.conflictFiles.map((f) => <li key={f}>{f}</li>)}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+          {mergePreview && !mergePreview.willConflict && (
+            <div className="alert alert-success text-xs py-2 gap-1.5">
+              <CheckCircle2 className="size-3.5 shrink-0" />
+              <span>Merge is clean — no conflicts detected.</span>
+            </div>
+          )}
 
           {/* Test Live banner */}
           {tested && (
@@ -336,11 +370,11 @@ export function PreviewModal({ issue, onClose }) {
                 <RotateCcw className="size-3.5" /> Reject & Rollback
               </button>
               <button
-                className="btn btn-sm btn-success gap-1.5 flex-1"
+                className={`btn btn-sm gap-1.5 flex-1 ${mergePreview?.willConflict ? "btn-warning" : "btn-success"}`}
                 onClick={() => { setConfirming("merge"); setActionError(null); }}
                 disabled={actionBusy}
               >
-                <GitMerge className="size-3.5" /> Approve & Merge
+                <GitMerge className="size-3.5" /> {mergePreview?.willConflict ? "Merge (conflicts expected)" : "Approve & Merge"}
               </button>
             </div>
           </div>

@@ -88,7 +88,32 @@ export function extractTokenUsage(output: string, jsonObj?: JsonRecord | null): 
       }
     }
 
-    // 1b. Claude --output-format json: usage field (aggregate totals)
+    // 1b. Gemini --output-format json: stats.models per-model breakdown
+    //     { stats: { models: { "gemini-2.5-flash": { tokens: { input, candidates, total, cached, thoughts } } } } }
+    const stats = jsonObj.stats as Record<string, unknown> | undefined;
+    const geminiModels = (stats?.models ?? null) as Record<string, Record<string, unknown>> | null;
+    if (geminiModels && typeof geminiModels === "object") {
+      let totalInput = 0, totalOutput = 0, primaryModel = "", maxTokens = 0;
+      for (const [model, data] of Object.entries(geminiModels)) {
+        const tokens = data?.tokens as Record<string, unknown> | undefined;
+        if (!tokens) continue;
+        const inp = Number(tokens.input || 0) + Number(tokens.cached || 0);
+        const out = Number(tokens.candidates || 0);
+        totalInput += inp;
+        totalOutput += out;
+        if (inp + out > maxTokens) { maxTokens = inp + out; primaryModel = model; }
+      }
+      if (totalInput > 0 || totalOutput > 0) {
+        return {
+          inputTokens: totalInput,
+          outputTokens: totalOutput,
+          totalTokens: totalInput + totalOutput,
+          model: primaryModel || undefined,
+        };
+      }
+    }
+
+    // 1c. Claude --output-format json: usage field (aggregate totals)
     const usage = jsonObj.usage as Record<string, unknown> | undefined;
     if (usage && typeof usage === "object") {
       const inp = Number(usage.input_tokens) || 0;
@@ -149,6 +174,18 @@ export function tryParseJsonOutput(output: string): JsonRecord | null {
       }
       // Direct JSON with status field (from --json-schema)
       if (obj.status) return obj;
+
+      // Gemini --output-format json: { response: "...", stats: { ... } }
+      if (typeof obj.response === "string") {
+        try {
+          const inner = JSON.parse(obj.response) as unknown;
+          if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+            return inner as JsonRecord;
+          }
+        } catch {
+          // response is plain text — not structured JSON
+        }
+      }
     }
   } catch {
     // Not JSON output — fall through to legacy parsing

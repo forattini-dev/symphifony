@@ -53,7 +53,7 @@ export function registerAnalyticsRoutes(app: any): void {
     try {
       const context = getApiRuntimeContextOrThrow();
       const doneIssues = context.state.issues.filter(
-        (i) => (i.state === "Done" || i.state === "Merged") && i.completedAt,
+        (i) => (i.state === "Approved" || i.state === "Merged") && i.completedAt,
       );
 
       const msToDay = (ms: number) => ms / (1000 * 60 * 60 * 24);

@@ -43,8 +43,7 @@ function makeIssue(overrides: Partial<IssueEntry> = {}): IssueEntry {
     identifier: "TST-1",
     title: "Add JWT authentication",
     description: "Implement JWT-based auth in the API",
-    priority: 2,
-    state: "Planned",
+    state: "PendingApproval",
     labels: ["auth", "backend"],
     paths: ["src/auth.ts"],
     blockedBy: [],
@@ -417,7 +416,6 @@ describe("buildExecutionPayload", () => {
     assert.equal(payload.issue.id, "test-123");
     assert.equal(payload.issue.identifier, "TST-1");
     assert.equal(payload.issue.title, "Add JWT authentication");
-    assert.equal(payload.issue.priority, 2);
   });
 
   it("populates provider fields correctly", () => {

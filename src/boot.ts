@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { env, exit, argv } from "node:process";
-import { CLI_ARGS, PACKAGE_ROOT, STATE_ROOT, TARGET_ROOT } from "./concerns/constants.ts";
-import { debugBoot, fail, now, sleep, parseIntArg } from "./concerns/helpers.ts";
+import { CLI_ARGS, STATE_ROOT, TARGET_ROOT } from "./concerns/constants.ts";
+import { debugBoot, fail, now, parseIntArg } from "./concerns/helpers.ts";
 import { initLogger, logger } from "./concerns/logger.ts";
 import { initStateStore, loadPersistedState, persistState, persistStateFull, closeStateStore } from "./persistence/store.ts";
-import { initQueueWorkers, stopQueueWorkers, enqueueForPlanning, enqueueForExecution, enqueueForReview } from "./persistence/plugins/queue-workers.ts";
+import { initQueueWorkers, stopQueueWorkers, recoverState, recoverOrphans, cleanTerminalWorkspaces } from "./persistence/plugins/queue-workers.ts";
 import { createContainer } from "./persistence/container.ts";
 import {
   applyPersistedSettings,
@@ -21,14 +21,12 @@ import {
 } from "./agents/providers.ts";
 import { setSkipSource, detectDefaultBranch } from "./domains/workspace.ts";
 import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./domains/issues.ts";
-import { hasDirtyState } from "./persistence/dirty-tracker.ts";
-import { executeTransition } from "./persistence/plugins/issue-state-machine.ts";
 import { startApiServer } from "./persistence/plugins/api-server.ts";
-import { installGracefulShutdown, isShuttingDown, ensureNotStale, hasTerminalQueue } from "./persistence/plugins/scheduler.ts";
-import { cleanWorkspace, isAgentStillRunning, cleanStalePidFile } from "./agents/agent.ts";
+import { startDevFrontend } from "./persistence/plugins/dev-server.ts";
+import { installGracefulShutdown, hasTerminalQueue } from "./persistence/plugins/scheduler.ts";
 import { recoverPlanningSession } from "./agents/planning/issue-planner.ts";
 import { hydrate as hydrateTokenLedger } from "./domains/tokens.ts";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { RuntimeState } from "./types.ts";
 
 function parsePort(args: string[]): number | undefined {
@@ -43,79 +41,6 @@ function parsePort(args: string[]): number | undefined {
     }
   }
   return undefined;
-}
-
-async function startDevFrontend(apiPort: number, devPort: number): Promise<void> {
-  const VITE_CONFIG_PATH = resolve(PACKAGE_ROOT, "app/vite.config.js");
-  let createViteServer: typeof import("vite").createServer;
-  try {
-    const vite = await import("vite");
-    createViteServer = vite.createServer;
-  } catch {
-    logger.warn("Vite not installed (devDependency). Run 'pnpm install' in the project to enable --dev mode.");
-    return;
-  }
-  // Wait for the API server to be ready before starting the proxy
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try {
-      const res = await fetch(`http://localhost:${apiPort}/api/health`);
-      if (res.ok) break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-
-  try {
-    const server = await createViteServer({
-      configFile: VITE_CONFIG_PATH,
-      customLogger: {
-        info: (msg: string) => logger.info(`[Vite] ${msg}`),
-        warn: (msg: string) => logger.warn(`[Vite] ${msg}`),
-        warnOnce: (msg: string) => logger.warn(`[Vite] ${msg}`),
-        error: (msg: string) => {
-          if (msg.includes("ws proxy error") || msg.includes("ws proxy socket error")) {
-            logger.debug(`[Vite] ${msg.split("\n")[0]} (transient, suppressed)`);
-            return;
-          }
-          logger.error(`[Vite] ${msg}`);
-        },
-        hasErrorLogged: () => false,
-        clearScreen: () => {},
-        hasWarned: false,
-      },
-      server: {
-        port: devPort,
-        host: true,
-        proxy: {
-          "/api": `http://localhost:${apiPort}`,
-          "/ws": {
-            target: `ws://localhost:${apiPort}`,
-            ws: true,
-            configure: (proxy) => {
-              const silence = (err: any) => {
-                logger.debug(`[Vite] WS proxy transient: ${err.code || err.message}`);
-              };
-              proxy.on("error", silence);
-              proxy.on("proxyReqWs", (_proxyReq: any, _req: any, socket: any) => {
-                socket.on("error", silence);
-              });
-            },
-          },
-          "/docs": `http://localhost:${apiPort}`,
-          "/health": `http://localhost:${apiPort}`,
-          "/manifest.webmanifest": `http://localhost:${apiPort}`,
-          "/service-worker.js": `http://localhost:${apiPort}`,
-          "/icon.svg": `http://localhost:${apiPort}`,
-          "/icon-maskable.svg": `http://localhost:${apiPort}`,
-          "/offline.html": `http://localhost:${apiPort}`,
-        },
-      },
-    });
-    await server.listen();
-    logger.info(`Dev frontend available at http://localhost:${devPort}`);
-  } catch (error) {
-    logger.warn(`Failed to start Vite dev server: ${String(error)}`);
-  }
 }
 
 function usage() {
@@ -250,57 +175,22 @@ async function main() {
   state.updatedAt = now();
   state.booting = false;
 
-  // Reconcile in-memory state with FSM persisted state (source of truth)
-  try {
-    const { getIssueStateMachinePlugin, ISSUE_STATE_MACHINE_ID } = await import("./persistence/plugins/issue-state-machine.ts");
-    const fsmPlugin = getIssueStateMachinePlugin();
-    if (fsmPlugin?.getState) {
-      for (const issue of state.issues) {
-        try {
-          const fsmState = await fsmPlugin.getState(ISSUE_STATE_MACHINE_ID, issue.id);
-          if (fsmState && fsmState !== issue.state) {
-            logger.warn({ issueId: issue.id, memoryState: issue.state, fsmState }, "[Boot] Reconciling desync — FSM is source of truth");
-            issue.state = fsmState as typeof issue.state;
-          }
-        } catch { /* FSM entity may not exist yet */ }
-      }
-    }
-  } catch { /* FSM plugin may not be ready */ }
-
-  // Detect and lock the default branch once at startup
   if (!state.config.defaultBranch) {
     try {
-      const detectedBranch = detectDefaultBranch(TARGET_ROOT);
-      state.config.defaultBranch = detectedBranch;
-      logger.info({ defaultBranch: detectedBranch }, "[Agent] Default branch detected");
-    } catch {
-      // Not a git repo or detection failed — leave undefined
-    }
+      state.config.defaultBranch = detectDefaultBranch(TARGET_ROOT);
+      logger.info({ defaultBranch: state.config.defaultBranch }, "[Boot] Default branch detected");
+    } catch { /* not a git repo */ }
   }
 
-  // Auto-detect test command from package.json if not configured
   if (!state.config.testCommand) {
     try {
-      const pkgPath = join(TARGET_ROOT, "package.json");
-      if (existsSync(pkgPath)) {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-        const testScript = pkg?.scripts?.test;
-        if (testScript && !testScript.includes("no test specified")) {
-          state.config.testCommand = "pnpm test";
-          logger.info({ testCommand: state.config.testCommand }, "[Boot] Auto-detected test command from package.json");
-        }
+      const pkg = JSON.parse(readFileSync(join(TARGET_ROOT, "package.json"), "utf8"));
+      if (pkg?.scripts?.test && !pkg.scripts.test.includes("no test specified")) {
+        state.config.testCommand = "pnpm test";
+        logger.info({ testCommand: state.config.testCommand }, "[Boot] Test command auto-detected");
       }
-    } catch {
-      // Non-critical — leave testCommand undefined
-    }
+    } catch { /* non-critical */ }
   }
-
-  if (state.config.agentCommand) {
-    state.notes.push(`Using agent command: ${state.config.agentCommand}`);
-  }
-  state.notes.push(`Agent session max turns: ${state.config.maxTurns}`);
-  state.notes.push(`Agent provider: ${state.config.agentProvider}`);
-  state.notes.push(`Interface mode: ${interfaceMode}`);
 
   if (!state.config.agentCommand.trim()) {
     const available = detectedProviders.filter((p) => p.available).map((p) => p.name);
@@ -317,43 +207,8 @@ async function main() {
     for (const err of configErrors) logger.warn(`Config validation: ${err}`);
   }
 
-  // Clean terminal workspaces in background (non-blocking boot)
-  const terminalIssues = state.issues.filter((i) => i.state === "Merged" || i.state === "Cancelled");
-  if (terminalIssues.length > 0) {
-    logger.info(`Scheduling cleanup of ${terminalIssues.length} terminal workspace(s) in background...`);
-    setImmediate(async () => {
-      for (const issue of terminalIssues) {
-        try { await cleanWorkspace(issue.id, issue, state); } catch {}
-      }
-      logger.info("Background workspace cleanup complete.");
-    });
-  }
-
-  // Recover orphaned agent processes from previous session
-  if (!skipRecovery) {
-    logger.debug({ issueCount: state.issues.filter((i) => i.state === "Running" || i.state === "Queued").length }, "[Boot] Checking for orphaned agent processes");
-    for (const issue of state.issues) {
-      if (issue.state === "Running" || issue.state === "Queued") {
-        const { alive, pid } = isAgentStillRunning(issue);
-        if (alive && pid) {
-          logger.info(`Agent for ${issue.identifier} still alive (PID ${pid.pid}), keeping state as Running.`);
-          if (issue.state !== "Running") {
-            try { await executeTransition(issue, "RUN", { issue, note: `Orphaned agent detected (PID ${pid.pid}), still alive — tracking resumed.` }); }
-            catch { issue.state = "Running"; }
-          }
-          addEvent(state, issue.id, "info", `Orphaned agent detected (PID ${pid.pid}), still alive — tracking resumed.`);
-        } else {
-          // Agent died — clean PID file, mark as Queued for resumption
-          if (issue.workspacePath) cleanStalePidFile(issue.workspacePath);
-          if (issue.state === "Running") {
-            try { await executeTransition(issue, "REQUEUE", { issue, note: `Agent process not found on boot — marked Queued.` }); }
-            catch { issue.state = "Queued"; }
-            addEvent(state, issue.id, "info", `Agent for ${issue.identifier} not found, marked Queued.`);
-          }
-        }
-      }
-    }
-  }
+  cleanTerminalWorkspaces();
+  if (!skipRecovery) await recoverOrphans();
 
   state.metrics = computeMetrics(state.issues);
 
@@ -374,8 +229,7 @@ async function main() {
     logger.warn({ err: error }, "[Boot] Queue workers failed to initialize — continuing without queue-based dispatch");
   }
 
-  const running = new Set<string>();
-  installGracefulShutdown(state, running);
+  installGracefulShutdown(state);
 
   logger.info("[Boot] Runtime ready");
   hydrateTokenLedger(state.issues);
@@ -389,53 +243,19 @@ async function main() {
   try {
     addEvent(state, undefined, "info", `Runtime started in local-only mode (filesystem tracker).`);
     const runForever = !runOnce && (Boolean(dashboardPort) || interfaceMode === "mcp");
-    logger.info({ runForever, runOnce, dashboardPort, interfaceMode }, "[Boot] Entering queue supervisor loop");
+    logger.info({ runForever, runOnce, dashboardPort, interfaceMode }, "[Boot] Queue-driven dispatch active");
 
-    // Boot recovery: enqueue all in-progress issues so queue workers pick them up
-    for (const issue of state.issues) {
-      try {
-        if (issue.state === "Planning" && issue.planningStatus !== "planning") {
-          await enqueueForPlanning(issue);
-        } else if (issue.state === "Queued" || issue.state === "Running") {
-          await enqueueForExecution(issue);
-        } else if (issue.state === "Reviewing") {
-          await enqueueForReview(issue);
-        }
-      } catch (err) {
-        logger.error({ err, issueId: issue.id, state: issue.state }, "[Boot] Failed to enqueue issue for recovery");
-      }
-    }
+    // Reconcile FSM state + enqueue in-progress issues
+    await recoverState();
 
-    const PERSIST_DEBOUNCE_MS = 5_000;
-    let lastPersistAt = 0;
-
+    // The unified queue handles: dispatch, stale checks, persist.
+    // boot.ts just keeps the process alive (or waits for terminal in batch mode).
     if (runForever) {
-      while (!isShuttingDown()) {
-        // Take a snapshot of states before stale recovery so we can detect transitions
-        const statesBefore = new Map(state.issues.map((i) => [i.id, i.state]));
-        await ensureNotStale(state, state.config.staleInProgressTimeoutMs);
-
-        // Re-enqueue any issues that just changed state due to stale recovery or retry eligibility
-        for (const issue of state.issues) {
-          const prev = statesBefore.get(issue.id);
-          if (prev !== issue.state) {
-            if (issue.state === "Queued") enqueueForExecution(issue).catch(() => {});
-            else if (issue.state === "Reviewing") enqueueForReview(issue).catch(() => {});
-            else if (issue.state === "Planning") enqueueForPlanning(issue).catch(() => {});
-          }
-        }
-
-        state.updatedAt = now();
-        if (hasDirtyState() || Date.now() - lastPersistAt > PERSIST_DEBOUNCE_MS) {
-          await persistState(state);
-          lastPersistAt = Date.now();
-        }
-        await sleep(1_000);
-      }
+      await new Promise<void>(() => {}); // block forever — graceful shutdown handler calls process.exit
     } else {
-      // Batch mode: wait until all issues reach terminal states
+      // Batch mode: poll until all issues reach terminal states
       while (!hasTerminalQueue(state)) {
-        await sleep(state.config.pollIntervalMs);
+        await new Promise((r) => setTimeout(r, state.config.pollIntervalMs));
       }
     }
   } catch (error) {

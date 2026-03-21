@@ -40,17 +40,17 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
   }, [issue.id]);
 
   const isPlanning = issue.state === "Planning";
-  const isPlanned = issue.state === "Planned";
+  const isPlanned = issue.state === "PendingApproval";
   const isRunning = issue.state === "Running" || issue.state === "Queued";
-  const isInReview = issue.state === "Reviewing" || issue.state === "Reviewed";
-  const isDone = issue.state === "Done";
+  const isInReview = issue.state === "Reviewing" || issue.state === "PendingDecision";
+  const isDone = issue.state === "Approved";
   const isMergedState = issue.state === "Merged";
   const isMerged = !!issue.mergedAt || isMergedState;
 
   // Planning: approve button lives inside PlanningTab, nothing to show here
   if (isPlanning) return null;
 
-  // Planned: show Execute button to dispatch to Queued
+  // PendingApproval: show Execute button to dispatch to Queued
   if (isPlanned) {
     return (
       <div className="px-6 py-3 border-t border-base-300 shrink-0 space-y-1.5" style={footerStyle}>
@@ -82,7 +82,7 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
     );
   }
 
-  // Reviewing/Reviewed: preview + approve/rework actions
+  // Reviewing/PendingDecision: preview + approve/rework actions
   if (isInReview) {
     return (
       <>
@@ -97,7 +97,7 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
           <div className="flex items-center gap-2">
             <button
               className="btn btn-success btn-sm gap-1.5 flex-1"
-              onClick={() => onStateChange?.(issue.id, "Done")}
+              onClick={() => onStateChange?.(issue.id, "Approved")}
             >
               <ThumbsUp className="size-4" /> Approve
             </button>
@@ -195,9 +195,9 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
 
   const { ref: swipeRef, handlers: swipeHandlers } = useSwipeToDismiss({ onDismiss: handleClose, direction: "right" });
 
-  // Reset tab when issue changes — auto-open Review tab when Reviewing/Reviewed
+  // Reset tab when issue changes — auto-open Review tab when Reviewing/PendingDecision
   useEffect(() => {
-    setTab((issue?.state === "Planning" || issue?.state === "Planned") ? "planning" : (issue?.state === "Reviewing" || issue?.state === "Reviewed") ? "review" : "overview");
+    setTab((issue?.state === "Planning" || issue?.state === "PendingApproval") ? "planning" : (issue?.state === "Reviewing" || issue?.state === "PendingDecision") ? "review" : "overview");
     setMergeBusy(false);
     setMergeError(null);
     setMergeNotice(null);
@@ -213,9 +213,12 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
       const res = await api.post(`/issues/${encodeURIComponent(issue.id)}/merge`);
       const mergedFiles = typeof res?.copied?.length === "number" ? res.copied.length : 0;
       const conflicts = typeof res?.conflicts?.length === "number" ? res.conflicts.length : 0;
-      setMergeNotice(conflicts > 0
-        ? `Merge completed with ${conflicts} conflict${conflicts !== 1 ? "s" : ""}.`
-        : `Merged ${mergedFiles} file${mergedFiles !== 1 ? "s" : ""} into the project.`);
+      const conflictNames = Array.isArray(res?.conflicts) ? res.conflicts : [];
+      if (conflicts > 0) {
+        setMergeError(`Merge aborted — ${conflicts} conflict${conflicts !== 1 ? "s" : ""}: ${conflictNames.join(", ")}`);
+      } else {
+        setMergeNotice(`Merged ${mergedFiles} file${mergedFiles !== 1 ? "s" : ""} into the project.`);
+      }
     } catch (err) {
       setMergeError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -353,7 +356,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
                 >
                   <Icon className="size-3" />
                   {label}
-                  {id === "review" && (issue.state === "Reviewing" || issue.state === "Reviewed") && (
+                  {id === "review" && (issue.state === "Reviewing" || issue.state === "PendingDecision") && (
                     <span className="badge badge-xs badge-secondary">!</span>
                   )}
                   {id === "planning" && issue.planningStatus === "planning" && (
@@ -375,7 +378,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
           <div key={tab} className="animate-fade-in">
             {tab === "overview" && <OverviewTab issue={issue} onStateChange={onStateChange} onRetry={onRetry} onCancel={onCancel} />}
             {tab === "planning" && <PlanningTab issue={issue} onStateChange={onStateChange} workflowConfig={workflowConfig} />}
-            {tab === "review" && <ReviewTab issue={issue} issueId={issue.id} onStateChange={onStateChange} />}
+            {tab === "review" && <ReviewTab issue={issue} issueId={issue.id} onStateChange={onStateChange} onRetry={onRetry} />}
             {tab === "execution" && <ExecutionTab issue={issue} workflowConfig={workflowConfig} />}
             {tab === "diff" && <DiffTab issueId={issue.id} />}
             {tab === "routing" && <RoutingTab issue={issue} />}

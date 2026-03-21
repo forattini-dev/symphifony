@@ -8,7 +8,7 @@ import { api } from "../../../api.js";
 import { Section } from "../shared.jsx";
 import { DiffFileItem, DiffViewer } from "./DiffTab.jsx";
 
-export function ReviewTab({ issue, issueId, onStateChange }) {
+export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
   const [diffData, setDiffData] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [note, setNote] = useState("");
@@ -49,8 +49,8 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
     }
   }, [issueId]);
 
-  const isInReview = issue.state === "Reviewing" || issue.state === "Reviewed";
-  const isDone = issue.state === "Done";
+  const isInReview = issue.state === "Reviewing" || issue.state === "PendingDecision";
+  const isDone = issue.state === "Approved";
 
   useEffect(() => {
     if (!isInReview) return;
@@ -77,7 +77,7 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
     }
   }
 
-  const handleApprove = () => { setVerdict("approved"); onStateChange?.(issue.id, "Done"); };
+  const handleApprove = () => { setVerdict("approved"); onStateChange?.(issue.id, "Approved"); };
   const handleRework = () => { setVerdict("rework"); onStateChange?.(issue.id, "Queued"); };
   const handleReject = () => { setVerdict("rejected"); onStateChange?.(issue.id, "Blocked"); };
 
@@ -96,9 +96,22 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
               <span className="opacity-70"> — {mergeResult.copied} file{mergeResult.copied !== 1 ? "s" : ""} copied{mergeResult.deleted > 0 ? `, ${mergeResult.deleted} deleted` : ""}</span>
             )}
             {mergeResult?.conflicts > 0 && (
-              <p className="text-xs text-warning font-medium mt-0.5">{mergeResult.conflicts} file{mergeResult.conflicts !== 1 ? "s" : ""} conflicted with another worker and were skipped.</p>
+              <>
+                <p className="text-xs text-warning font-medium mt-0.5">
+                  Merge aborted — {mergeResult.conflicts} file{mergeResult.conflicts !== 1 ? "s" : ""} had conflicts. No changes were applied.
+                </p>
+                {mergeResult.conflictFiles?.length > 0 && (
+                  <ul className="text-xs text-warning/80 mt-1 ml-4 list-disc space-y-0.5">
+                    {mergeResult.conflictFiles.map((f) => (
+                      <li key={f} className="font-mono">{f}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
-            <p className="text-xs opacity-50 mt-0.5">The approved branch has been integrated into the current project branch.</p>
+            {(!mergeResult?.conflicts || mergeResult.conflicts === 0) && (
+              <p className="text-xs opacity-50 mt-0.5">The approved branch has been integrated into the current project branch.</p>
+            )}
           </div>
         </div>
       )}
@@ -118,7 +131,32 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
           </div>
         </div>
       )}
-      {!isMerged && isDone && (
+      {!isMerged && isDone && mergeResult?.conflicts > 0 && (
+        <div className="alert border border-warning/30 bg-warning/5 text-sm">
+          <AlertTriangle className="size-4 shrink-0 text-warning" />
+          <div className="flex-1">
+            <span className="font-semibold">Merge failed due to conflicts</span>
+            <p className="text-xs opacity-70 mt-0.5">
+              The branch {issue.branchName ? <span className="font-mono">{issue.branchName}</span> : ""} could not be merged because {mergeResult.conflicts} file{mergeResult.conflicts !== 1 ? "s" : ""} diverged from the base branch.
+              You can send it back for rework so the agent resolves the conflicts.
+            </p>
+            {mergeResult.conflictFiles?.length > 0 && (
+              <ul className="text-xs opacity-60 mt-1 ml-4 list-disc space-y-0.5">
+                {mergeResult.conflictFiles.map((f) => (
+                  <li key={f} className="font-mono">{f}</li>
+                ))}
+              </ul>
+            )}
+            <button
+              className="btn btn-xs btn-warning gap-1 mt-2"
+              onClick={() => onRetry?.(issue.id)}
+            >
+              <RotateCcw className="size-3" /> Requeue for Rework
+            </button>
+          </div>
+        </div>
+      )}
+      {!isMerged && isDone && (!mergeResult || mergeResult.conflicts === 0) && (
         <div className="alert border border-info/30 bg-info/5 text-sm">
           <GitBranch className="size-4 shrink-0 text-info" />
           <div>
@@ -138,7 +176,7 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
         <div className="alert alert-error text-sm"><AlertTriangle className="size-4" /> Review failed. Check execution output.</div>
       )}
       {verdict === "approved" && isInReview && (
-        <div className="alert alert-success text-sm"><ThumbsUp className="size-4" /> Approved! Moving to Done.</div>
+        <div className="alert alert-success text-sm"><ThumbsUp className="size-4" /> Approved! Moving to Approved.</div>
       )}
       {verdict === "rework" && (
         <div className="alert alert-warning text-sm"><RotateCcw className="size-4" /> Sent back for rework.</div>
@@ -279,7 +317,7 @@ export function ReviewTab({ issue, issueId, onStateChange }) {
             </button>
           </div>
           <p className="text-xs opacity-40">
-            <strong>Approve</strong> moves to Done. <strong>Rework</strong> sends back to executor. <strong>Reject</strong> blocks the issue.
+            <strong>Approve</strong> moves to Approved. <strong>Rework</strong> sends back to executor. <strong>Reject</strong> blocks the issue.
           </p>
         </div>
       )}

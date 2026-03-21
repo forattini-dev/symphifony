@@ -58,8 +58,7 @@ export function normalizeIssue(
     identifier: toStringValue(raw.identifier, id),
     title: toStringValue(raw.title, `Issue ${id}`),
     description: toStringValue(raw.description, ""),
-    priority: toNumberValue(raw.priority, 1),
-    state: normalizeState(raw.state, raw.plan && typeof raw.plan === "object" ? "Planned" : "Planning"),
+    state: normalizeState(raw.state, raw.plan && typeof raw.plan === "object" ? "PendingApproval" : "Planning"),
     branchName: toStringValue(raw.branchName) || toStringValue(raw.branch_name),
     url: toStringValue(raw.url),
     assigneeId: toStringValue(raw.assignee_id),
@@ -120,14 +119,13 @@ export function createIssueFromPayload(
   const blockedBy = toStringArray(payload.blockedBy);
   const paths = toStringArray(payload.paths);
   const images = toStringArray(payload.images);
-  const initialState = parseIssueState(payload.state) ?? (payload.plan ? "Planned" : "Planning");
+  const initialState = parseIssueState(payload.state) ?? (payload.plan ? "PendingApproval" : "Planning");
 
   const issue: IssueEntry = {
     id,
     identifier,
     title: toStringValue(payload.title, `Issue ${identifier}`),
     description: toStringValue(payload.description, ""),
-    priority: clamp(toNumberValue(payload.priority, 1), 1, 10),
     state: initialState,
     branchName: toStringValue(payload.branchName),
     baseBranch: toStringValue(payload.baseBranch) || defaultBranch,
@@ -210,7 +208,7 @@ export function buildRuntimeState(
         identifier: toStringValue(existing.identifier, existing.id),
         title: toStringValue(existing.title, `Issue ${toStringValue(existing.identifier, existing.id)}`),
         description: toStringValue(existing.description, ""),
-        state: normalizeState(existing.state, existing.plan ? "Planned" : "Planning"),
+        state: normalizeState(existing.state, existing.plan ? "PendingApproval" : "Planning"),
         paths: toStringArray(existing.paths),
         inferredPaths: toStringArray(existing.inferredPaths),
         labels: toStringArray(existing.labels),
@@ -322,7 +320,7 @@ export function issueDependenciesResolved(issue: IssueEntry, allIssues: IssueEnt
   const map = new Map(allIssues.map((entry) => [entry.id, entry]));
   return issue.blockedBy.every((dependencyId) => {
     const dep = map.get(dependencyId);
-    return dep?.state === "Done" || dep?.state === "Merged";
+    return dep?.state === "Approved" || dep?.state === "Merged";
   });
 }
 
@@ -349,7 +347,7 @@ export async function handleStatePatch(state: RuntimeState, issue: IssueEntry, p
     await transitionIssue(issue, event, { note: `Manual state update: ${nextState}`, reason: toStringValue(payload.reason) });
   }
 
-  if (nextState === "Planned") {
+  if (nextState === "PendingApproval") {
     issue.nextRetryAt = undefined;
     issue.lastError = undefined;
   }

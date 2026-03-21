@@ -7,18 +7,28 @@ import { PLAN_JSON_SCHEMA } from "./planning-schema.ts";
 import { ADAPTERS } from "../adapters/registry.ts";
 import { CLAUDE_RESULT_SCHEMA } from "../adapters/commands.ts";
 import { renderPrompt } from "../prompting.ts";
-import { STATE_ROOT } from "../../concerns/constants.ts";
+import { STATE_ROOT, TARGET_ROOT } from "../../concerns/constants.ts";
 import { detectAvailableProviders } from "../providers.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "../../persistence/settings.ts";
+import { discoverSkills, discoverAgents, discoverCommands } from "../skills.ts";
 
 // ── Prompt builders ───────────────────────────────────────────────────────────
 
 export async function buildPlanPrompt(title: string, description: string, fast = false, images?: string[]): Promise<string> {
+  const skills = discoverSkills(TARGET_ROOT);
+  const agents = discoverAgents(TARGET_ROOT);
+  const commands = discoverCommands(TARGET_ROOT);
+  const hasCapabilities = skills.length > 0 || agents.length > 0 || commands.length > 0;
+
   return renderPrompt("issue-planner", {
     title,
     description: description || "(none provided)",
     fast,
     images: images?.length ? images : undefined,
+    availableCapabilities: hasCapabilities,
+    availableSkills: skills.map((s) => ({ name: s.name })),
+    availableAgents: agents.map((a) => ({ name: a.name })),
+    availableCommands: commands.map((c) => ({ name: c.name })),
   });
 }
 

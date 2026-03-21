@@ -2,13 +2,13 @@ export type JsonRecord = Record<string, unknown>;
 
 export type IssueState =
   | "Planning"
-  | "Planned"
+  | "PendingApproval"
   | "Queued"
   | "Running"
   | "Reviewing"
-  | "Reviewed"
+  | "PendingDecision"
   | "Blocked"
-  | "Done"
+  | "Approved"
   | "Merged"
   | "Cancelled";
 
@@ -34,7 +34,6 @@ export type IssueEntry = {
   identifier: string;
   title: string;
   description: string;
-  priority: number;
   state: IssueState;
   branchName?: string;
   baseBranch?: string;
@@ -61,6 +60,8 @@ export type IssueEntry = {
   workspacePath?: string;
   workspacePreparedAt?: string;
   lastError?: string;
+  /** Which phase produced the lastError — used by onEnterQueued to tag AttemptSummary */
+  lastFailedPhase?: "plan" | "execute" | "review" | "crash";
   durationMs?: number;
   commandExitCode?: number | null;
   commandOutputTail?: string;
@@ -80,7 +81,7 @@ export type IssueEntry = {
   /** When the workspace was merged into TARGET_ROOT */
   mergedAt?: string;
   /** Summary of the merge result */
-  mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number };
+  mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number; conflictFiles?: string[] };
   /** Why the issue was merged — set for both auto and manual merges */
   mergedReason?: string;
   /** Why the issue was cancelled — set for both auto and manual cancels */
@@ -112,10 +113,20 @@ export type IssueEntry = {
 export type AttemptSummary = {
   planVersion: number;
   executeAttempt: number;
+  /** Which phase failed: plan, execute, review, or unknown */
+  phase?: "plan" | "execute" | "review" | "crash";
   error: string;
   outputTail?: string;
   outputFile?: string;
   timestamp: string;
+  /** Structured failure analysis (populated by failure-analyzer) */
+  insight?: {
+    errorType: string;
+    rootCause: string;
+    failedCommand?: string;
+    filesInvolved: string[];
+    suggestion: string;
+  };
 };
 
 export type ValidationResult = {
@@ -212,6 +223,8 @@ export type RuntimeConfig = {
   mergeMode?: "local" | "push-pr";
   testCommand?: string;
   prBaseBranch?: string;
+  /** Maximum dollar budget per agent execution (claude --max-budget-usd) */
+  maxBudgetUsd?: number;
   afterCreateHook: string;
   beforeRunHook: string;
   afterRunHook: string;

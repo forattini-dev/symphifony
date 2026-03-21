@@ -545,6 +545,104 @@ export function mergeWorkspace(issue: IssueEntry): MergeResult {
   return mergeWorktree(issue, issue.worktreePath);
 }
 
+// ── Dry merge (pre-merge conflict detection) ────────────────────────────────
+
+export type DryMergeResult = {
+  willConflict: boolean;
+  conflictFiles: string[];
+  canMerge: boolean;
+  changedFiles: number;
+};
+
+/** Run a no-commit merge to detect conflicts without modifying the working tree. */
+export function dryMerge(issue: IssueEntry): DryMergeResult {
+  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
+    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot preview merge.`);
+  }
+
+  ensureWorktreeCommitted(issue);
+
+  const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (currentBranch !== issue.baseBranch) {
+    throw new Error(`Cannot preview merge: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
+  }
+
+  const targetStatus = execSync("git status --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (targetStatus) {
+    throw new Error(`Cannot preview merge: target repository has uncommitted changes.`);
+  }
+
+  let conflictFiles: string[] = [];
+  let willConflict = false;
+
+  try {
+    execSync(
+      `git merge --no-commit --no-ff "${issue.branchName}"`,
+      { cwd: TARGET_ROOT, stdio: "pipe" },
+    );
+  } catch {
+    willConflict = true;
+    try {
+      const conflictOut = execSync(
+        "git diff --name-only --diff-filter=U",
+        { cwd: TARGET_ROOT, encoding: "utf8" },
+      );
+      conflictFiles = conflictOut.trim().split("\n").filter(Boolean);
+    } catch {}
+  }
+
+  // Always clean up: abort if conflicted, reset if succeeded (was --no-commit)
+  try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {
+    try { execSync("git reset --hard HEAD", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+  }
+
+  let changedFiles = 0;
+  try {
+    const diffOut = execSync(
+      `git diff --name-only "${issue.baseBranch}"..."${issue.branchName}"`,
+      { cwd: TARGET_ROOT, encoding: "utf8" },
+    );
+    changedFiles = diffOut.trim().split("\n").filter(Boolean).length;
+  } catch {}
+
+  return { willConflict, conflictFiles, canMerge: !willConflict, changedFiles };
+}
+
+// ── Rebase worktree onto updated base ────────────────────────────────────────
+
+export type RebaseResult = {
+  success: boolean;
+  conflictFiles: string[];
+};
+
+/** Rebase the worktree branch onto the latest base branch. Aborts on conflicts. */
+export function rebaseWorktree(issue: IssueEntry): RebaseResult {
+  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
+    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot rebase.`);
+  }
+
+  ensureWorktreeCommitted(issue);
+
+  try {
+    execSync(
+      `git rebase "${issue.baseBranch}"`,
+      { cwd: issue.worktreePath, stdio: "pipe" },
+    );
+    return { success: true, conflictFiles: [] };
+  } catch {
+    let conflictFiles: string[] = [];
+    try {
+      const conflictOut = execSync(
+        "git diff --name-only --diff-filter=U",
+        { cwd: issue.worktreePath, encoding: "utf8" },
+      );
+      conflictFiles = conflictOut.trim().split("\n").filter(Boolean);
+    } catch {}
+    try { execSync("git rebase --abort", { cwd: issue.worktreePath, stdio: "pipe" }); } catch {}
+    return { success: false, conflictFiles };
+  }
+}
+
 export function hydrateIssuePathsFromWorkspace(issue: IssueEntry): string[] {
   const inferredPaths = inferChangedWorkspacePaths(issue.workspacePath ?? "", 32, issue);
   if (inferredPaths.length === 0) return [];

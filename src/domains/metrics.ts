@@ -28,19 +28,19 @@ export function computeMetrics(issues: IssueEntry[]): RuntimeMetrics {
       case "Planning":
         planning += 1;
         break;
-      case "Planned":
+      case "PendingApproval":
         queued += 1;
         break;
       case "Queued":
       case "Running":
       case "Reviewing":
-      case "Reviewed":
+      case "PendingDecision":
         inProgress += 1;
         break;
       case "Blocked":
         blocked += 1;
         break;
-      case "Done":
+      case "Approved":
         done += 1;
         break;
       case "Merged":

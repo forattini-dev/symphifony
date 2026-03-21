@@ -22,7 +22,7 @@ export function GlobalActivityBar({ issues }) {
           planning++;
           break;
         case "Reviewing":
-        case "Reviewed": reviewing++; break;
+        case "PendingDecision": reviewing++; break;
         case "Blocked": blocked++; break;
       }
     }
@@ -84,7 +84,7 @@ export function QueuePosition({ issue, allIssues }) {
 
   const queued = allIssues
     .filter((i) => i.state === "Queued")
-    .sort((a, b) => a.priority - b.priority);
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   const position = queued.findIndex((i) => i.id === issue.id) + 1;
   const total = queued.length;

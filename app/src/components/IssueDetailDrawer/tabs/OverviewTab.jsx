@@ -38,7 +38,6 @@ export function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
       {/* Details + Timing — collapsed into one compact section */}
       <Section title="Details" icon={Layers}>
         <div className="space-y-0.5">
-          <Field label="Priority" value={`P${issue.priority}`} />
           <Field label="Attempts" value={`${issue.attempts ?? 0} / ${issue.maxAttempts ?? 0}`} />
           {issue.branchName && <Field label="Branch" value={issue.branchName} mono />}
           {issue.baseBranch && <Field label="Base branch" value={issue.baseBranch} mono />}
@@ -96,7 +95,7 @@ export function OverviewTab({ issue, onStateChange, onRetry, onCancel }) {
               <RotateCcw className="size-3" /> Retry
             </button>
             <button className="btn btn-sm btn-error btn-soft gap-1 max-sm:w-full" onClick={() => onCancel?.(issue.id)}
-              disabled={issue.state === "Done" || issue.state === "Cancelled"}>
+              disabled={issue.state === "Approved" || issue.state === "Cancelled"}>
               <XCircle className="size-3" /> Cancel
             </button>
           </div>

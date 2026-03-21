@@ -7,22 +7,22 @@ import { ISSUE_STATE_MACHINE } from "../utils.js";
  */
 /** States that belong to each column (for resolving drop target). */
 const COLUMN_STATES = {
-  Planning: ["Planning", "Planned"],
-  "In Progress": ["Queued", "Running"],
-  Reviewing: ["Reviewing", "Reviewed"],
+  Planning: ["Planning"],
+  "Needs Approval": ["PendingApproval", "PendingDecision"],
+  "In Progress": ["Queued", "Running", "Reviewing"],
   Blocked: ["Blocked"],
-  Done: ["Done", "Merged", "Cancelled"],
+  Done: ["Approved", "Merged", "Cancelled"],
 };
 
 /** Reverse: actual states → column name. Must match BoardView's grouping sets. */
-const PLANNING_STATES = new Set(["Planning", "Planned"]);
-const IN_PROGRESS_STATES = new Set(["Queued", "Running"]);
-const REVIEWING_STATES = new Set(["Reviewing", "Reviewed"]);
-const DONE_STATES = new Set(["Done", "Merged", "Cancelled"]);
+const PLANNING_STATES = new Set(["Planning"]);
+const NEEDS_APPROVAL_STATES = new Set(["PendingApproval", "PendingDecision"]);
+const IN_PROGRESS_STATES = new Set(["Queued", "Running", "Reviewing"]);
+const DONE_STATES = new Set(["Approved", "Merged", "Cancelled"]);
 function stateToColumn(state) {
   if (PLANNING_STATES.has(state)) return "Planning";
+  if (NEEDS_APPROVAL_STATES.has(state)) return "Needs Approval";
   if (IN_PROGRESS_STATES.has(state)) return "In Progress";
-  if (REVIEWING_STATES.has(state)) return "Reviewing";
   if (DONE_STATES.has(state)) return "Done";
   return state;
 }

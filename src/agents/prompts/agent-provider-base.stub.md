@@ -35,6 +35,10 @@ Prefer stronger hierarchy, spacing, and readability decisions over generic imple
 {{profileInstructions}}
 {{/if}}
 
+{{#if capabilitiesManifest}}
+{{capabilitiesManifest}}
+{{/if}}
+
 {{#if skillContext}}
 {{skillContext}}
 {{/if}}

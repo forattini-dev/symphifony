@@ -48,39 +48,39 @@ stateDiagram-v2
     classDef cancelled fill:#9ca3af,color:#fff,stroke:#6b7280,stroke-width:2px
 
     [*] --> Planning
-    Planning --> Planned: PLANNED
-    Planned --> Queued: QUEUE
+    Planning --> PendingApproval: PLANNED
+    PendingApproval --> Queued: QUEUE
     Queued --> Running: RUN
     Running --> Reviewing: REVIEW
-    Reviewing --> Reviewed: REVIEWED
-    Reviewed --> Done: DONE
-    Done --> Merged: MERGE
+    Reviewing --> PendingDecision: REVIEWED
+    PendingDecision --> Approved: APPROVE
+    Approved --> Merged: MERGE
 
     Running --> Blocked: BLOCK
     Reviewing --> Blocked: BLOCK
     Blocked --> Queued: UNBLOCK
     Blocked --> Planning: REPLAN
 
-    Reviewed --> Queued: rework
-    Reviewed --> Planning: REPLAN
+    PendingDecision --> Queued: REQUEUE (rework)
+    PendingDecision --> Planning: REPLAN
 
-    Done --> Planning: REOPEN
+    Approved --> Planning: REOPEN
     Merged --> Planning: REOPEN
 
     Planning --> Cancelled: CANCEL
-    Planned --> Cancelled: CANCEL
-    Reviewed --> Cancelled: CANCEL
+    PendingApproval --> Cancelled: CANCEL
+    PendingDecision --> Cancelled: CANCEL
     Blocked --> Cancelled: CANCEL
     Cancelled --> Planning: REOPEN
 
     Merged --> [*]
     Cancelled --> [*]
 
-    class Planning,Planned planning
+    class Planning,PendingApproval planning
     class Queued queued
     class Running running
-    class Reviewing,Reviewed review
-    class Done done
+    class Reviewing,PendingDecision review
+    class Approved done
     class Merged merged
     class Blocked blocked
     class Cancelled cancelled
@@ -93,8 +93,16 @@ stateDiagram-v2
 | **Approve** | You review the plan. Optionally refine it with AI chat before approving. |
 | **Execute** | Agents run in an isolated git worktree. Live output streams to the dashboard. |
 | **Review** | The reviewer agent inspects the diff and either approves, requests rework, or blocks. |
-| **Done** | Approved and waiting for merge. You review the diff in the dashboard. |
+| **Approved** | Approved and waiting for merge. You review the diff in the dashboard. |
 | **Merge** | You merge the worktree into your project. Analytics capture lines added/removed. |
+
+**Retry operations** are semantically distinct from first-run operations:
+
+| Retry | What happens |
+|-------|-------------|
+| **Replan** | Archives the current plan, increments plan version, resets execution/review counters, and generates a fresh plan. |
+| **Re-execute** | Retries execution from Blocked state. Prior failure insights are analyzed and injected into the prompt so the agent avoids repeating the same mistake. |
+| **Rework** | Reviewer requested changes. Reviewer feedback is archived as a structured failure insight, and the issue is re-queued for another execution attempt. |
 
 Agents run as detached child processes, tracked by PID. If the server restarts mid-run, fifony recovers on the next boot.
 
@@ -268,7 +276,7 @@ FIFONY_LOG_FILE=0                     # set to 1 to also write .fifony/fifony-lo
 
 | Layer | How it works |
 |-------|-------------|
-| **State machine** | Single source of truth. All transitions, side effects (events, field mutations, EC tracking), and guards live in `issue-state-machine.ts`. |
+| **State machine** | Single source of truth. All transitions, side effects (events, field mutations, EC tracking), and guards live in `issue-state-machine.ts`. Dedicated commands for each retry type: `replanIssueCommand`, `retryExecutionCommand`, `requestReworkCommand`. |
 | **Persistence** | s3db.js with SQLite backend. Issues, events, sessions, and settings are first-class resources. No external DB. |
 | **Analytics** | `EventualConsistencyPlugin` tracks token usage, code churn (lines added/removed), and event counts with daily cohort rollups. |
 | **Queue** | `S3QueuePlugin` dispatches planning/execution/review jobs to concurrent workers. |

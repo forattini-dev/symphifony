@@ -8,6 +8,16 @@ FAST MODE: Be brief and direct. Minimize reasoning depth.
 - Focus only on: summary, steps, estimatedComplexity, suggestedPaths, suggestedLabels.
 {{/if}}
 
+{{#if availableCapabilities}}
+## Installed Capabilities (choose from these in toolingDecision)
+
+{{#if availableSkills.length}}Skills available: {{#each availableSkills}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+{{#if availableAgents.length}}Agents available: {{#each availableAgents}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+{{#if availableCommands.length}}Commands available: {{#each availableCommands}}/{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+
+ONLY recommend skills/subagents from this list. Do not invent names.
+{{/if}}
+
 Issue title: {{title}}
 Issue description: {{description}}
 {{#if images}}

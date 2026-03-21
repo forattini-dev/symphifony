@@ -71,19 +71,19 @@ export function fillDailyGaps(data, days = 14) {
 }
 
 export const STATES = [
-  "Planning", "Planned", "Queued", "Running",
-  "Reviewing", "Reviewed", "Blocked", "Done", "Merged", "Cancelled"
+  "Planning", "PendingApproval", "Queued", "Running",
+  "Reviewing", "PendingDecision", "Blocked", "Approved", "Merged", "Cancelled"
 ];
 // Must match backend state machine in persistence/plugins/issue-state-machine.ts
 export const ISSUE_STATE_MACHINE = {
-  Planning:  ["Planned", "Cancelled"],
-  Planned:   ["Queued", "Planning", "Cancelled"],
+  Planning:  ["PendingApproval", "Cancelled"],
+  PendingApproval:   ["Queued", "Planning", "Cancelled"],
   Queued:    ["Running"],
   Running:   ["Reviewing", "Queued", "Blocked"],
-  Reviewing: ["Reviewed", "Queued", "Blocked"],
-  Reviewed:  ["Done", "Queued", "Planning", "Cancelled"],
+  Reviewing: ["PendingDecision", "Queued", "Blocked"],
+  PendingDecision:  ["Approved", "Queued", "Planning", "Cancelled"],
   Blocked:   ["Queued", "Planning", "Cancelled"],
-  Done:      ["Merged", "Planning"],
+  Approved:      ["Merged", "Planning"],
   Merged:    ["Planning"],
   Cancelled: ["Planning"],
 };

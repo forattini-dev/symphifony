@@ -215,7 +215,7 @@ export function DashboardProvider({ children }) {
   const toggleEvents = useCallback(() => setIsEventsOpen((prev) => !prev), []);
   const notifications = useNotifications(issues);
 
-  // Track previous issue states to detect Done transitions and fire confetti on the card
+  // Track previous issue states to detect Approved transitions and fire confetti on the card
   const prevIssueStatesRef = useRef(new Map());
   useEffect(() => {
     const prev = prevIssueStatesRef.current;

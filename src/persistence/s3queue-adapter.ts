@@ -1,27 +1,17 @@
 import type { IssueEntry } from "../types.ts";
-import type { IQueuePort } from "../ports/index.ts";
+import type { IQueuePort, JobType } from "../ports/index.ts";
 import {
-  enqueueForPlanning,
-  enqueueForExecution,
-  enqueueForReview,
+  enqueue,
   areQueueWorkersActive,
 } from "./plugins/queue-workers.ts";
 
 /**
- * Wraps existing queue-workers.ts functions behind the IQueuePort interface.
+ * Wraps the unified queue behind the IQueuePort interface.
  */
 export function createS3QueueAdapter(): IQueuePort {
   return {
-    async enqueueForPlanning(issue: IssueEntry): Promise<void> {
-      return enqueueForPlanning(issue);
-    },
-
-    async enqueueForExecution(issue: IssueEntry): Promise<void> {
-      return enqueueForExecution(issue);
-    },
-
-    async enqueueForReview(issue: IssueEntry): Promise<void> {
-      return enqueueForReview(issue);
+    async enqueue(issue: IssueEntry, job: JobType): Promise<void> {
+      return enqueue(issue, job);
     },
 
     isActive(): boolean {

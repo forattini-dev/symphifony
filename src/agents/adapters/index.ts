@@ -18,6 +18,7 @@ export async function compileExecution(
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
+  capabilitiesManifest?: string,
 ): Promise<CompiledExecution | null> {
   const plan = issue.plan;
   if (!plan?.steps?.length) return null;
@@ -26,7 +27,7 @@ export async function compileExecution(
   if (!adapter) return null;
 
   const payload = buildExecutionPayload(issue, provider, plan, workspacePath);
-  const compiled = await adapter.compile(issue, provider, plan, config, workspacePath, skillContext);
+  const compiled = await adapter.compile(issue, provider, plan, config, workspacePath, skillContext, capabilitiesManifest);
   compiled.payload = payload;
   return compiled;
 }
@@ -38,6 +39,7 @@ export async function compileReview(
   reviewer: AgentProviderDefinition,
   workspacePath: string,
   diffSummary: string,
+  config?: RuntimeConfig,
 ): Promise<CompiledReview> {
   const plan = issue.plan;
   const prompt = await renderPrompt("compile-review", {
@@ -53,7 +55,7 @@ export async function compileReview(
 
   const adapter = ADAPTERS[reviewer.provider];
   const command = adapter
-    ? adapter.buildReviewCommand(reviewer)
+    ? adapter.buildReviewCommand(reviewer, config)
     : reviewer.command;
 
   return { prompt, command };

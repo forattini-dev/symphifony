@@ -1,8 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Activity } from "lucide-react";
 import { NAV_ITEMS } from "./Header.jsx";
 
-export function MobileDock({ onToggleEvents, eventsOpen }) {
+export function MobileDock() {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
@@ -21,13 +20,6 @@ export function MobileDock({ onToggleEvents, eventsOpen }) {
           </Link>
         );
       })}
-      <button
-        className={eventsOpen ? "dock-active" : undefined}
-        onClick={onToggleEvents}
-      >
-        <Activity className={`size-[1.2em] transition-transform duration-200 ${eventsOpen ? "scale-110" : ""}`} />
-        <span className="dock-label">Events</span>
-      </button>
     </div>
   );
 }

@@ -44,7 +44,6 @@ export async function callTool(name: string, args: Record<string, unknown> = {})
     const explicitId = typeof args.id === "string" && args.id.trim() ? args.id.trim() : "";
     const issueId = explicitId || `LOCAL-${hashInput(`${title}:${nowIso()}`)}`.toUpperCase();
     const description = typeof args.description === "string" ? args.description : "";
-    const priority = typeof args.priority === "number" ? args.priority : 2;
     const state = parseIssueState(args.state) ?? "Planning";
     const baseLabels = Array.isArray(args.labels) ? args.labels.filter((value): value is string => typeof value === "string") : ["fifony", "mcp"];
     const paths = Array.isArray(args.paths) ? args.paths.filter((value): value is string => typeof value === "string") : [];
@@ -53,7 +52,7 @@ export async function callTool(name: string, args: Record<string, unknown> = {})
     const labels = [...new Set([...baseLabels, resolution.category ? `capability:${resolution.category}` : "", ...resolution.overlays.map((overlay) => `overlay:${overlay}`)].filter(Boolean))];
 
     const record = await issueResource?.insert({
-      id: issueId, identifier: issueId, title, description, priority, state, labels, paths, inferredPaths,
+      id: issueId, identifier: issueId, title, description, state, labels, paths, inferredPaths,
       capabilityCategory: resolution.category, capabilityOverlays: resolution.overlays, capabilityRationale: resolution.rationale,
       blockedBy: [], assignedToWorker: false, createdAt: nowIso(), url: `fifony://local/${issueId}`,
       updatedAt: nowIso(), history: [`[${nowIso()}] Issue created via MCP.`], attempts: 0, maxAttempts: 3,
@@ -124,8 +123,8 @@ export async function callTool(name: string, args: Record<string, unknown> = {})
     const issue = result.issue as Record<string, unknown> | undefined;
     return toolText(JSON.stringify({
       issueId,
-      state: issue?.state ?? "Planned",
-      message: `Plan approved for ${issueId}. Issue moved to Planned and is ready for execution.`,
+      state: issue?.state ?? "PendingApproval",
+      message: `Plan approved for ${issueId}. Issue moved to PendingApproval and is ready for execution.`,
     }, null, 2));
   }
 
@@ -219,7 +218,7 @@ export async function callTool(name: string, args: Record<string, unknown> = {})
     try {
       const result = await apiPost(`/api/issues/${encodeURIComponent(issueId)}/retry`);
       const issue = result.issue as Record<string, unknown> | undefined;
-      return toolText(JSON.stringify({ issueId, state: issue?.state ?? "Planned", message: `Issue ${issueId} has been retried and reset to Planned.` }, null, 2));
+      return toolText(JSON.stringify({ issueId, state: issue?.state ?? "PendingApproval", message: `Issue ${issueId} has been retried.` }, null, 2));
     } catch (error) {
       throw new Error(`Failed to retry issue ${issueId}: ${String(error)}`);
     }

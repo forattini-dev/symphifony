@@ -12,10 +12,10 @@ export type IEventStore = {
   listEvents(filters?: { issueId?: string; kind?: string; since?: string }): Promise<RuntimeEvent[]>;
 };
 
+export type JobType = "plan" | "execute" | "review";
+
 export type IQueuePort = {
-  enqueueForPlanning(issue: IssueEntry): Promise<void>;
-  enqueueForExecution(issue: IssueEntry): Promise<void>;
-  enqueueForReview(issue: IssueEntry): Promise<void>;
+  enqueue(issue: IssueEntry, job: JobType): Promise<void>;
   isActive(): boolean;
 };
 

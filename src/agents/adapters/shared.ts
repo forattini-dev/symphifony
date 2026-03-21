@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { basename, extname } from "node:path";
 import type { IssuePlan, IssuePlanStep, IssueEntry, AgentProviderDefinition, EffortConfig, AgentProviderRole } from "../../types.ts";
 
 /** Render plan context (summary, assumptions, constraints, unknowns) */
@@ -188,7 +190,6 @@ export type ExecutionPayload = {
     identifier: string;
     title: string;
     description: string;
-    priority: number;
     labels: string[];
     paths: string[];
   };
@@ -267,6 +268,43 @@ export type ExecutionPayload = {
   createdAt: string;
 };
 
+// ── Image handling ───────────────────────────────────────────────────────────
+
+const MIME_MAP: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+};
+
+/**
+ * Build a markdown section with base64-embedded images.
+ * Used by adapters whose CLI has no `--image` flag (e.g. Gemini).
+ * For CLIs with native image flags (Claude, Codex), use command-level flags instead.
+ */
+export function buildImagePromptSection(imagePaths: string[]): string {
+  const validPaths = imagePaths.filter((p) => existsSync(p));
+  if (validPaths.length === 0) return "";
+
+  const parts: string[] = ["## Attached Images", ""];
+  for (const imgPath of validPaths) {
+    const ext = extname(imgPath).toLowerCase();
+    const mime = MIME_MAP[ext] || "image/png";
+    const name = basename(imgPath);
+    try {
+      const data = readFileSync(imgPath).toString("base64");
+      parts.push(`### ${name}`);
+      parts.push(`![${name}](data:${mime};base64,${data})`);
+      parts.push("");
+    } catch {
+      // Skip unreadable images
+    }
+  }
+  return parts.length > 2 ? parts.join("\n") : "";
+}
+
 /**
  * Build the canonical execution payload from issue + plan + provider context.
  */
@@ -287,7 +325,6 @@ export function buildExecutionPayload(
       identifier: issue.identifier,
       title: issue.title,
       description: issue.description || "",
-      priority: issue.priority,
       labels: issue.labels || [],
       paths: issue.paths || [],
     },

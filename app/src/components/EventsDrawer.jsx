@@ -19,13 +19,13 @@ const KIND_COLORS = {
 /** Border color for state-transition events, keyed by the new state name found in the message. */
 const STATE_BORDER = {
   Planning: "border-l-info",
-  Planned: "border-l-warning",
+  PendingApproval: "border-l-warning",
   Queued: "border-l-info",
   Running: "border-l-primary",
   Reviewing: "border-l-secondary",
-  Reviewed: "border-l-success",
+  PendingDecision: "border-l-success",
   Blocked: "border-l-error",
-  Done: "border-l-success",
+  Approved: "border-l-success",
   Cancelled: "border-l-neutral",
 };
 

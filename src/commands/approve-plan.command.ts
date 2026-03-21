@@ -20,10 +20,10 @@ export async function approvePlanCommand(
   }
 
   await transitionIssueCommand(
-    { issue, target: "Planned", note: `Plan approved for ${issue.identifier}. Ready for execution.` },
+    { issue, target: "PendingApproval", note: `Plan approved for ${issue.identifier}. Ready for execution.` },
     deps,
   );
-  // Event emitted by FSM onEnterPlanned
+  // Event emitted by FSM onEnterPendingApproval
 
   // Explicitly queue for execution (no auto-queue hack in FSM)
   await transitionIssueCommand(

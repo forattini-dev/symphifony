@@ -13,6 +13,10 @@ Role: executor. Implement the required changes.
 {{profileInstructions}}
 {{/if}}
 
+{{#if capabilitiesManifest}}
+{{capabilitiesManifest}}
+{{/if}}
+
 {{#if skillContext}}
 {{skillContext}}
 {{/if}}

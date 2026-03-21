@@ -19,7 +19,6 @@ import { getEffectiveAgentProviders } from "./providers.ts";
 import { addEvent, computeMetrics, getNextRetryAt } from "../domains/issues.ts";
 import { compileReview, buildExecutionAudit, persistExecutionAudit } from "./adapters/index.ts";
 import { generatePlan } from "./planning/issue-planner.ts";
-import { persistState } from "../persistence/store.ts";
 import { addTokenUsage } from "./directive-parser.ts";
 import { runAgentSession, runAgentPipeline } from "./agent-pipeline.ts";
 import { computeDiffStats } from "../domains/workspace.ts";
@@ -30,6 +29,7 @@ import { inferCapabilityPaths } from "../routing/capability-resolver.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "../persistence/settings.ts";
 import { getContainer } from "../persistence/container.ts";
 import { transitionIssueCommand } from "../commands/transition-issue.command.ts";
+import { requestReworkCommand } from "../commands/request-rework.command.ts";
 
 /**
  * Run a planning job for an issue in the Planning state within a worker slot.
@@ -124,7 +124,7 @@ async function handleReviewStage(
   if (!reviewer) {
     // No reviewer configured → auto-approve
     issue.mergedReason = "Auto-approved: no reviewer configured.";
-    await transitionIssueCommand({ issue, target: "Done", note: `No reviewer configured; auto-approved for ${issue.identifier}.` }, container);
+    await transitionIssueCommand({ issue, target: "Approved", note: `No reviewer configured; auto-approved for ${issue.identifier}.` }, container);
     // completedAt and lastError handled by FSM onEnterDone
     return;
   }
@@ -152,7 +152,7 @@ async function handleReviewStage(
     diffSummary = (err.stdout || "").trim();
   }
 
-  const compiled = await compileReview(issue, reviewer, workspacePath, diffSummary);
+  const compiled = await compileReview(issue, reviewer, workspacePath, diffSummary, state.config);
   const effectiveReviewer = { ...reviewer, command: compiled.command || reviewer.command };
   const reviewPromptFile = join(workspacePath, "review-prompt.md");
   writeFileSync(reviewPromptFile, `${compiled.prompt}\n`, "utf8");
@@ -179,7 +179,7 @@ async function handleReviewStage(
 
   if (reviewResult.success) {
     issue.mergedReason = `Auto-approved by reviewer in ${reviewResult.turns} turn(s).`;
-    await transitionIssueCommand({ issue, target: "Reviewed", note: `Reviewer completed for ${issue.identifier}.` }, container);
+    await transitionIssueCommand({ issue, target: "PendingDecision", note: `Reviewer completed for ${issue.identifier}.` }, container);
 
     // Run validation gate before transitioning to Done
     const validation = await runValidationGate(issue, state.config);
@@ -194,16 +194,17 @@ async function handleReviewStage(
       addEvent(state, issue.id, "info", `Validation gate passed for ${issue.identifier}.`);
     }
 
-    await transitionIssueCommand({ issue, target: "Done", note: `Reviewer approved ${issue.identifier} in ${reviewResult.turns} turn(s).` }, container);
+    await transitionIssueCommand({ issue, target: "Approved", note: `Reviewer approved ${issue.identifier} in ${reviewResult.turns} turn(s).` }, container);
     // completedAt and lastError are set by FSM onEnterDone
   } else if (reviewResult.continueRequested) {
-    await transitionIssueCommand({ issue, target: "Reviewed", note: `Reviewer completed for ${issue.identifier}.` }, container);
-    await transitionIssueCommand({ issue, target: "Queued", note: `Reviewer requested rework for ${issue.identifier}.` }, container);
-    // nextRetryAt and lastError are cleared by FSM onEnterQueued
-    container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} sent back for rework by reviewer.`);
+    await requestReworkCommand(
+      { issue, reviewerFeedback: reviewResult.output, note: `Reviewer requested rework for ${issue.identifier}.` },
+      container,
+    );
   } else {
     // Reviewer blocked or failed
     issue.lastError = reviewResult.output;
+    issue.lastFailedPhase = "review";
     issue.attempts += 1;
     if (issue.attempts >= issue.maxAttempts) {
       issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): reviewer failed or blocked.`;
@@ -289,6 +290,7 @@ async function handleExecutionStage(
     container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} queued for next turn.`);
   } else {
     issue.lastError = runResult.output;
+    issue.lastFailedPhase = "execute";
     issue.attempts += 1;
 
     if (issue.attempts >= issue.maxAttempts) {
@@ -314,23 +316,13 @@ export async function runIssueOnce(
   const isResuming = issue.state === "Running";
   logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, isReviewing, isResuming, attempt: issue.attempts + 1, maxAttempts: issue.maxAttempts }, "[Agent] Starting issue execution");
 
-  // Planning jobs run in the background without occupying a worker slot.
-  // planningStatus="planning" (set immediately by runPlanningJob) acts as the dispatch guard
-  // so canRunIssue returns false while planning is in progress, preventing double-dispatch.
+  // Planning is dispatched directly by the queue — should not arrive here.
   if (issue.state === "Planning") {
-    issue.startedAt = issue.startedAt ?? now();
-    runPlanningJob(state, issue)
-      .catch((err) => logger.error({ err, issueId: issue.id, identifier: issue.identifier }, "[Agent] Unexpected error in background planning job"))
-      .finally(() => {
-        state.metrics = computeMetrics(state.issues);
-        state.updatedAt = now();
-        persistState(state).catch(() => {});
-      });
+    logger.warn({ issueId: issue.id }, "[Agent] runIssueOnce called for Planning state — skipping (queue handles planning)");
     return;
   }
 
   running.add(issue.id);
-  state.metrics.activeWorkers += 1;
   issue.startedAt = issue.startedAt ?? now();
 
   let workflowConfig: WorkflowConfig | null = null;
@@ -399,6 +391,7 @@ export async function runIssueOnce(
   } catch (error) {
     issue.attempts += 1;
     issue.lastError = String(error);
+    issue.lastFailedPhase = issue.lastFailedPhase ?? "execute";
 
     if (issue.attempts >= issue.maxAttempts) {
       issue.cancelledReason = `Max attempts reached (${issue.attempts}/${issue.maxAttempts}): unexpected failure — ${issue.lastError?.slice(0, 120) ?? "unknown error"}.`;
@@ -412,10 +405,8 @@ export async function runIssueOnce(
     logger.info({ issueId: issue.id, identifier: issue.identifier, finalState: issue.state, elapsedMs, attempts: issue.attempts }, "[Agent] Issue execution finished");
     issue.updatedAt = now();
     container.issueRepository.markDirty(issue.id);
-    state.metrics.activeWorkers = Math.max(state.metrics.activeWorkers - 1, 0);
     running.delete(issue.id);
     state.metrics = computeMetrics(state.issues);
-    state.metrics.activeWorkers = Math.max(state.metrics.activeWorkers, 0);
     state.updatedAt = now();
     await container.persistencePort.persistState(state);
   }

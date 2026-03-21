@@ -15,8 +15,8 @@ export async function executeIssueCommand(
 ): Promise<void> {
   const { issue } = input;
 
-  if (issue.state !== "Planned") {
-    throw new Error(`Cannot execute issue in state ${issue.state}. Must be in Planned.`);
+  if (issue.state !== "PendingApproval") {
+    throw new Error(`Cannot execute issue in state ${issue.state}. Must be in PendingApproval.`);
   }
 
   await transitionIssueCommand(

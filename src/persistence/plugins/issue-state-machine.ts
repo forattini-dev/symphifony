@@ -1,11 +1,12 @@
 import type { AttemptSummary, IssueEntry, IssueState } from "../../types.ts";
 import { S3DB_ISSUE_RESOURCE, TERMINAL_STATES } from "../../concerns/constants.ts";
 import { computeDiffStats } from "../../domains/workspace.ts";
+import { extractFailureInsights } from "../../agents/failure-analyzer.ts";
 import { invalidateMetrics } from "../metrics-cache.ts";
 import { markIssueDirty } from "../dirty-tracker.ts";
 import { isoWeek, now } from "../../concerns/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // ── Event emitter callback (set after container init to avoid circular deps) ──
@@ -90,12 +91,12 @@ export const issueStateMachineConfig = {
 
       states: {
         Planning: {
-          on: { PLANNED: "Planned", CANCEL: "Cancelled" },
+          on: { PLANNED: "PendingApproval", CANCEL: "Cancelled" },
           entry: "onEnterPlanning",
         },
-        Planned: {
+        PendingApproval: {
           on: { QUEUE: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
-          entry: "onEnterPlanned",
+          entry: "onEnterPendingApproval",
         },
         Queued: {
           on: { RUN: "Running" },
@@ -112,7 +113,7 @@ export const issueStateMachineConfig = {
           }],
         },
         Reviewing: {
-          on: { REVIEWED: "Reviewed", REQUEUE: "Queued", BLOCK: "Blocked" },
+          on: { REVIEWED: "PendingDecision", REQUEUE: "Queued", BLOCK: "Blocked" },
           entry: "onEnterReviewing",
           guards: { BLOCK: "requireBlockReason" },
           triggers: [{
@@ -122,16 +123,16 @@ export const issueStateMachineConfig = {
             condition: isStaleIssue,
           }],
         },
-        Reviewed: {
-          on: { DONE: "Done", REQUEUE: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
+        PendingDecision: {
+          on: { APPROVE: "Approved", REQUEUE: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
         },
         Blocked: {
           on: { UNBLOCK: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
           entry: "onEnterBlocked",
         },
-        Done: {
+        Approved: {
           on: { MERGE: "Merged", REOPEN: "Planning" },
-          entry: "onEnterDone",
+          entry: "onEnterApproved",
         },
         Merged: {
           on: { REOPEN: "Planning" },
@@ -168,13 +169,13 @@ export const issueStateMachineConfig = {
       }
     },
 
-    onEnterPlanned: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
+    onEnterPendingApproval: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
         issue.nextRetryAt = undefined;
         issue.lastError = undefined;
-        emitFsmEvent(issue.id, "state", `Plan approved — ${issue.identifier} moved to Planned.`);
-        // No auto-queue hack — callers (approve command) handle Planned → Queued explicitly
+        emitFsmEvent(issue.id, "state", `Plan ready — ${issue.identifier} awaiting approval.`);
+        // No auto-queue hack — callers (approve command) handle PendingApproval → Queued explicitly
       }
     },
 
@@ -183,14 +184,9 @@ export const issueStateMachineConfig = {
       if (issue) {
         // Archive previous attempt summary before clearing lastError
         if (issue.attempts > 0 && issue.lastError) {
-          const summary: AttemptSummary = {
-            planVersion: issue.planVersion ?? 1,
-            executeAttempt: issue.executeAttempt ?? 1,
-            error: (issue.lastError ?? "").slice(0, 500),
-            outputTail: (issue.commandOutputTail ?? "").slice(0, 500),
-            timestamp: now(),
-          };
-          // Find the most recent stdout file in outputs/
+          // Read the full output from the most recent stdout file for better analysis
+          let fullOutput = "";
+          let outputFile: string | undefined;
           if (issue.workspacePath) {
             try {
               const outputsDir = join(issue.workspacePath, "outputs");
@@ -201,16 +197,41 @@ export const issueStateMachineConfig = {
                     try { return statSync(join(outputsDir, b)).mtimeMs - statSync(join(outputsDir, a)).mtimeMs; }
                     catch { return 0; }
                   });
-                if (files.length > 0) summary.outputFile = files[0];
+                if (files.length > 0) {
+                  outputFile = files[0];
+                  try { fullOutput = readFileSync(join(outputsDir, files[0]), "utf8"); } catch {}
+                }
               }
             } catch {}
           }
+
+          // Analyze the failure output for structured insights
+          const analysisSource = fullOutput || issue.commandOutputTail || issue.lastError || "";
+          const failureInsight = extractFailureInsights(analysisSource, issue.commandExitCode);
+
+          const summary: AttemptSummary = {
+            planVersion: issue.planVersion ?? 1,
+            executeAttempt: issue.executeAttempt ?? 1,
+            phase: issue.lastFailedPhase ?? undefined,
+            error: failureInsight.rootCause || (issue.lastError ?? "").slice(0, 500),
+            outputTail: (issue.commandOutputTail ?? "").slice(0, 500),
+            outputFile,
+            timestamp: now(),
+            insight: {
+              errorType: failureInsight.errorType,
+              rootCause: failureInsight.rootCause,
+              failedCommand: failureInsight.failedCommand,
+              filesInvolved: failureInsight.filesInvolved,
+              suggestion: failureInsight.suggestion,
+            },
+          };
           const prev = issue.previousAttemptSummaries ?? [];
           issue.previousAttemptSummaries = [...prev.slice(-(2)), summary].slice(-3);
         }
 
         issue.nextRetryAt = undefined;
         issue.lastError = undefined;
+        issue.lastFailedPhase = undefined;
         logger.info({ issueId: issue.id, identifier: issue.identifier }, "[FSM] onEnterQueued — enqueuing for execution");
         emitFsmEvent(issue.id, "state", `${issue.identifier} queued for execution.`);
         lazyEnqueueForExecution(issue).catch((err) => {
@@ -244,10 +265,10 @@ export const issueStateMachineConfig = {
       }
     },
 
-    onEnterDone: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
+    onEnterApproved: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
-        // Done = approved, waiting for merge. Not terminal yet.
+        // Approved = waiting for merge. Not terminal yet.
         issue.nextRetryAt = undefined;
         issue.lastError = undefined;
         // Pre-compute diff stats for display (but EC add() happens only on Merged)
@@ -329,12 +350,12 @@ export const issueStateMachineConfig = {
 // ── Event mapping: FSM event name → target state ────────────────────────────
 
 const EVENT_TO_STATE: Record<string, IssueState> = {
-  PLANNED: "Planned",
+  PLANNED: "PendingApproval",
   QUEUE: "Queued",
   RUN: "Running",
   REVIEW: "Reviewing",
-  REVIEWED: "Reviewed",
-  DONE: "Done",
+  REVIEWED: "PendingDecision",
+  APPROVE: "Approved",
   MERGE: "Merged",
   CANCEL: "Cancelled",
   BLOCK: "Blocked",

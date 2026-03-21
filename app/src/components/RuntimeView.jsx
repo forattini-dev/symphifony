@@ -6,13 +6,13 @@ import { useWorkflowConfig } from "../hooks/useWorkflowConfig.js";
 
 const STATE_BADGE = {
   Queued: "badge-info", Running: "badge-primary", Reviewing: "badge-secondary",
-  Reviewed: "badge-success", Blocked: "badge-error", Done: "badge-success", Merged: "badge-success", Cancelled: "badge-neutral",
+  PendingDecision: "badge-success", Blocked: "badge-error", Approved: "badge-success", Merged: "badge-success", Cancelled: "badge-neutral",
   Planning: "badge-info",
 };
 
 const STATE_ICON = {
   Queued: ListOrdered, Running: Circle, Reviewing: Eye,
-  Reviewed: Eye, Blocked: AlertTriangle, Done: CheckCircle2, Merged: GitMerge, Cancelled: XCircle,
+  PendingDecision: Eye, Blocked: AlertTriangle, Approved: CheckCircle2, Merged: GitMerge, Cancelled: XCircle,
 };
 
 function formatTokens(n) {
@@ -109,18 +109,18 @@ function AgentSlot({ index, issue, total, workflow }) {
 
   const isRunning = issue.state === "Running";
   const isPlanning = issue.state === "Planning";
-  const borderClass = issue.state === "Reviewing" || issue.state === "Reviewed"
+  const borderClass = issue.state === "Reviewing" || issue.state === "PendingDecision"
     ? "border-secondary bg-secondary/5"
     : isPlanning
     ? "border-info bg-info/5"
     : "border-primary bg-primary/5";
 
   // Resolve stage config for current phase
-  const stageKey = isPlanning ? "plan" : (issue.state === "Reviewing" || issue.state === "Reviewed") ? "review" : "execute";
+  const stageKey = isPlanning ? "plan" : (issue.state === "Reviewing" || issue.state === "PendingDecision") ? "review" : "execute";
   const stageConfig = workflow?.[stageKey];
 
   // Actual model from tokensByPhase (falls back to configured)
-  const phaseKey = isPlanning ? "planner" : (issue.state === "Reviewing" || issue.state === "Reviewed") ? "reviewer" : "executor";
+  const phaseKey = isPlanning ? "planner" : (issue.state === "Reviewing" || issue.state === "PendingDecision") ? "reviewer" : "executor";
   const actualModel = issue.tokensByPhase?.[phaseKey]?.model;
   const displayModel = formatModelName(actualModel || stageConfig?.model);
   const displayProvider = stageConfig?.provider;
@@ -144,7 +144,6 @@ function AgentSlot({ index, issue, total, workflow }) {
 
       <div className="flex flex-wrap gap-2 text-xs opacity-60">
         {issue.capabilityCategory && <span className="badge badge-xs badge-ghost">{issue.capabilityCategory}</span>}
-        <span>P{issue.priority}</span>
         <span>Attempt {(issue.attempts || 0) + 1}/{issue.maxAttempts}</span>
         {issue.startedAt && <span>started {timeAgo(issue.startedAt)}</span>}
       </div>
@@ -186,8 +185,8 @@ function QueueItem({ issue }) {
 // ── Recently completed ──────────────────────────────────────────────────────
 
 function CompletedItem({ issue }) {
-  const Icon = issue.state === "Merged" ? GitMerge : issue.state === "Done" ? CheckCircle2 : XCircle;
-  const color = (issue.state === "Done" || issue.state === "Merged") ? "text-success" : "text-neutral";
+  const Icon = issue.state === "Merged" ? GitMerge : issue.state === "Approved" ? CheckCircle2 : XCircle;
+  const color = (issue.state === "Approved" || issue.state === "Merged") ? "text-success" : "text-neutral";
   return (
     <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-lg bg-base-200">
       <Icon className={`size-3 shrink-0 ${color}`} />
@@ -258,12 +257,12 @@ export function RuntimeView({ state, providers, parallelism, onRefresh, issues: 
     ...activePlanning,
   ];
   const queued = stateIssues.filter((i) =>
-    i.state === "Planned" || i.state === "Queued"
+    i.state === "PendingApproval" || i.state === "Queued"
     || (i.state === "Blocked" && i.nextRetryAt)
     || (i.state === "Planning" && i.planningStatus !== "planning"),
   );
   const completed = stateIssues
-    .filter((i) => i.state === "Done" || i.state === "Merged" || i.state === "Cancelled")
+    .filter((i) => i.state === "Approved" || i.state === "Merged" || i.state === "Cancelled")
     .sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""))
     .slice(0, 10);
 

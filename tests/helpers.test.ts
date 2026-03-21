@@ -230,7 +230,7 @@ describe("clamp", () => {
 // ── normalizeState() ──────────────────────────────────────────────────────────
 
 describe("normalizeState", () => {
-  const validStates = ["Planning", "Planned", "Queued", "Running", "Reviewing", "Reviewed", "Blocked", "Done", "Merged", "Cancelled"];
+  const validStates = ["Planning", "PendingApproval", "Queued", "Running", "Reviewing", "PendingDecision", "Blocked", "Approved", "Merged", "Cancelled"];
 
   for (const state of validStates) {
     it(`passes through valid state: ${state}`, () => {
@@ -253,6 +253,18 @@ describe("normalizeState", () => {
 
   it("is case-sensitive (lowercase fails)", () => {
     assert.equal(normalizeState("planned"), "Planning");
+  });
+
+  it("migrates legacy state 'Planned' to 'PendingApproval'", () => {
+    assert.equal(normalizeState("Planned"), "PendingApproval");
+  });
+
+  it("migrates legacy state 'Reviewed' to 'PendingDecision'", () => {
+    assert.equal(normalizeState("Reviewed"), "PendingDecision");
+  });
+
+  it("migrates legacy state 'Done' to 'Approved'", () => {
+    assert.equal(normalizeState("Done"), "Approved");
   });
 });
 

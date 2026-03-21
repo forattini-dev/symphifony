@@ -28,7 +28,7 @@ function deriveSubStatus(issue) {
       return { label: "Aguardando scheduler…", icon: Clock, color: "text-info/60", spin: false };
     }
 
-    case "Planned":
+    case "PendingApproval":
       return { label: "Ready to queue", icon: ListOrdered, color: "text-warning/70", spin: false };
 
     case "Queued": {
@@ -66,7 +66,7 @@ function deriveSubStatus(issue) {
       return { label: "Reviewing", icon: Eye, color: "text-secondary/70", spin: false };
     }
 
-    case "Reviewed":
+    case "PendingDecision":
       return { label: "Review complete", icon: Eye, color: "text-success/70", spin: false };
 
     case "Blocked":
@@ -77,7 +77,7 @@ function deriveSubStatus(issue) {
         spin: false,
       };
 
-    case "Done":
+    case "Approved":
       return { label: "Approved", icon: CheckCircle2, color: "text-success", spin: false };
 
     case "Merged":

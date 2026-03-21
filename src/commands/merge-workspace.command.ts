@@ -33,14 +33,14 @@ export async function mergeWorkspaceCommand(
 ): Promise<MergeWorkspaceResult> {
   const { issue, state } = input;
 
-  if (!["Done", "Reviewing", "Reviewed"].includes(issue.state)) {
-    throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Merge is only allowed in Reviewing, Reviewed, or Done state.`);
+  if (!["Approved", "Reviewing", "PendingDecision"].includes(issue.state)) {
+    throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Merge is only allowed in Reviewing, PendingDecision, or Approved state.`);
   }
 
-  // Auto-transition to Done if still in review
-  if (issue.state === "Reviewing" || issue.state === "Reviewed") {
+  // Auto-transition to Approved if still in review
+  if (issue.state === "Reviewing" || issue.state === "PendingDecision") {
     await transitionIssueCommand(
-      { issue, target: "Done", note: "Approved and merged by user." },
+      { issue, target: "Approved", note: "Approved and merged by user." },
       deps,
     );
   }
@@ -90,6 +90,7 @@ export async function mergeWorkspaceCommand(
     deleted: result.deleted.length,
     skipped: result.skipped.length,
     conflicts: result.conflicts.length,
+    conflictFiles: result.conflicts.length > 0 ? result.conflicts : undefined,
   };
 
   if (result.conflicts.length > 0) {

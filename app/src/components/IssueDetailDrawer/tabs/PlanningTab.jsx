@@ -104,7 +104,7 @@ export function PlanningTab({ issue, onStateChange, workflowConfig }) {
     setLocalApproving(true);
     try {
       await api.post(`/issues/${encodeURIComponent(issue.id)}/approve`);
-      // approve already transitions Planning → Planned → Queued (FSM handles execution dispatch)
+      // approve already transitions Planning → PendingApproval → Queued (FSM handles execution dispatch)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setLocalApproving(false);

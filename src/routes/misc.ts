@@ -34,8 +34,8 @@ export function registerMiscRoutes(
     if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
     const issue = findIssue(state, issueId);
     if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
-    if (!["Done", "Reviewing", "Reviewed"].includes(issue.state)) {
-      return c.json({ ok: false, error: `Issue ${issue.identifier} must be in Done, Reviewing, or Reviewed state to push. Current state: ${issue.state}.` }, 409);
+    if (!["Approved", "Reviewing", "PendingDecision"].includes(issue.state)) {
+      return c.json({ ok: false, error: `Issue ${issue.identifier} must be in Approved, Reviewing, or PendingDecision state to push. Current state: ${issue.state}.` }, 409);
     }
     try {
       const container = getContainer();

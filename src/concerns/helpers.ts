@@ -68,10 +68,21 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+/** Migrate legacy state names from pre-rename database records. */
+const LEGACY_STATE_MAP: Record<string, IssueState> = {
+  Planned: "PendingApproval",
+  Reviewed: "PendingDecision",
+  Done: "Approved",
+};
+
 export function parseIssueState(value: unknown): IssueState | undefined {
   const raw = typeof value === "string" ? value.trim() : "";
   if ((ALLOWED_STATES as readonly string[]).includes(raw)) {
     return raw as IssueState;
+  }
+  // Backwards compat: map old state names to new
+  if (raw in LEGACY_STATE_MAP) {
+    return LEGACY_STATE_MAP[raw];
   }
   return undefined;
 }

@@ -20,7 +20,6 @@ export function isShuttingDown(): boolean {
 
 export function installGracefulShutdown(
   state: RuntimeState,
-  running: Set<string>,
 ): void {
   const handler = async (signal: string) => {
     if (shuttingDown) {
@@ -34,7 +33,7 @@ export function installGracefulShutdown(
 
     // Mark running/reviewing issues as Queued so they resume on next boot
     for (const issue of state.issues) {
-      if (running.has(issue.id) && (issue.state === "Running" || issue.state === "Reviewing")) {
+      if (issue.state === "Running" || issue.state === "Reviewing") {
         try {
           await transitionIssueCommand({ issue, target: "Queued", note: `Interrupted by ${signal} — queued for resume on next start.`, fallbackToLocal: true }, container);
         } catch {
@@ -70,7 +69,7 @@ export function installGracefulShutdown(
 
 export function analyzeParallelizability(issues: IssueEntry[]): ParallelismAnalysis {
   const todo = issues.filter((issue) =>
-    issue.state === "Planned"
+    issue.state === "PendingApproval"
     && issue.assignedToWorker
     && issue.blockedBy.length === 0,
   );
@@ -172,6 +171,10 @@ export async function ensureNotStale(state: RuntimeState, staleTimeoutMs: number
     if (pidDead) {
       logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, pid: agentStatus.pid?.pid }, "[Scheduler] PID dead — silently recovering to Queued");
       issue.startedAt = undefined;
+      // Capture crash context so onEnterQueued can generate insights
+      issue.lastError = `Agent process died unexpectedly (PID ${agentStatus.pid!.pid}).`;
+      issue.lastFailedPhase = "crash";
+      issue.attempts = (issue.attempts ?? 0) + 1;
       container.issueRepository.markDirty(issue.id);
       await transitionIssueCommand({ issue, target: "Queued", note: `Agent process died (PID ${agentStatus.pid!.pid}) — auto-recovering.` }, container);
       container.eventStore.addEvent(issue.id, "info", `Issue ${issue.identifier} agent process died (PID ${agentStatus.pid!.pid}), silently recovered to Queued.`);

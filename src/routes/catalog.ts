@@ -7,6 +7,8 @@ import {
   installAgents,
   installSkills,
 } from "../agents/catalog.ts";
+import { discoverSkills, discoverAgents, discoverCommands } from "../agents/skills.ts";
+import { updateClaudeMdManagedBlock } from "../agents/claude-md-manager.ts";
 
 export function registerCatalogRoutes(app: any): void {
   app.get("/api/catalog/agents", async (c: any) => {
@@ -32,6 +34,9 @@ export function registerCatalogRoutes(app: any): void {
       }
       const catalog = loadAgentCatalog();
       const result = installAgents(TARGET_ROOT, agentNames, catalog);
+      try {
+        updateClaudeMdManagedBlock(TARGET_ROOT, discoverSkills(TARGET_ROOT), discoverAgents(TARGET_ROOT), discoverCommands(TARGET_ROOT));
+      } catch { /* non-critical */ }
       return c.json({ ok: true, ...result });
     } catch (error) {
       logger.error({ err: error }, "Failed to install agents");
@@ -48,6 +53,9 @@ export function registerCatalogRoutes(app: any): void {
       }
       const catalog = loadSkillCatalog();
       const result = installSkills(TARGET_ROOT, skillNames, catalog);
+      try {
+        updateClaudeMdManagedBlock(TARGET_ROOT, discoverSkills(TARGET_ROOT), discoverAgents(TARGET_ROOT), discoverCommands(TARGET_ROOT));
+      } catch { /* non-critical */ }
       return c.json({ ok: true, ...result });
     } catch (error) {
       logger.error({ err: error }, "Failed to install skills");

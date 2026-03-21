@@ -9,13 +9,13 @@ import {
 import { timeAgo, formatDuration } from "../utils.js";
 
 const STATE_BADGE = {
-  Planning: "badge-info", Planned: "badge-warning", Queued: "badge-info", Running: "badge-primary",
-  Reviewing: "badge-secondary", Reviewed: "badge-success", Blocked: "badge-error", Done: "badge-success", Merged: "badge-success", Cancelled: "badge-neutral",
+  Planning: "badge-info", PendingApproval: "badge-warning", Queued: "badge-info", Running: "badge-primary",
+  Reviewing: "badge-secondary", PendingDecision: "badge-success", Blocked: "badge-error", Approved: "badge-success", Merged: "badge-success", Cancelled: "badge-neutral",
 };
 
 const STATE_BG = {
-  Planning: "border-l-info", Planned: "border-l-warning", Queued: "border-l-info", Running: "border-l-primary",
-  Reviewing: "border-l-secondary", Reviewed: "border-l-success", Blocked: "border-l-error", Done: "border-l-success", Merged: "border-l-success", Cancelled: "border-l-neutral",
+  Planning: "border-l-info", PendingApproval: "border-l-warning", Queued: "border-l-info", Running: "border-l-primary",
+  Reviewing: "border-l-secondary", PendingDecision: "border-l-success", Blocked: "border-l-error", Approved: "border-l-success", Merged: "border-l-success", Cancelled: "border-l-neutral",
 };
 
 function formatTokens(n) {
@@ -59,7 +59,7 @@ function GridIssueCard({ issue, onSelect }) {
   const description = issue.description || "";
   const labels = (issue.labels || []).filter((l) => !l.startsWith("capability:") && !l.startsWith("overlay:"));
   const { leadTimeMs, cycleTimeMs, waitTimeMs } = computeMetrics(issue);
-  const isDone = issue.state === "Done" || issue.state === "Cancelled";
+  const isDone = issue.state === "Approved" || issue.state === "Cancelled";
 
   return (
     <div
@@ -81,7 +81,6 @@ function GridIssueCard({ issue, onSelect }) {
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-xs opacity-50">{issue.identifier}</span>
               <span className={`badge badge-xs ${STATE_BADGE[issue.state] || "badge-ghost"}`}>{issue.state}</span>
-              <span className="text-[10px] opacity-30">P{issue.priority}</span>
             </div>
             <span className="text-xs opacity-40 shrink-0">{timeAgo(issue.updatedAt)}</span>
           </div>
@@ -109,7 +108,7 @@ function GridIssueCard({ issue, onSelect }) {
         )}
 
         {/* Live status indicator for active states */}
-        {["Planning", "Planned", "Queued", "Running", "Reviewing", "Reviewed", "Blocked"].includes(issue.state) && (
+        {["Planning", "PendingApproval", "Queued", "Running", "Reviewing", "PendingDecision", "Blocked"].includes(issue.state) && (
           <div className="pt-1">
             <StatusIndicator issue={issue} showElapsed />
           </div>

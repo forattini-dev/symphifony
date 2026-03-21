@@ -35,7 +35,6 @@ export async function runCommandWithTimeout(
       FIFONY_ISSUE_ID: issue.id,
       FIFONY_ISSUE_IDENTIFIER: issue.identifier,
       FIFONY_ISSUE_TITLE: issue.title,
-      FIFONY_ISSUE_PRIORITY: String(issue.priority),
       FIFONY_WORKSPACE_PATH: issue.worktreePath ?? workspacePath,
       FIFONY_PROMPT_FILE: promptFile,
     };

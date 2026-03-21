@@ -155,7 +155,6 @@ export default {
     identifier: "string|required",
     title: "string|required",
     description: "string|optional",
-    priority: "number|required",
     state: "string|required",
     branchName: "string|optional",
     url: "string|optional",

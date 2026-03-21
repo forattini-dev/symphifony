@@ -49,6 +49,10 @@ export function buildCodexCommand(options: ProviderCommandOptions): string {
     }
   }
 
+  if (options.search) {
+    parts.push("--search");
+  }
+
   parts.push("< \"$FIFONY_PROMPT_FILE\"");
   return parts.join(" ");
 }
@@ -62,6 +66,7 @@ async function compile(
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
+  capabilitiesManifest?: string,
 ): Promise<CompiledExecution> {
   const effort = resolveEffortForProvider(plan, provider.role, config.defaultEffort) || provider.reasoningEffort;
 
@@ -70,6 +75,7 @@ async function compile(
     isReviewer: provider.role === "reviewer",
     profileInstructions: provider.profileInstructions || "",
     skillContext,
+    capabilitiesManifest: capabilitiesManifest || "",
     issueIdentifier: issue.identifier,
     title: issue.title,
     description: issue.description || "(none)",
@@ -94,6 +100,7 @@ async function compile(
     model: provider.model,
     addDirs: absoluteDirs,
     effort,
+    imagePaths: issue.images?.filter((p) => existsSync(p)),
   });
 
   const env: Record<string, string> = {
@@ -127,9 +134,10 @@ async function compile(
 
 export const codexAdapter: ProviderAdapter = {
   buildCommand: buildCodexCommand,
-  buildReviewCommand: (reviewer) => buildCodexCommand({
+  buildReviewCommand: (reviewer, _config) => buildCodexCommand({
     model: reviewer.model,
     effort: reviewer.reasoningEffort,
+    // Codex has no --permission-mode or --approval-mode equivalent for read-only review
   }),
   compile,
 };

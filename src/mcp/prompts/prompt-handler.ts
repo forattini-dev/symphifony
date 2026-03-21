@@ -139,10 +139,10 @@ export async function getPrompt(name: string, args: Record<string, unknown> = {}
       return accumulator;
     }, {});
     const totalIssues = issues.length;
-    const completed = byState["Done"] ?? 0;
+    const completed = byState["Approved"] ?? 0;
     const blocked = (byState["Blocked"] ?? 0) + (byState["Failed"] ?? 0);
-    const inProgress = (byState["Running"] ?? 0) + (byState["Reviewing"] ?? 0) + (byState["Reviewed"] ?? 0) + (byState["Queued"] ?? 0);
-    const planned = byState["Planned"] ?? 0;
+    const inProgress = (byState["Running"] ?? 0) + (byState["Reviewing"] ?? 0) + (byState["PendingDecision"] ?? 0) + (byState["Queued"] ?? 0);
+    const planned = byState["PendingApproval"] ?? 0;
     const planning = byState["Planning"] ?? 0;
     const cancelled = byState["Cancelled"] ?? 0;
     const inputTokens = typeof overall.inputTokens === "number" ? overall.inputTokens : 0;

@@ -14,10 +14,31 @@ export function buildRetryContext(issue: IssueEntry): string {
 
   for (let i = 0; i < summaries.length; i++) {
     const s = summaries[i];
-    lines.push(`### Attempt ${i + 1} (plan v${s.planVersion}, exec #${s.executeAttempt})`);
-    lines.push(`**Error:** ${s.error}`);
+    const phaseLabel = s.phase === "review" ? "review" : s.phase === "crash" ? "crash" : s.phase === "plan" ? "plan" : "execution";
+    lines.push(`### Attempt ${i + 1} — ${phaseLabel} failure (plan v${s.planVersion}, exec #${s.executeAttempt})`);
+
+    // Phase-specific preamble
+    if (s.phase === "review") {
+      lines.push("*The reviewer identified issues with the previous implementation. Focus on addressing the reviewer's feedback — do not redo work that was already approved.*");
+    } else if (s.phase === "crash") {
+      lines.push("*The agent process crashed or timed out. Simplify the approach — break the work into smaller steps.*");
+    }
+
+    // Use structured insights when available (richer than raw error text)
+    if (s.insight) {
+      lines.push(`**Failure type:** ${s.insight.errorType}`);
+      lines.push(`**Root cause:** ${s.insight.rootCause}`);
+      if (s.insight.failedCommand) lines.push(`**Failed command:** \`${s.insight.failedCommand}\``);
+      if (s.insight.filesInvolved.length > 0) {
+        lines.push(`**Files involved:** ${s.insight.filesInvolved.map(f => `\`${f}\``).join(", ")}`);
+      }
+      lines.push(`**What to do differently:** ${s.insight.suggestion}`);
+    } else {
+      lines.push(`**Error:** ${s.error}`);
+    }
+
     if (s.outputTail) {
-      lines.push(`**Output tail:**\n\`\`\`\n${s.outputTail}\n\`\`\``);
+      lines.push(`\n<details><summary>Output tail</summary>\n\n\`\`\`\n${s.outputTail}\n\`\`\`\n</details>`);
     }
     if (s.outputFile) {
       lines.push(`*Full output saved in: outputs/${s.outputFile}*`);
@@ -77,6 +98,7 @@ export async function buildProviderBasePrompt(
   basePrompt: string,
   workspacePath: string,
   skillContext: string,
+  capabilitiesManifest?: string,
 ): Promise<string> {
   return renderPrompt("agent-provider-base", {
     isPlanner: provider.role === "planner",
@@ -85,6 +107,7 @@ export async function buildProviderBasePrompt(
     hasFrontendDesignOverlay: provider.overlays?.includes("frontend-design") ?? false,
     profileInstructions: provider.profileInstructions || "",
     skillContext,
+    capabilitiesManifest: capabilitiesManifest || "",
     capabilityCategory: provider.capabilityCategory || "",
     selectionReason: provider.selectionReason ?? "No additional routing reason.",
     overlays: provider.overlays ?? [],

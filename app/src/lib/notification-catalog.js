@@ -43,7 +43,7 @@ export const NOTIFICATION_EVENT_CATALOG = [
   },
   {
     id: "reviewed",
-    state: "Reviewed",
+    state: "PendingDecision",
     label: "Review complete",
     description: "When the review step finishes.",
     icon: "eye",
@@ -53,7 +53,7 @@ export const NOTIFICATION_EVENT_CATALOG = [
   },
   {
     id: "done",
-    state: "Done",
+    state: "Approved",
     label: "Issue completed",
     description: "When an issue is fully done.",
     icon: "check",

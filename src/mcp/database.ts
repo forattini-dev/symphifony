@@ -11,7 +11,6 @@ export type IssueRecord = {
   identifier?: string;
   title: string;
   description?: string;
-  priority?: number;
   state?: string;
   labels?: string[];
   paths?: string[];
@@ -156,7 +155,6 @@ export async function initDatabase(): Promise<S3dbDatabase> {
       identifier: "string|required",
       title: "string|required",
       description: "string|optional",
-      priority: "number|required",
       state: "string|required",
       branchName: "string|optional",
       labels: "json|required",

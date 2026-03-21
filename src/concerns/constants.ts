@@ -94,21 +94,21 @@ export const DEBUG_BOOT = env.FIFONY_DEBUG_BOOT === "1";
 
 export const ALLOWED_STATES: IssueState[] = [
   "Planning",
-  "Planned",
+  "PendingApproval",
   "Queued",
   "Running",
   "Reviewing",
-  "Reviewed",
+  "PendingDecision",
   "Blocked",
-  "Done",
+  "Approved",
   "Merged",
   "Cancelled",
 ];
 
 /** Truly final — workspace can be cleaned, no more work expected. */
 export const TERMINAL_STATES = new Set<IssueState>(["Merged", "Cancelled"]);
-/** Done or final — no more automated work, but merge may still be pending. */
-export const COMPLETED_STATES = new Set<IssueState>(["Done", "Merged", "Cancelled"]);
+/** Approved or final — no more automated work, but merge may still be pending. */
+export const COMPLETED_STATES = new Set<IssueState>(["Approved", "Merged", "Cancelled"]);
 export const EXECUTING_STATES = new Set<IssueState>(["Running", "Reviewing"]);
 export const PERSIST_EVENTS_MAX = 500;
 

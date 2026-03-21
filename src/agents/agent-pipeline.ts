@@ -15,7 +15,7 @@ import { logger } from "../concerns/logger.ts";
 import { getEffectiveAgentProviders } from "./providers.ts";
 import { addEvent } from "../domains/issues.ts";
 import { compileExecution, persistCompilationArtifacts } from "./adapters/index.ts";
-import { discoverSkills, buildSkillContext } from "../agents/skills.ts";
+import { discoverSkills, buildSkillContext, discoverAgents, discoverCommands, buildCapabilitiesManifest } from "../agents/skills.ts";
 import {
   loadAgentSessionState,
   persistAgentSessionState,
@@ -230,9 +230,12 @@ export async function runAgentPipeline(
   const activeProvider = providers[clamp(pipeline.activeIndex, 0, Math.max(0, providers.length - 1))];
   const executorIndex = providers.findIndex((provider) => provider.role === "executor");
 
-  // Discover skills and build context
+  // Discover skills, agents, commands and build context
   const skills = discoverSkills(workspacePath);
   const skillContext = buildSkillContext(skills);
+  const agents = discoverAgents(workspacePath);
+  const commands = discoverCommands(workspacePath);
+  const capabilitiesManifest = buildCapabilitiesManifest(skills, agents, commands);
 
   // Write skills reference to workspace
   if (skillContext) {
@@ -240,7 +243,7 @@ export async function runAgentPipeline(
   }
 
   // Compile plan-aware execution if plan exists
-  const compiled = await compileExecution(issue, activeProvider, state.config, workspacePath, skillContext);
+  const compiled = await compileExecution(issue, activeProvider, state.config, workspacePath, skillContext, capabilitiesManifest);
 
   let providerPrompt: string;
   let effectiveProvider = activeProvider;
@@ -258,7 +261,7 @@ export async function runAgentPipeline(
       writeFileSync(envFile, envLines, "utf8");
     }
   } else {
-    providerPrompt = await buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext);
+    providerPrompt = await buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext, capabilitiesManifest);
   }
 
   if (!effectiveProvider.command.trim()) {

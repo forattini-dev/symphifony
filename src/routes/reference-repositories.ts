@@ -6,6 +6,8 @@ import {
 } from "../domains/project.ts";
 import { TARGET_ROOT } from "../concerns/constants.ts";
 import type { ReferenceImportKind } from "../domains/project.ts";
+import { discoverSkills, discoverAgents, discoverCommands } from "../agents/skills.ts";
+import { updateClaudeMdManagedBlock } from "../agents/claude-md-manager.ts";
 
 function normalizeReferenceKind(value: unknown): ReferenceImportKind {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "all";
@@ -74,6 +76,12 @@ export function registerReferenceRepositoryRoutes(app: any): void {
         dryRun: payload?.dryRun === true,
         importToGlobal: payload?.global === true,
       });
+
+      if (!payload?.dryRun) {
+        try {
+          updateClaudeMdManagedBlock(TARGET_ROOT, discoverSkills(TARGET_ROOT), discoverAgents(TARGET_ROOT), discoverCommands(TARGET_ROOT));
+        } catch { /* non-critical */ }
+      }
 
       return c.json({
         ok: true,

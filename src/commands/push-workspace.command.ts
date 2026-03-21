@@ -18,7 +18,7 @@ export type PushWorkspaceResult = {
 };
 
 /** Check if the `gh` CLI is available in PATH. */
-function isGhAvailable(): boolean {
+export function isGhAvailable(): boolean {
   try {
     execFileSync("gh", ["--version"], { stdio: "pipe", timeout: 5_000 });
     return true;
@@ -28,7 +28,7 @@ function isGhAvailable(): boolean {
 }
 
 /** Get the remote compare URL as fallback when `gh` is not available. */
-function getCompareUrl(branchName: string, baseBranch: string): string {
+export function getCompareUrl(branchName: string, baseBranch: string): string {
   try {
     const remote = execSync("git remote get-url origin", { cwd: TARGET_ROOT, encoding: "utf8", stdio: "pipe" }).trim();
     const cleanRemote = remote.replace(/\.git$/, "");
@@ -39,7 +39,7 @@ function getCompareUrl(branchName: string, baseBranch: string): string {
 }
 
 /** Try to find an existing open PR for the given branch. Returns URL or null. */
-function findExistingPr(branchName: string): string | null {
+export function findExistingPr(branchName: string): string | null {
   try {
     const result = execFileSync(
       "gh", ["pr", "view", branchName, "--json", "url,state", "--jq", 'select(.state == "OPEN") | .url'],
@@ -52,7 +52,7 @@ function findExistingPr(branchName: string): string | null {
 }
 
 /** Create a new PR via `gh`. Returns URL or throws on failure. */
-function createPr(branchName: string, baseBranch: string, title: string, body: string): string {
+export function createPr(branchName: string, baseBranch: string, title: string, body: string): string {
   // execFileSync with array args — no shell injection possible
   return execFileSync(
     "gh", ["pr", "create", "--head", branchName, "--base", baseBranch, "--title", title, "--body", body],
@@ -70,18 +70,18 @@ export async function pushWorkspaceCommand(
 ): Promise<PushWorkspaceResult> {
   const { issue, state } = input;
 
-  if (!["Done", "Reviewing", "Reviewed"].includes(issue.state)) {
-    throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Push is only allowed in Reviewing, Reviewed, or Done state.`);
+  if (!["Approved", "Reviewing", "PendingDecision"].includes(issue.state)) {
+    throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Push is only allowed in Reviewing, PendingDecision, or Approved state.`);
   }
 
   if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
     throw new Error(`Issue ${issue.identifier} has no git worktree — cannot push.`);
   }
 
-  // Auto-transition to Done if still in review
-  if (issue.state === "Reviewing" || issue.state === "Reviewed") {
+  // Auto-transition to Approved if still in review
+  if (issue.state === "Reviewing" || issue.state === "PendingDecision") {
     await transitionIssueCommand(
-      { issue, target: "Done", note: "Approved and pushed by user." },
+      { issue, target: "Approved", note: "Approved and pushed by user." },
       deps,
     );
   }

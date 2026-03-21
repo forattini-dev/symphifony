@@ -21,13 +21,13 @@ const ISSUE_TYPE_BADGE = {
 
 const STATE_BORDER_LEFT = {
   Planning:   "border-l-info",
-  Planned:    "border-l-warning",
+  PendingApproval:    "border-l-warning",
   Queued:     "border-l-info",
   Running:    "border-l-primary",
   Reviewing:  "border-l-secondary",
-  Reviewed:   "border-l-success/60",
+  PendingDecision:   "border-l-success/60",
   Blocked:    "border-l-error",
-  Done:       "border-l-success",
+  Approved:       "border-l-success",
   Merged:     "border-l-success",
   Cancelled:  "border-l-neutral",
 };
@@ -106,7 +106,7 @@ function formatStallMs(ms) {
 
 function getStallTimestamp(issue) {
   if (issue.state === "Reviewing") return issue.updatedAt;
-  if (issue.state === "Reviewed")  return issue.completedAt || issue.updatedAt;
+  if (issue.state === "PendingDecision")  return issue.completedAt || issue.updatedAt;
   if (issue.state === "Blocked")   return issue.updatedAt;
   return null;
 }
@@ -129,7 +129,7 @@ function deriveActivity(issue) {
       return { label: "Aguardando…",       Icon: Clock,     spin: false, pulse: true,  color: "text-info/50" };
     }
 
-    case "Planned":
+    case "PendingApproval":
       return null; // passive wait
 
     case "Queued": {
@@ -154,7 +154,7 @@ function deriveActivity(issue) {
 
     // Stalling states — handled separately via StallLine
     case "Reviewing":
-    case "Reviewed":
+    case "PendingDecision":
     case "Blocked":
       return "stall";
 
@@ -199,11 +199,11 @@ function ActivityLine({ issue }) {
     if (!stallTs) return null;
     const stallColor =
       issue.state === "Blocked"   ? "text-error/70" :
-      issue.state === "Reviewed"  ? "text-success/70" :
+      issue.state === "PendingDecision"  ? "text-success/70" :
       "text-secondary/70"; // Reviewing
     const stallLabel =
       issue.state === "Blocked"   ? "blocked" :
-      issue.state === "Reviewed"  ? "review complete" :
+      issue.state === "PendingDecision"  ? "review complete" :
       "reviewing";
 
     return (
@@ -241,7 +241,7 @@ export function IssueCard({
 }) {
   const isRunning    = issue.state === "Running";
   const isPlanning   = issue.state === "Planning";
-  const isDone       = issue.state === "Done" || issue.state === "Merged";
+  const isDone       = issue.state === "Approved" || issue.state === "Merged";
   const isMergedState = issue.state === "Merged";
   const isCancelled  = issue.state === "Cancelled";
   const isBlocked    = issue.state === "Blocked";
@@ -249,7 +249,7 @@ export function IssueCard({
   const isMerged     = !!issue.mergedAt;
   const hasMergeConflict = issue.mergeResult?.conflicts > 0;
   const canMerge     = !isMerged && !isMergedState && !hasMergeConflict && !!issue.branchName
-                       && issue.state === "Done";
+                       && issue.state === "Approved";
 
   // Token bump animation
   const prevTokensRef = useRef(issue.tokenUsage?.totalTokens);
@@ -268,7 +268,7 @@ export function IssueCard({
   }, [issue.tokenUsage?.totalTokens]);
 
   useEffect(() => {
-    if ((prevStateRef.current !== "Merged" && issue.state === "Merged") || (prevStateRef.current !== "Done" && issue.state === "Done")) {
+    if ((prevStateRef.current !== "Merged" && issue.state === "Merged") || (prevStateRef.current !== "Approved" && issue.state === "Approved")) {
       setCompletionFlash(true);
       const t = setTimeout(() => setCompletionFlash(false), 800);
       prevStateRef.current = issue.state;

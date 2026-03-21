@@ -24,49 +24,50 @@ function ColumnBadge({ count, className }) {
   );
 }
 
-// Kanban columns — Planning/Planned grouped as "Planning", Queued/Running as "In Progress", Reviewing/Reviewed as "Reviewing"
-const COLUMNS = ["Planning", "In Progress", "Reviewing", "Blocked", "Done"];
-const PLANNING_STATES = new Set(["Planning", "Planned"]);
-const IN_PROGRESS_STATES = new Set(["Queued", "Running"]);
-const REVIEWING_STATES = new Set(["Reviewing", "Reviewed"]);
-const DONE_STATES = new Set(["Done", "Merged", "Cancelled"]);
+// Kanban columns — grouped by who acts:
+//   Planning (AI), Needs Approval (Human), In Progress (AI), Blocked (Human), Done (terminal)
+const COLUMNS = ["Planning", "Needs Approval", "In Progress", "Blocked", "Done"];
+const PLANNING_STATES = new Set(["Planning"]);
+const NEEDS_APPROVAL_STATES = new Set(["PendingApproval", "PendingDecision"]);
+const IN_PROGRESS_STATES = new Set(["Queued", "Running", "Reviewing"]);
+const DONE_STATES = new Set(["Approved", "Merged", "Cancelled"]);
 
 const COLUMN_BADGE = {
   Planning: "badge-info",
+  "Needs Approval": "badge-warning",
   "In Progress": "badge-primary",
-  "Reviewing": "badge-secondary",
   Blocked: "badge-error",
   Done: "badge-success",
 };
 
 const COLUMN_ACCENT_STYLE = {
   Planning: { borderTopColor: 'color-mix(in oklab, var(--color-info) 40%, transparent)' },
+  "Needs Approval": { borderTopColor: 'color-mix(in oklab, var(--color-warning) 40%, transparent)' },
   "In Progress": { borderTopColor: 'color-mix(in oklab, var(--color-primary) 50%, transparent)' },
-  "Reviewing": { borderTopColor: 'color-mix(in oklab, var(--color-secondary) 40%, transparent)' },
   Blocked: { borderTopColor: 'color-mix(in oklab, var(--color-error) 40%, transparent)' },
   Done: { borderTopColor: 'color-mix(in oklab, var(--color-success) 40%, transparent)' },
 };
 
 const COLUMN_HEADER_COLOR = {
   Planning: 'var(--color-info)',
+  "Needs Approval": 'var(--color-warning)',
   "In Progress": 'var(--color-primary)',
-  "Reviewing": 'var(--color-secondary)',
   Blocked: 'var(--color-error)',
   Done: 'var(--color-success)',
 };
 
 const COLUMN_DOT_COLOR = {
   Planning: 'var(--color-info)',
+  "Needs Approval": 'var(--color-warning)',
   "In Progress": 'var(--color-primary)',
-  "Reviewing": 'var(--color-secondary)',
   Blocked: 'var(--color-error)',
   Done: 'var(--color-success)',
 };
 
 const EMPTY_CONFIG = {
   Planning: { icon: Lightbulb, desc: "Create an issue to start planning" },
+  "Needs Approval": { icon: Eye, desc: "Issues waiting for your approval" },
   "In Progress": { icon: Play, desc: "Issues move here when agents start" },
-  "Reviewing": { icon: Eye, desc: "Awaiting review" },
   Blocked: { icon: AlertTriangle, desc: "Needs attention" },
   Done: { icon: CheckCircle, desc: "Completed" },
 };
@@ -209,7 +210,7 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
   const isEmpty = issues.length === 0;
   const isCollapsedEmpty = isEmpty && col !== "Planning" && totalIssues === 0;
 
-  // Collapsible columns: Done shows 5, Cancelled shows 3 by default
+  // Collapsible columns: Done shows 20 by default
   const collapseLimit = COLLAPSE_LIMITS[col];
   const isCollapsible = collapseLimit != null && issues.length > collapseLimit;
   const visibleIssues = (isCollapsible && !expanded) ? issues.slice(0, collapseLimit) : issues;
@@ -290,7 +291,7 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
                 );
               })}
 
-              {/* Collapse/expand toggle for Done and Cancelled columns */}
+              {/* Collapse/expand toggle for Done column */}
               {isCollapsible && (
                 <button
                   className="btn btn-ghost btn-xs w-full gap-1 opacity-50 hover:opacity-80"
@@ -432,14 +433,15 @@ export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect, 
     for (const issue of issues) {
       let col;
       if (PLANNING_STATES.has(issue.state)) col = "Planning";
+      else if (NEEDS_APPROVAL_STATES.has(issue.state)) col = "Needs Approval";
       else if (IN_PROGRESS_STATES.has(issue.state)) col = "In Progress";
-      else if (REVIEWING_STATES.has(issue.state)) col = "Reviewing";
+      else if (issue.state === "Blocked") col = "Blocked";
       else if (DONE_STATES.has(issue.state)) col = "Done";
-      else col = buckets[issue.state] ? issue.state : "Planning";
+      else col = "Planning";
       buckets[col].push(issue);
     }
     for (const c of COLUMNS) {
-      buckets[c].sort((a, b) => a.priority - b.priority);
+      buckets[c].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     }
     return buckets;
   }, [issues]);

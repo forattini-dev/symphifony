@@ -5,24 +5,24 @@ import { Search, X, Filter, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const STATE_GROUPS = [
-  { label: "Active", states: ["Planning", "Planned", "Queued", "Running"] },
-  { label: "Review", states: ["Reviewing", "Reviewed"] },
-  { label: "Waiting", states: ["Blocked", "Done"] },
+  { label: "Active", states: ["Planning", "PendingApproval", "Queued", "Running"] },
+  { label: "Review", states: ["Reviewing", "PendingDecision"] },
+  { label: "Waiting", states: ["Blocked", "Approved"] },
   { label: "Final", states: ["Merged", "Cancelled"] },
 ];
 
 const ALL_STATES = STATE_GROUPS.flatMap((g) => g.states);
 
 const STATE_COLOR = {
-  Planning: "badge-info", Planned: "badge-warning", Queued: "badge-info", Running: "badge-primary",
-  Reviewing: "badge-secondary", Reviewed: "badge-success", Blocked: "badge-error", Done: "badge-success",
+  Planning: "badge-info", PendingApproval: "badge-warning", Queued: "badge-info", Running: "badge-primary",
+  Reviewing: "badge-secondary", PendingDecision: "badge-success", Blocked: "badge-error", Approved: "badge-success",
   Merged: "badge-success", Cancelled: "badge-neutral",
 };
 
 const SORT_OPTIONS = [
   { value: "updated", label: "Last updated" },
   { value: "created", label: "Newest first" },
-  { value: "priority", label: "Priority" },
+  { value: "state", label: "State" },
   { value: "tokens", label: "Most tokens" },
 ];
 
@@ -90,8 +90,8 @@ function IssuesPage() {
       switch (sortBy) {
         case "created":
           return (b.createdAt || "").localeCompare(a.createdAt || "");
-        case "priority":
-          return (a.priority ?? 99) - (b.priority ?? 99);
+        case "state":
+          return (a.state || "").localeCompare(b.state || "");
         case "tokens":
           return (b.tokenUsage?.totalTokens || 0) - (a.tokenUsage?.totalTokens || 0);
         case "updated":

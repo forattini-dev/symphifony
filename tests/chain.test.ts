@@ -49,8 +49,7 @@ function makeIssue(title: string, description: string, extra: Partial<IssueEntry
     identifier: "CT-1",
     title,
     description,
-    priority: 2,
-    state: "Planned",
+    state: "PendingApproval",
     labels: [],
     paths: [],
     blockedBy: [],
@@ -531,5 +530,351 @@ describe("mixed chain: claude-planner + codex-executor + claude-reviewer", () =>
 
     assert.ok(execResult!.command.startsWith("codex exec"), "executor is codex");
     assert.ok(reviewResult.command.startsWith("claude "), "reviewer is claude");
+  });
+});
+
+
+// ── Gemini chain ──────────────────────────────────────────────────────────────
+
+describe("gemini chain", () => {
+  const title = "Optimize database queries for the analytics dashboard";
+  const description = "Profile and optimize slow queries in the PostgreSQL analytics pipeline";
+
+  it("compile execution for gemini: produces valid command", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({
+      provider: "gemini",
+      role: "executor",
+      model: "gemini-2.5-pro",
+    });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(result !== null, "compilation succeeded");
+    assert.ok(result!.command.startsWith("gemini"), "command starts with 'gemini'");
+    assert.ok(result!.command.includes("--yolo"), "has --yolo flag");
+    assert.ok(result!.command.includes('-p ""'), "has headless -p flag");
+  });
+
+  it("compile execution for gemini: model is injected", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor", model: "gemini-2.5-pro" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(result!.command.includes("--model gemini-2.5-pro"), "model in command");
+  });
+
+  it("compile execution for gemini: model is omitted when not configured", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor", model: undefined });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(!result!.command.includes("--model"), "no model flag");
+  });
+
+  it("compile execution for gemini: uses --include-directories (not --add-dir)", async () => {
+    const plan = makePlan({ suggestedPaths: ["src/db/queries.ts"] });
+    const issue = makeIssue(title, description, { plan });
+    const provider = makeProvider({ provider: "gemini", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(result!.command.includes("--include-directories"), "gemini uses --include-directories");
+    assert.ok(!result!.command.includes("--add-dir"), "gemini does NOT use --add-dir");
+  });
+
+  it("compile execution for gemini: adapter meta is correct", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.equal(result!.meta.adapter, "gemini");
+    assert.equal(result!.meta.phasesCount, 0);
+  });
+
+  it("compile execution for gemini: prompt references the issue title", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(result!.prompt.includes(title), "prompt contains issue title");
+  });
+
+  it("compile execution for gemini: payload is populated", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+    assert.ok(result!.payload !== null, "has payload");
+    assert.equal(result!.payload!.version, 1);
+    assert.equal(result!.payload!.issue.identifier, "CT-1");
+  });
+
+  it("compile review for gemini: produces valid command with read-only mode", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const reviewer = makeProvider({ provider: "gemini", role: "reviewer", model: "gemini-2.0-flash" });
+
+    const result = await compileReview(issue, reviewer, WORKSPACE, "optimized 3 queries");
+
+    assert.ok(result.command.startsWith("gemini"), "review command starts with gemini");
+    assert.ok(result.command.includes("--approval-mode plan"), "review uses read-only mode");
+    assert.ok(!result.command.includes("--yolo"), "review should NOT use yolo");
+  });
+
+  it("compile review for gemini: prompt includes diff summary", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const reviewer = makeProvider({ provider: "gemini", role: "reviewer" });
+    const diff = "Modified src/db/queries.ts: rewrote 3 slow queries";
+
+    const result = await compileReview(issue, reviewer, WORKSPACE, diff);
+
+    assert.ok(result.prompt.includes(diff), "review prompt includes diff");
+  });
+
+  it("full chain: compile execution then review for gemini", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan() });
+    const executor = makeProvider({ provider: "gemini", role: "executor", model: "gemini-2.5-pro" });
+    const reviewer = makeProvider({ provider: "gemini", role: "reviewer", model: "gemini-2.0-flash" });
+
+    const execResult = await compileExecution(issue, executor, BASE_CONFIG, WORKSPACE, "");
+    const reviewResult = await compileReview(issue, reviewer, WORKSPACE, "3 files changed");
+
+    assert.ok(execResult!.command.includes("gemini-2.5-pro"), "executor uses 2.5-pro");
+    assert.ok(reviewResult.command.includes("gemini-2.0-flash"), "reviewer uses 2.0-flash");
+    assert.ok(execResult!.command.startsWith("gemini"), "executor is gemini");
+    assert.ok(reviewResult.command.startsWith("gemini"), "reviewer is gemini");
+  });
+});
+
+
+// ── Cross-adapter: environment variables, hooks, and meta ─────────────────────
+
+describe("cross-adapter: env vars are populated for all adapters", () => {
+  const plan = makePlan({
+    suggestedPaths: ["src/index.ts", "src/utils.ts"],
+    estimatedComplexity: "high",
+    validation: ["pnpm lint", "pnpm test"],
+  });
+  const issue = makeIssue("Cross-adapter test", "Test all adapters", { plan });
+
+  for (const adapterName of ["claude", "codex", "gemini"]) {
+    it(`${adapterName}: sets FIFONY_PLAN_COMPLEXITY`, async () => {
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+      assert.equal(result!.env.FIFONY_PLAN_COMPLEXITY, "high");
+    });
+
+    it(`${adapterName}: sets FIFONY_PLAN_STEPS`, async () => {
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+      assert.equal(result!.env.FIFONY_PLAN_STEPS, "3"); // plan has 3 steps
+    });
+
+    it(`${adapterName}: sets FIFONY_PLAN_PATHS when suggestedPaths exist`, async () => {
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+      assert.ok(result!.env.FIFONY_PLAN_PATHS, "FIFONY_PLAN_PATHS should be set");
+      assert.ok(result!.env.FIFONY_PLAN_PATHS.includes("src/index.ts"));
+    });
+  }
+});
+
+
+describe("cross-adapter: post-hooks extracted from plan.validation", () => {
+  const plan = makePlan({
+    validation: ["pnpm lint --strict", "pnpm typecheck", "pnpm test --coverage"],
+  });
+  const issue = makeIssue("Hooks test", "Test hooks", { plan });
+
+  for (const adapterName of ["claude", "codex", "gemini"]) {
+    it(`${adapterName}: extracts lint, typecheck, test hooks`, async () => {
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+      assert.ok(result!.postHooks.length >= 2, `${adapterName} should have post-hooks`);
+      assert.ok(result!.postHooks.some(h => h.includes("lint")), "has lint hook");
+      assert.ok(result!.postHooks.some(h => h.includes("tsc") || h.includes("typecheck")), "has typecheck hook");
+    });
+  }
+});
+
+
+describe("cross-adapter: meta fields populated consistently", () => {
+  for (const adapterName of ["claude", "codex", "gemini"]) {
+    it(`${adapterName}: meta.adapter matches provider name`, async () => {
+      const issue = makeIssue("Meta test", "desc", { plan: makePlan() });
+      const provider = makeProvider({ provider: adapterName, role: "executor", model: "test-model" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+      assert.equal(result!.meta.adapter, adapterName);
+      assert.equal(result!.meta.model, "test-model");
+      assert.equal(result!.meta.phasesCount, 0); // flat plan
+    });
+
+    it(`${adapterName}: meta.phasesCount reflects phased plan`, async () => {
+      const phasedPlan = makePlan({
+        phases: [
+          { phaseName: "Phase 1", goal: "Setup", tasks: [{ step: 1, action: "Init" }], outputs: [] },
+          { phaseName: "Phase 2", goal: "Build", tasks: [{ step: 2, action: "Build" }], outputs: [] },
+        ],
+      });
+      const issue = makeIssue("Phased test", "desc", { plan: phasedPlan });
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+      assert.equal(result!.meta.phasesCount, 2);
+    });
+  }
+});
+
+
+describe("cross-adapter: payload structure consistent across all adapters", () => {
+  const plan = makePlan({
+    assumptions: ["Uses PostgreSQL"],
+    constraints: ["No breaking changes"],
+    risks: [{ risk: "Perf regression", impact: "slow queries", mitigation: "benchmark" }],
+  });
+  const issue = makeIssue("Payload test", "Test payload", { plan });
+
+  for (const adapterName of ["claude", "codex", "gemini"]) {
+    it(`${adapterName}: payload has version, issue, provider, plan fields`, async () => {
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+
+      const p = result!.payload!;
+      assert.equal(p.version, 1);
+      assert.equal(p.issue.identifier, "CT-1");
+      assert.equal(p.provider.name, adapterName);
+      assert.equal(p.provider.role, "executor");
+      assert.ok(p.plan.steps.length >= 3);
+      assert.ok(p.constraints.length > 0, "constraints populated");
+      assert.ok(p.assumptions.length > 0, "assumptions populated");
+      assert.ok(p.risks.length > 0, "risks populated");
+    });
+  }
+});
+
+
+describe("cross-adapter: compileExecution returns null for missing plan", () => {
+  for (const adapterName of ["claude", "codex", "gemini"]) {
+    it(`${adapterName}: returns null when issue has no plan`, async () => {
+      const issue = makeIssue("No plan", "desc"); // no plan attached
+      const provider = makeProvider({ provider: adapterName, role: "executor" });
+      const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+      assert.equal(result, null);
+    });
+  }
+});
+
+
+// ── Parameter flow tests — verify new features flow through compile() ────────
+
+describe("cross-adapter: readOnly flows from role to command", () => {
+  const issue = makeIssue("ReadOnly test", "desc", { plan: makePlan() });
+
+  it("claude planner uses --permission-mode plan (not --dangerously-skip-permissions)", async () => {
+    const planner = makeProvider({ provider: "claude", role: "planner" });
+    const result = await compileExecution(issue, planner, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--permission-mode plan"), "planner should be read-only");
+    assert.ok(!result!.command.includes("--dangerously-skip-permissions"), "should NOT skip permissions");
+  });
+
+  it("claude executor uses --dangerously-skip-permissions (not plan mode)", async () => {
+    const executor = makeProvider({ provider: "claude", role: "executor" });
+    const result = await compileExecution(issue, executor, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--dangerously-skip-permissions"), "executor needs full access");
+    assert.ok(!result!.command.includes("--permission-mode"), "executor should NOT be read-only");
+  });
+
+  it("claude reviewer uses --permission-mode plan (not --dangerously-skip-permissions)", async () => {
+    const reviewer = makeProvider({ provider: "claude", role: "reviewer" });
+    const result = await compileExecution(issue, reviewer, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--permission-mode plan"), "reviewer should be read-only");
+  });
+
+  it("gemini planner uses --approval-mode plan (not --yolo)", async () => {
+    const planner = makeProvider({ provider: "gemini", role: "planner" });
+    const result = await compileExecution(issue, planner, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--approval-mode plan"), "gemini planner should be read-only");
+    assert.ok(!result!.command.includes("--yolo"));
+  });
+
+  it("gemini executor uses --yolo (not plan mode)", async () => {
+    const executor = makeProvider({ provider: "gemini", role: "executor" });
+    const result = await compileExecution(issue, executor, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--yolo"), "gemini executor needs full access");
+    assert.ok(!result!.command.includes("--approval-mode"));
+  });
+});
+
+
+describe("cross-adapter: readOnly in review commands", () => {
+  const issue = makeIssue("Review readOnly", "desc", { plan: makePlan() });
+
+  it("claude review command uses --permission-mode plan", async () => {
+    const reviewer = makeProvider({ provider: "claude", role: "reviewer" });
+    const result = await compileReview(issue, reviewer, WORKSPACE, "diff summary");
+    assert.ok(result.command.includes("--permission-mode plan"), "review is read-only");
+    assert.ok(!result.command.includes("--dangerously-skip-permissions"));
+  });
+
+  it("gemini review command uses --approval-mode plan", async () => {
+    const reviewer = makeProvider({ provider: "gemini", role: "reviewer" });
+    const result = await compileReview(issue, reviewer, WORKSPACE, "diff summary");
+    assert.ok(result.command.includes("--approval-mode plan"), "review is read-only");
+    assert.ok(!result.command.includes("--yolo"));
+  });
+});
+
+
+describe("claude: maxBudgetUsd flows from config through compile()", () => {
+  it("includes --max-budget-usd when config has it set", async () => {
+    const issue = makeIssue("Budget test", "desc", { plan: makePlan() });
+    const provider = makeProvider({ provider: "claude", role: "executor" });
+    const config = { ...BASE_CONFIG, maxBudgetUsd: 2.50 };
+
+    const result = await compileExecution(issue, provider, config, WORKSPACE, "");
+    assert.ok(result!.command.includes("--max-budget-usd 2.5"), "budget should flow to command");
+  });
+
+  it("omits --max-budget-usd when config does not have it", async () => {
+    const issue = makeIssue("No budget", "desc", { plan: makePlan() });
+    const provider = makeProvider({ provider: "claude", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(!result!.command.includes("--max-budget-usd"), "should not have budget flag");
+  });
+
+  it("includes --max-budget-usd in review command when config has it", async () => {
+    const issue = makeIssue("Budget review", "desc", { plan: makePlan() });
+    const reviewer = makeProvider({ provider: "claude", role: "reviewer" });
+    const config = { ...BASE_CONFIG, maxBudgetUsd: 1.00 };
+
+    const result = await compileReview(issue, reviewer, WORKSPACE, "diff", config);
+    assert.ok(result.command.includes("--max-budget-usd 1"), "review should respect budget");
+  });
+});
+
+
+describe("gemini: --output-format json flows through compile()", () => {
+  it("execution command always includes --output-format json", async () => {
+    const issue = makeIssue("Gemini JSON", "desc", { plan: makePlan() });
+    const provider = makeProvider({ provider: "gemini", role: "executor" });
+
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.command.includes("--output-format json"), "gemini should always output JSON");
+  });
+
+  it("review command also includes --output-format json", async () => {
+    const issue = makeIssue("Gemini JSON review", "desc", { plan: makePlan() });
+    const reviewer = makeProvider({ provider: "gemini", role: "reviewer" });
+
+    const result = await compileReview(issue, reviewer, WORKSPACE, "diff");
+    assert.ok(result.command.includes("--output-format json"), "gemini review should output JSON");
   });
 });

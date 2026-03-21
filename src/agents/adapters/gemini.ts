@@ -4,7 +4,7 @@ import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } fr
 import type { CompiledExecution } from "./types.ts";
 import type { ProviderAdapter, ProviderCommandOptions } from "./registry.ts";
 import { renderPrompt } from "../prompting.ts";
-import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands } from "./shared.ts";
+import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands, buildImagePromptSection } from "./shared.ts";
 import { REVIEW_RESULT_SCHEMA, extractPlanDirs } from "./commands.ts";
 
 // ── Result contract (embedded in prompt — Gemini CLI has no --json-schema flag) ─
@@ -26,11 +26,21 @@ Return a JSON object with this exact schema when finished:
 // ── Command builder ───────────────────────────────────────────────────────────
 
 export function buildGeminiCommand(options: ProviderCommandOptions): string {
-  const parts = ["gemini", "--yolo"];
+  const parts = ["gemini"];
+
+  if (options.readOnly) {
+    // Read-only mode for planning/review — no file edits
+    parts.push("--approval-mode plan");
+  } else {
+    parts.push("--yolo");
+  }
 
   if (options.model) {
     parts.push(`--model ${options.model}`);
   }
+
+  // JSON output enables structured parsing and token tracking
+  parts.push("--output-format json");
 
   if (options.addDirs?.length) {
     parts.push(`--include-directories ${options.addDirs.map((d) => `"${d}"`).join(",")}`);
@@ -50,14 +60,16 @@ async function compile(
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
+  capabilitiesManifest?: string,
 ): Promise<CompiledExecution> {
   const effort = resolveEffortForProvider(plan, provider.role, config.defaultEffort) || provider.reasoningEffort;
 
-  const prompt = await renderPrompt("compile-execution-codex", {
+  let prompt = await renderPrompt("compile-execution-codex", {
     isPlanner: provider.role === "planner",
     isReviewer: provider.role === "reviewer",
     profileInstructions: provider.profileInstructions || "",
     skillContext,
+    capabilitiesManifest: capabilitiesManifest || "",
     issueIdentifier: issue.identifier,
     title: issue.title,
     description: issue.description || "(none)",
@@ -74,13 +86,22 @@ async function compile(
     outputContract: GEMINI_RESULT_CONTRACT,
   });
 
+  // Gemini CLI has no --image flag — embed images directly in the prompt
+  if (issue.images?.length) {
+    const imageSection = buildImagePromptSection(issue.images);
+    if (imageSection) prompt = prompt + "\n\n" + imageSection;
+  }
+
   const relativeDirs = extractPlanDirs(plan);
   const codePath = existsSync(join(workspacePath, "worktree")) ? join(workspacePath, "worktree") : workspacePath;
   const absoluteDirs = relativeDirs.map((d) => join(codePath, d));
 
+  const isReadOnlyRole = provider.role === "planner" || provider.role === "reviewer";
+
   const command = buildGeminiCommand({
     model: provider.model,
     addDirs: absoluteDirs,
+    readOnly: isReadOnlyRole,
   });
 
   const env: Record<string, string> = {
@@ -116,6 +137,7 @@ export const geminiAdapter: ProviderAdapter = {
   buildCommand: buildGeminiCommand,
   buildReviewCommand: (reviewer) => buildGeminiCommand({
     model: reviewer.model,
+    readOnly: true,
   }),
   compile,
 };

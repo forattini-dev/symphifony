@@ -25,6 +25,7 @@ import { replanIssueCommand } from "../commands/replan-issue.command.ts";
 import { mergeWorkspaceCommand } from "../commands/merge-workspace.command.ts";
 import { pushWorkspaceCommand } from "../commands/push-workspace.command.ts";
 import { transitionIssueCommand } from "../commands/transition-issue.command.ts";
+import { retryExecutionCommand } from "../commands/retry-execution.command.ts";
 
 type GetStateResult = RuntimeState & {
   capabilities: Record<string, number>;
@@ -154,7 +155,7 @@ export function registerStateRoutes(
         );
         if (issue.plan?.steps?.length) {
           await transitionIssueCommand(
-            { issue, target: "Planned", note: "Existing plan found." },
+            { issue, target: "PendingApproval", note: "Existing plan found." },
             container,
           );
           await transitionIssueCommand(
@@ -163,12 +164,27 @@ export function registerStateRoutes(
           );
         }
       } else if (issue.state === "Blocked") {
-        // lastError/nextRetryAt cleared by FSM onEnterQueued
-        await transitionIssueCommand(
-          { issue, target: "Queued", note: "Manual retry from Blocked." },
+        await retryExecutionCommand(
+          { issue, note: "Manual retry from Blocked." },
           container,
         );
-      } else if (issue.state === "Planned") {
+      } else if (issue.state === "Approved") {
+        // Done → reopen for rework (e.g. after merge conflicts)
+        await transitionIssueCommand(
+          { issue, target: "Planning", note: "Requeued for rework after merge conflicts." },
+          container,
+        );
+        if (issue.plan?.steps?.length) {
+          await transitionIssueCommand(
+            { issue, target: "PendingApproval", note: "Existing plan found." },
+            container,
+          );
+          await transitionIssueCommand(
+            { issue, target: "Queued", note: "Auto-queued for rework." },
+            container,
+          );
+        }
+      } else if (issue.state === "PendingApproval") {
         await transitionIssueCommand(
           { issue, target: "Queued", note: "Manual retry — queued for execution." },
           container,
@@ -235,10 +251,46 @@ export function registerStateRoutes(
     }
   });
 
+  app.get("/api/issues/:id/merge-preview", async (c: any) => {
+    logger.info({ issueId: parseIssue(c) }, "[API] GET /api/issues/:id/merge-preview");
+    try {
+      const issueId = parseIssue(c);
+      if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
+      const issue = findIssue(state, issueId);
+      if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
+      const { dryMerge } = await import("../domains/workspace.ts");
+      const result = dryMerge(issue);
+      return c.json({ ok: true, ...result });
+    } catch (error) {
+      logger.error(`Failed to preview merge for ${parseIssue(c) || "<unknown>"}: ${String(error)}`);
+      return c.json({ ok: false, error: String(error) }, 500);
+    }
+  });
+
+  app.post("/api/issues/:id/rebase", async (c: any) => {
+    logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/rebase");
+    try {
+      const issueId = parseIssue(c);
+      if (!issueId) return c.json({ ok: false, error: "Issue id is required." }, 400);
+      const issue = findIssue(state, issueId);
+      if (!issue) return c.json({ ok: false, error: "Issue not found." }, 404);
+      const { rebaseWorktree } = await import("../domains/workspace.ts");
+      const result = rebaseWorktree(issue);
+      if (result.success) {
+        addEvent(state, issue.id, "info", `Branch ${issue.branchName} rebased onto ${issue.baseBranch}.`);
+      }
+      await persistState(state);
+      return c.json({ ok: true, ...result });
+    } catch (error) {
+      logger.error(`Failed to rebase for ${parseIssue(c) || "<unknown>"}: ${String(error)}`);
+      return c.json({ ok: false, error: String(error) }, 500);
+    }
+  });
+
   app.post("/api/issues/:id/try", async (c: any) => {
     logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/try");
     return mutateIssueState(state, c, async (issue) => {
-      if (!["Reviewing", "Reviewed"].includes(issue.state)) {
+      if (!["Reviewing", "PendingDecision"].includes(issue.state)) {
         throw new Error(`Cannot apply test for issue in state ${issue.state}.`);
       }
       if (!issue.branchName) {
@@ -274,7 +326,7 @@ export function registerStateRoutes(
   app.post("/api/issues/:id/rollback", async (c: any) => {
     logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/rollback");
     return mutateIssueState(state, c, async (issue) => {
-      if (!["Reviewing", "Reviewed", "Done"].includes(issue.state)) {
+      if (!["Reviewing", "PendingDecision", "Approved"].includes(issue.state)) {
         throw new Error(`Cannot rollback issue in state ${issue.state}. Must be in Reviewing, Reviewed, or Done.`);
       }
       if (issue.workspacePath) {

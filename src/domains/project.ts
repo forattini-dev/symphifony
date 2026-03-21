@@ -669,6 +669,12 @@ const DEFAULT_REFERENCE_REPOSITORIES: RepositoryReferenceInput[] = [
     url: "https://github.com/pbakaus/impeccable.git",
     description: "Frontend polish and impeccable-style quality workflows.",
   },
+  {
+    id: "everything-claude-code",
+    name: "affaan-m/everything-claude-code",
+    url: "https://github.com/affaan-m/everything-claude-code.git",
+    description: "28 specialized agents, 116 skills, and 59 commands — agent harness performance system.",
+  },
 ];
 
 const REPOSITORY_ROOT = resolve(homedir(), ".fifony", "repositories");

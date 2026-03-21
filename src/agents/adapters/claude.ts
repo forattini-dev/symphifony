@@ -4,7 +4,7 @@ import type { IssueEntry, AgentProviderDefinition, RuntimeConfig, IssuePlan } fr
 import type { CompiledExecution } from "./types.ts";
 import type { ProviderAdapter, ProviderCommandOptions } from "./registry.ts";
 import { renderPrompt } from "../prompting.ts";
-import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands } from "./shared.ts";
+import { buildFullPlanPrompt, resolveEffortForProvider, extractValidationCommands, buildImagePromptSection } from "./shared.ts";
 import { CLAUDE_RESULT_SCHEMA, REVIEW_RESULT_SCHEMA, extractPlanDirs } from "./commands.ts";
 
 // ── Command builder ───────────────────────────────────────────────────────────
@@ -12,7 +12,10 @@ import { CLAUDE_RESULT_SCHEMA, REVIEW_RESULT_SCHEMA, extractPlanDirs } from "./c
 export function buildClaudeCommand(options: ProviderCommandOptions): string {
   const parts = ["claude", "--print"];
 
-  if (!options.noToolAccess) {
+  if (options.readOnly) {
+    // Read-only mode: no file edits, no tool access — safe for planning/review
+    parts.push("--permission-mode plan");
+  } else if (!options.noToolAccess) {
     parts.push("--dangerously-skip-permissions");
   }
 
@@ -20,6 +23,10 @@ export function buildClaudeCommand(options: ProviderCommandOptions): string {
 
   if (options.effort) {
     parts.push(`--effort ${options.effort}`);
+  }
+
+  if (options.maxBudgetUsd && options.maxBudgetUsd > 0) {
+    parts.push(`--max-budget-usd ${options.maxBudgetUsd}`);
   }
 
   if (options.jsonSchema) {
@@ -49,14 +56,16 @@ async function compile(
   config: RuntimeConfig,
   workspacePath: string,
   skillContext: string,
+  capabilitiesManifest?: string,
 ): Promise<CompiledExecution> {
   const effort = resolveEffortForProvider(plan, provider.role, config.defaultEffort);
 
-  const prompt = await renderPrompt("compile-execution-claude", {
+  let prompt = await renderPrompt("compile-execution-claude", {
     isPlanner: provider.role === "planner",
     isReviewer: provider.role === "reviewer",
     profileInstructions: provider.profileInstructions || "",
     skillContext,
+    capabilitiesManifest: capabilitiesManifest || "",
     planPrompt: buildFullPlanPrompt(plan),
     subagentsToUse: plan.toolingDecision?.shouldUseSubagents ? (plan.toolingDecision.subagentsToUse ?? []) : [],
     skillsToUse: plan.toolingDecision?.shouldUseSkills ? (plan.toolingDecision.skillsToUse ?? []) : [],
@@ -72,11 +81,21 @@ async function compile(
   const codePath = existsSync(join(workspacePath, "worktree")) ? join(workspacePath, "worktree") : workspacePath;
   const absoluteDirs = relativeDirs.map((d) => join(codePath, d));
 
+  // Claude CLI has no --image flag — embed images in prompt
+  if (issue.images?.length) {
+    const imageSection = buildImagePromptSection(issue.images);
+    if (imageSection) prompt = prompt + "\n\n" + imageSection;
+  }
+
+  const isReadOnlyRole = provider.role === "planner" || provider.role === "reviewer";
+
   const command = buildClaudeCommand({
     model: provider.model,
     effort,
     addDirs: absoluteDirs,
     jsonSchema: CLAUDE_RESULT_SCHEMA,
+    readOnly: isReadOnlyRole,
+    maxBudgetUsd: config.maxBudgetUsd,
   });
 
   const env: Record<string, string> = {
@@ -112,10 +131,12 @@ async function compile(
 
 export const claudeAdapter: ProviderAdapter = {
   buildCommand: buildClaudeCommand,
-  buildReviewCommand: (reviewer) => buildClaudeCommand({
+  buildReviewCommand: (reviewer, config) => buildClaudeCommand({
     model: reviewer.model,
     effort: reviewer.reasoningEffort,
     jsonSchema: REVIEW_RESULT_SCHEMA,
+    readOnly: true,
+    maxBudgetUsd: config?.maxBudgetUsd,
   }),
   compile,
 };
