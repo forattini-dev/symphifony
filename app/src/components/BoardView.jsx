@@ -436,8 +436,7 @@ export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect, 
       else if (NEEDS_APPROVAL_STATES.has(issue.state)) col = "Needs Approval";
       else if (IN_PROGRESS_STATES.has(issue.state)) col = "In Progress";
       else if (issue.state === "Blocked") col = "Blocked";
-      else if (DONE_STATES.has(issue.state)) col = "Done";
-      else col = "Planning";
+      else col = "Done";
       buckets[col].push(issue);
     }
     for (const c of COLUMNS) {
