@@ -6,6 +6,7 @@ import { addEvent } from "../domains/issues.ts";
 import { persistState } from "../persistence/store.ts";
 import { getContainer } from "../persistence/container.ts";
 import { pushWorkspaceCommand } from "../commands/push-workspace.command.ts";
+import { getGitRepoStatus, initializeGitRepoForWorktrees } from "../domains/workspace.ts";
 import { findIssue, listEvents, parseIssue } from "../routes/helpers.ts";
 import { TARGET_ROOT, SOURCE_ROOT, ATTACHMENTS_ROOT } from "../concerns/constants.ts";
 import { execSync } from "node:child_process";
@@ -273,17 +274,7 @@ export function registerMiscRoutes(
 
   app.get("/api/git/status", async (c: any) => {
     try {
-      const isGit = (() => {
-        try { execSync("git rev-parse --git-dir", { cwd: TARGET_ROOT, stdio: "pipe" }); return true; } catch { return false; }
-      })();
-      if (!isGit) return c.json({ isGit: false, branch: null, hasCommits: false });
-      const branch = (() => {
-        try { return execSync("git rev-parse --abbrev-ref HEAD", { cwd: TARGET_ROOT, encoding: "utf8", stdio: "pipe" }).trim(); } catch { return null; }
-      })();
-      const hasCommits = (() => {
-        try { execSync("git rev-parse HEAD", { cwd: TARGET_ROOT, stdio: "pipe" }); return true; } catch { return false; }
-      })();
-      return c.json({ isGit: true, branch, hasCommits });
+      return c.json(getGitRepoStatus(TARGET_ROOT));
     } catch (error) {
       return c.json({ ok: false, error: String(error) }, 500);
     }
@@ -291,13 +282,10 @@ export function registerMiscRoutes(
 
   app.post("/api/git/init", async (c: any) => {
     try {
-      execSync("git init", { cwd: TARGET_ROOT, stdio: "pipe" });
-      // Create an empty initial commit so HEAD exists and branching works normally
-      execSync('git commit --allow-empty -m "Initial commit"', { cwd: TARGET_ROOT, stdio: "pipe" });
-      const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: TARGET_ROOT, encoding: "utf8", stdio: "pipe" }).trim();
-      state.config.defaultBranch = branch;
+      const status = initializeGitRepoForWorktrees(TARGET_ROOT);
+      state.config.defaultBranch = status.branch || state.config.defaultBranch || "main";
       await persistState(state);
-      return c.json({ ok: true, branch });
+      return c.json({ ok: true, ...status });
     } catch (error) {
       return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
     }

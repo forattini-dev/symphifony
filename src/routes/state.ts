@@ -61,6 +61,21 @@ function getStateQuery(
   };
 }
 
+function getWorkspaceActionErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes("requires a git repository")
+    || message.includes("requires at least one commit")
+    || message.includes("has no git worktree")
+    || message.includes("No mergeable workspace found")
+    || message.includes("target repository has uncommitted changes")
+    || message.includes("current branch is")
+  ) {
+    return 409;
+  }
+  return 500;
+}
+
 export function registerStateRoutes(
   app: any,
   state: RuntimeState,
@@ -245,7 +260,7 @@ export function registerStateRoutes(
     } catch (error) {
       const issueId = parseIssue(c);
       logger.error(`Failed to merge workspace for ${issueId || "<unknown>"}: ${String(error)}`);
-      return c.json({ ok: false, error: String(error) }, 500);
+      return c.json({ ok: false, error: String(error) }, getWorkspaceActionErrorStatus(error));
     }
   });
 
@@ -261,7 +276,7 @@ export function registerStateRoutes(
       return c.json({ ok: true, ...result });
     } catch (error) {
       logger.error(`Failed to preview merge for ${parseIssue(c) || "<unknown>"}: ${String(error)}`);
-      return c.json({ ok: false, error: String(error) }, 500);
+      return c.json({ ok: false, error: String(error) }, getWorkspaceActionErrorStatus(error));
     }
   });
 
@@ -281,7 +296,7 @@ export function registerStateRoutes(
       return c.json({ ok: true, ...result });
     } catch (error) {
       logger.error(`Failed to rebase for ${parseIssue(c) || "<unknown>"}: ${String(error)}`);
-      return c.json({ ok: false, error: String(error) }, 500);
+      return c.json({ ok: false, error: String(error) }, getWorkspaceActionErrorStatus(error));
     }
   });
 

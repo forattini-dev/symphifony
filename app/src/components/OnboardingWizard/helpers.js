@@ -32,3 +32,11 @@ export function buildWorkflowConfig(pipeline, efforts, models = {}) {
     review: { provider: pipeline.reviewer || pipeline.executor || "", model: models.review || "", effort: efforts.reviewer || "medium" },
   };
 }
+
+export function isGitReadyForWorktrees(gitStatus) {
+  return Boolean(gitStatus?.isGit && gitStatus?.hasCommits);
+}
+
+export function canProceedFromSetup(projectName, gitStatus) {
+  return Boolean(projectName) && isGitReadyForWorktrees(gitStatus);
+}

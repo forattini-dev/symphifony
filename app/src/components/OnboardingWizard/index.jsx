@@ -7,7 +7,12 @@ import Confetti from "../Confetti";
 import OnboardingParticles from "../OnboardingParticles";
 
 import { getStepLabels, getStepCount } from "./constants";
-import { saveSetting, normalizeRoleEfforts, buildWorkflowConfig } from "./helpers";
+import {
+  buildWorkflowConfig,
+  canProceedFromSetup,
+  normalizeRoleEfforts,
+  saveSetting,
+} from "./helpers";
 
 import StepIndicator from "./steps/StepIndicator";
 import StepContent from "./steps/StepContent";
@@ -43,6 +48,7 @@ export default function OnboardingWizard({ onComplete }) {
   // New step state
   const [projectName, setProjectNameState] = useState("");
   const [projectSource, setProjectSource] = useState("missing");
+  const [setupGitStatus, setSetupGitStatus] = useState(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState(null);
   const [selectedAgents, setSelectedAgents] = useState([]);
   const [selectedSkills, setSelectedSkills] = useState([]);
@@ -333,7 +339,7 @@ export default function OnboardingWizard({ onComplete }) {
   // Can proceed from step
   const canProceed =
     stepName === "Welcome" ||
-    (stepName === "Setup" && Boolean(normalizedProjectName)) ||
+    (stepName === "Setup" && canProceedFromSetup(normalizedProjectName, setupGitStatus)) ||
     (stepName === "Pipeline" && (pipeline.executor || providersLoading)) ||
     stepName === "Agents & Skills" ||
     stepName === "Preferences" ||
@@ -391,6 +397,7 @@ export default function OnboardingWizard({ onComplete }) {
               projectSource={projectSource}
               workspacePath={workspacePath}
               currentBranch={defaultBranch}
+              onGitStatusChange={setSetupGitStatus}
               onBranchCreated={(branch) => { setDefaultBranch(branch); if (!prBaseBranch) setPrBaseBranch(branch); }}
               mergeMode={mergeMode}
               setMergeMode={setMergeMode}

@@ -6,9 +6,8 @@ import { transitionIssueCommand } from "./transition-issue.command.ts";
 import { mergeWorkspace } from "../agents/agent.ts";
 import { cleanWorkspace } from "../domains/workspace.ts";
 import { TARGET_ROOT } from "../concerns/constants.ts";
-import { now } from "../concerns/helpers.ts";
 import { logger } from "../concerns/logger.ts";
-import { parseDiffStats } from "../domains/workspace.ts";
+import { ensureGitRepoReadyForWorktrees, parseDiffStats } from "../domains/workspace.ts";
 import { runValidationGate } from "../domains/validation.ts";
 
 export type MergeWorkspaceInput = {
@@ -37,6 +36,8 @@ export async function mergeWorkspaceCommand(
     throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Merge is only allowed in Reviewing, PendingDecision, or Approved state.`);
   }
 
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "merge issues");
+
   // Auto-transition to Approved if still in review
   if (issue.state === "Reviewing" || issue.state === "PendingDecision") {
     await transitionIssueCommand(
@@ -47,7 +48,7 @@ export async function mergeWorkspaceCommand(
 
   const wp = issue.worktreePath ?? issue.workspacePath;
   if (!wp || !existsSync(wp)) {
-    throw new Error("No workspace found for this issue.");
+    throw new Error(`No mergeable workspace found for ${issue.identifier}. This issue likely ran before git was initialized for the project. Re-run the issue after git setup.`);
   }
 
   // Compute diff stats BEFORE the git merge (branch still diverged from base)

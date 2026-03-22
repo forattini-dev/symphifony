@@ -1,5 +1,7 @@
 import type { IssueEntry } from "../types.ts";
 import type { IIssueRepository, IEventStore } from "../ports/index.ts";
+import { TARGET_ROOT } from "../concerns/constants.ts";
+import { ensureGitRepoReadyForWorktrees } from "../domains/workspace.ts";
 import { transitionIssueCommand } from "./transition-issue.command.ts";
 
 export type ApprovePlanInput = {
@@ -18,6 +20,8 @@ export async function approvePlanCommand(
   if (issue.state !== "Planning") {
     throw new Error(`Cannot approve issue in state ${issue.state}. Must be in Planning.`);
   }
+
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "execute approved plans");
 
   await transitionIssueCommand(
     { issue, target: "PendingApproval", note: `Plan approved for ${issue.identifier}. Ready for execution.` },

@@ -36,11 +36,15 @@ process.env.FIFONY_LOG_LEVEL = "silent";
 
 // Dynamic import — TARGET_ROOT and WORKSPACE_ROOT now point to our temp dirs
 const {
+  assertIssueHasGitWorktree,
   parseDiffStats,
   shouldSkipMergePath,
   detectDefaultBranch,
   createGitWorktree,
+  ensureGitRepoReadyForWorktrees,
   ensureWorktreeCommitted,
+  getGitRepoStatus,
+  initializeGitRepoForWorktrees,
   inferChangedWorkspacePaths,
   computeDiffStats,
   mergeWorkspace,
@@ -394,6 +398,67 @@ describe("detectDefaultBranch", () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("git readiness helpers", () => {
+  it("reports non-git directories as not ready", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "git-ready-none-"));
+    try {
+      assert.deepEqual(getGitRepoStatus(tempDir), {
+        isGit: false,
+        hasCommits: false,
+        branch: null,
+      });
+      assert.throws(
+        () => ensureGitRepoReadyForWorktrees(tempDir, "execute issues"),
+        /requires a git repository with at least one commit/i,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports repositories without commits as not ready", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "git-ready-unborn-"));
+    try {
+      try {
+        execSync("git init -b main", { cwd: tempDir, stdio: "pipe" });
+      } catch {
+        execSync("git init", { cwd: tempDir, stdio: "pipe" });
+      }
+      const status = getGitRepoStatus(tempDir);
+      assert.equal(status.isGit, true);
+      assert.equal(status.hasCommits, false);
+      assert.ok(status.branch === "main" || status.branch === "master");
+      assert.throws(
+        () => ensureGitRepoReadyForWorktrees(tempDir, "execute issues"),
+        /requires at least one commit/i,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("bootstraps git and the initial commit when requested", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "git-ready-bootstrap-"));
+    try {
+      const status = initializeGitRepoForWorktrees(tempDir);
+      assert.equal(status.isGit, true);
+      assert.equal(status.hasCommits, true);
+      assert.ok(status.branch === "main" || status.branch === "master");
+      assert.doesNotThrow(() => ensureGitRepoReadyForWorktrees(tempDir, "execute issues"));
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("explains when an issue has no git worktree metadata", () => {
+    const issue = makeIssue({ branchName: undefined, baseBranch: "main", worktreePath: undefined });
+    assert.throws(
+      () => assertIssueHasGitWorktree(issue, "merge"),
+      /executed before git was initialized/i,
+    );
   });
 });
 
@@ -1567,5 +1632,3 @@ describe("dryMerge and mergeWorkspace agree on conflict detection", () => {
     await cleanWorkspace(issue.id, issue, makeState());
   });
 });
-
-

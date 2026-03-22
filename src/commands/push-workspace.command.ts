@@ -2,7 +2,12 @@ import { execFileSync, execSync } from "node:child_process";
 import type { IssueEntry, RuntimeState } from "../types.ts";
 import type { IIssueRepository, IEventStore, IPersistencePort } from "../ports/index.ts";
 import { transitionIssueCommand } from "./transition-issue.command.ts";
-import { ensureWorktreeCommitted, computeDiffStats } from "../domains/workspace.ts";
+import {
+  assertIssueHasGitWorktree,
+  computeDiffStats,
+  ensureGitRepoReadyForWorktrees,
+  ensureWorktreeCommitted,
+} from "../domains/workspace.ts";
 import { runValidationGate } from "../domains/validation.ts";
 import { TARGET_ROOT } from "../concerns/constants.ts";
 import { logger } from "../concerns/logger.ts";
@@ -74,9 +79,8 @@ export async function pushWorkspaceCommand(
     throw new Error(`Issue ${issue.identifier} is in state ${issue.state}. Push is only allowed in Reviewing, PendingDecision, or Approved state.`);
   }
 
-  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
-    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot push.`);
-  }
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "push issue branches");
+  assertIssueHasGitWorktree(issue, "push");
 
   // Auto-transition to Approved if still in review
   if (issue.state === "Reviewing" || issue.state === "PendingDecision") {

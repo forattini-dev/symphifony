@@ -22,6 +22,8 @@ npx -y fifony
 
 Open **http://localhost:4000**. The first run launches the onboarding wizard — it detects your CLIs, scans your project, and configures everything in six steps. State lives in `.fifony/`. No accounts, no cloud, no external database.
 
+fifony executes each issue in an isolated git worktree. If you are starting from an empty folder, initialize git and create the first commit before execution. The onboarding Setup step can do this for you automatically.
+
 <div align="center">
 <img src="docs/ss-01.webp" alt="Onboarding wizard" width="720" />
 </div>
@@ -139,6 +141,8 @@ The first run walks you through six steps:
 | Effort & Workers | Per-stage reasoning effort, worker concurrency, and visual theme |
 
 Settings are saved progressively and can be re-run from Settings at any time.
+
+The Setup step blocks execution until the workspace is a git repository with at least one commit, because `git worktree` needs a base commit.
 
 ---
 
@@ -298,6 +302,7 @@ FIFONY_LOG_FILE=0                     # set to 1 to also write .fifony/fifony-lo
 ## Requirements
 
 - Node.js 23 or newer
+- git installed, with the target workspace initialized as a repository before issue execution
 - At least one of: `claude` CLI, `codex` CLI, `gemini` CLI
 
 ---

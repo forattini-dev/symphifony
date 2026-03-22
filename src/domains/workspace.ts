@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -27,6 +26,12 @@ import { runHook } from "../agents/command-executor.ts";
 import { buildPrompt } from "../agents/prompt-builder.ts";
 
 // ── Source bootstrap ────────────────────────────────────────────────────────
+
+export type GitRepoStatus = {
+  isGit: boolean;
+  hasCommits: boolean;
+  branch: string | null;
+};
 
 const SKIP_DIRS = new Set([
   ".git", ".fifony", "node_modules", ".venv", "data",
@@ -163,13 +168,93 @@ export async function ensureSourceReady(
 
 // ── Workspace setup ─────────────────────────────────────────────────────────
 
-/** Check if a directory is inside a git repository. */
-function isGitRepo(dir: string): boolean {
-  try {
-    execSync("git rev-parse --git-dir", { cwd: dir, stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
+export function getGitRepoStatus(dir: string): GitRepoStatus {
+  const isGit = (() => {
+    try {
+      execSync("git rev-parse --git-dir", { cwd: dir, stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!isGit) {
+    return { isGit: false, hasCommits: false, branch: null };
+  }
+
+  const branch = (() => {
+    try {
+      return execSync("git symbolic-ref --short HEAD", { cwd: dir, encoding: "utf8", stdio: "pipe" }).trim() || null;
+    } catch {
+      try {
+        return execSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, encoding: "utf8", stdio: "pipe" }).trim() || null;
+      } catch {
+        return null;
+      }
+    }
+  })();
+
+  const hasCommits = (() => {
+    try {
+      execSync("git rev-parse --verify HEAD", { cwd: dir, stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  return { isGit: true, hasCommits, branch };
+}
+
+function gitRequirementMessage(action: string): string {
+  return `fifony requires a git repository with at least one commit to ${action}. Initialize git in this project and create an initial commit, or use the onboarding Setup step.`;
+}
+
+export function ensureGitRepoReadyForWorktrees(dir: string, action = "run issue worktrees"): GitRepoStatus {
+  const status = getGitRepoStatus(dir);
+
+  if (!status.isGit) {
+    throw new Error(gitRequirementMessage(action));
+  }
+
+  if (!status.hasCommits) {
+    throw new Error(`fifony requires at least one commit to ${action} because git worktree needs a base commit. Create an initial commit, then retry.`);
+  }
+
+  return status;
+}
+
+export function initializeGitRepoForWorktrees(dir: string): GitRepoStatus {
+  let status = getGitRepoStatus(dir);
+
+  if (!status.isGit) {
+    try {
+      execSync("git init -b main", { cwd: dir, stdio: "pipe" });
+    } catch {
+      execSync("git init", { cwd: dir, stdio: "pipe" });
+    }
+    status = getGitRepoStatus(dir);
+  }
+
+  if (!status.hasCommits) {
+    execSync(
+      'git -c user.name="fifony" -c user.email="fifony@local.invalid" commit --allow-empty -m "Initial commit"',
+      { cwd: dir, stdio: "pipe" },
+    );
+    status = getGitRepoStatus(dir);
+  }
+
+  return status;
+}
+
+export function assertIssueHasGitWorktree(
+  issue: IssueEntry,
+  action: string,
+): asserts issue is IssueEntry & { branchName: string; baseBranch: string; worktreePath: string } {
+  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
+    throw new Error(
+      `Issue ${issue.identifier} has no git worktree — cannot ${action}. This usually means the issue was executed before git was initialized for the project. Initialize git, then re-run the issue.`,
+    );
   }
 }
 
@@ -234,21 +319,13 @@ export async function prepareWorkspace(
   if (createdNow) {
     mkdirSync(workspaceRoot, { recursive: true });
     logger.debug({ issueId: issue.id, identifier: issue.identifier, workspacePath: workspaceRoot }, "[Agent] Creating workspace");
+    ensureGitRepoReadyForWorktrees(TARGET_ROOT, "execute issues");
 
     if (state.config.afterCreateHook) {
       mkdirSync(worktreePath, { recursive: true });
       await runHook(state.config.afterCreateHook, worktreePath, issue, "after_create");
-    } else if (isGitRepo(TARGET_ROOT)) {
-      await createGitWorktree(issue, worktreePath, defaultBranch);
     } else {
-      // Fallback: copy SOURCE_ROOT snapshot
-      await ensureSourceReady();
-      mkdirSync(worktreePath, { recursive: true });
-      cpSync(SOURCE_ROOT, worktreePath, {
-        recursive: true,
-        force: true,
-        filter: (sourcePath) => !sourcePath.startsWith(WORKSPACE_ROOT),
-      });
+      await createGitWorktree(issue, worktreePath, defaultBranch);
     }
 
     logger.debug({ issueId: issue.id, workspacePath: workspaceRoot, worktreePath }, "[Agent] Workspace created");
@@ -538,9 +615,8 @@ export function shouldSkipMergePath(relativePath: string): boolean {
 
 /** Merge a worktree branch into TARGET_ROOT. */
 export function mergeWorkspace(issue: IssueEntry): MergeResult {
-  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
-    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot merge.`);
-  }
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "merge issues");
+  assertIssueHasGitWorktree(issue, "merge");
   return mergeWorktree(issue, issue.worktreePath);
 }
 
@@ -555,9 +631,8 @@ export type DryMergeResult = {
 
 /** Run a no-commit merge to detect conflicts without modifying the working tree. */
 export function dryMerge(issue: IssueEntry): DryMergeResult {
-  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
-    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot preview merge.`);
-  }
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "preview merges");
+  assertIssueHasGitWorktree(issue, "preview merge");
 
   ensureWorktreeCommitted(issue);
 
@@ -616,9 +691,8 @@ export type RebaseResult = {
 
 /** Rebase the worktree branch onto the latest base branch. Aborts on conflicts. */
 export function rebaseWorktree(issue: IssueEntry): RebaseResult {
-  if (!issue.branchName || !issue.baseBranch || !issue.worktreePath) {
-    throw new Error(`Issue ${issue.identifier} has no git worktree — cannot rebase.`);
-  }
+  ensureGitRepoReadyForWorktrees(TARGET_ROOT, "rebase worktrees");
+  assertIssueHasGitWorktree(issue, "rebase");
 
   ensureWorktreeCommitted(issue);
 

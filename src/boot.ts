@@ -19,7 +19,7 @@ import {
   resolveDefaultProvider,
   getProviderDefaultCommand,
 } from "./agents/providers.ts";
-import { setSkipSource, detectDefaultBranch } from "./domains/workspace.ts";
+import { setSkipSource, detectDefaultBranch, getGitRepoStatus } from "./domains/workspace.ts";
 import { deriveConfig, applyWorkflowConfig, buildRuntimeState, computeMetrics, addEvent, validateConfig } from "./domains/issues.ts";
 import { startApiServer } from "./persistence/plugins/api-server.ts";
 import { startDevFrontend } from "./persistence/plugins/dev-server.ts";
@@ -180,6 +180,13 @@ async function main() {
       state.config.defaultBranch = detectDefaultBranch(TARGET_ROOT);
       logger.info({ defaultBranch: state.config.defaultBranch }, "[Boot] Default branch detected");
     } catch { /* not a git repo */ }
+  }
+
+  const gitStatus = getGitRepoStatus(TARGET_ROOT);
+  if (!gitStatus.isGit) {
+    logger.warn({ workspace: TARGET_ROOT }, "[Boot] Target workspace is not a git repository. Issue execution and merge will stay blocked until git is initialized.");
+  } else if (!gitStatus.hasCommits) {
+    logger.warn({ workspace: TARGET_ROOT, branch: gitStatus.branch }, "[Boot] Target workspace has no commits. Create an initial commit before running issues because git worktree needs a base commit.");
   }
 
   if (!state.config.testCommand) {
