@@ -18,7 +18,6 @@ import { ExecutionTab } from "./tabs/ExecutionTab.jsx";
 import { DiffTab } from "./tabs/DiffTab.jsx";
 import { RoutingTab } from "./tabs/RoutingTab.jsx";
 import { EventsTab } from "./tabs/EventsTab.jsx";
-import { HistoryTab } from "./tabs/HistoryTab.jsx";
 import { PlanningTab } from "./tabs/PlanningTab.jsx";
 import { ReviewTab } from "./tabs/ReviewTab.jsx";
 
@@ -356,26 +355,30 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
               className="tabs tabs-lift overflow-x-auto flex-nowrap -webkit-overflow-scrolling-touch scrollbar-none"
               style={{ scrollbarWidth: "none" }}
             >
-              {ISSUE_DRAWER_TABS.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  role="tab"
-                  className={`tab gap-1 text-xs whitespace-nowrap ${tab === id ? "tab-active" : ""}`}
-                  onClick={() => setTab(id)}
-                >
-                  <Icon className="size-3" />
-                  {label}
-                  {id === "review" && (issue.state === "Reviewing" || issue.state === "PendingDecision") && (
-                    <span className="badge badge-xs badge-secondary">!</span>
-                  )}
-                  {id === "planning" && issue.planningStatus === "planning" && (
-                    <span className="loading loading-spinner loading-xs text-info" />
-                  )}
-                  {id === "planning" && isPendingPlanning && (
-                    <span className="loading loading-dots loading-xs text-info opacity-50" />
-                  )}
-                </a>
-              ))}
+              {ISSUE_DRAWER_TABS.map(({ id, label, icon: Icon, color, activeColor }) => {
+                const isActive = tab === id;
+                const iconColor = isActive ? activeColor.replace("tab-active ", "") : color;
+                return (
+                  <a
+                    key={id}
+                    role="tab"
+                    className={`tab gap-1 text-xs whitespace-nowrap ${isActive ? activeColor : color} ${isActive ? "font-semibold" : ""}`}
+                    onClick={() => setTab(id)}
+                  >
+                    <Icon className={`size-3 ${iconColor}`} />
+                    {label}
+                    {id === "review" && (issue.state === "Reviewing" || issue.state === "PendingDecision") && (
+                      <span className="badge badge-xs badge-secondary">!</span>
+                    )}
+                    {id === "planning" && issue.planningStatus === "planning" && (
+                      <span className="loading loading-spinner loading-xs text-info" />
+                    )}
+                    {id === "planning" && isPendingPlanning && (
+                      <span className="loading loading-dots loading-xs text-info opacity-50" />
+                    )}
+                  </a>
+                );
+              })}
             </div>
             {/* Fade edges for scroll indication */}
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-base-100 to-transparent pointer-events-none md:hidden" />
@@ -391,7 +394,6 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
             {tab === "execution" && <ExecutionTab issue={issue} workflowConfig={workflowConfig} />}
             {tab === "diff" && <DiffTab issueId={issue.id} />}
             {tab === "routing" && <RoutingTab issue={issue} />}
-            {tab === "history" && <HistoryTab issue={issue} />}
             {tab === "events" && <EventsTab issueId={issue.id} events={events} />}
           </div>
         </div>

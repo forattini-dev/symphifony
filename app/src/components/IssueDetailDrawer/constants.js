@@ -1,7 +1,7 @@
 import {
   Lightbulb, Circle, ListOrdered, PlayCircle, Eye, CheckCircle2,
   AlertTriangle, XCircle, Info, Terminal, Code, Route, Activity, ClipboardCheck,
-  GitMerge, History,
+  GitMerge,
 } from "lucide-react";
 
 // ── State maps ───────────────────────────────────────────────────────────────
@@ -47,14 +47,13 @@ export const ISSUE_TYPE_COLORS = {
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 
 export const ISSUE_DRAWER_TABS = [
-  { id: "overview", label: "Overview", icon: Info },
-  { id: "planning", label: "Plan", icon: Lightbulb },
-  { id: "review", label: "Review", icon: ClipboardCheck },
-  { id: "execution", label: "Execution", icon: Terminal },
-  { id: "diff", label: "Diff", icon: Code },
-  { id: "routing", label: "Routing", icon: Route },
-  { id: "history", label: "History", icon: History },
-  { id: "events", label: "Events", icon: Activity },
+  { id: "overview", label: "Overview", icon: Info, color: "text-info", activeColor: "tab-active text-info" },
+  { id: "planning", label: "Plan", icon: Lightbulb, color: "text-primary", activeColor: "tab-active text-primary" },
+  { id: "execution", label: "Execution", icon: Terminal, color: "text-secondary", activeColor: "tab-active text-secondary" },
+  { id: "review", label: "Review", icon: ClipboardCheck, color: "text-success", activeColor: "tab-active text-success" },
+  { id: "diff", label: "Diff", icon: Code, color: "text-warning", activeColor: "tab-active text-warning" },
+  { id: "routing", label: "Routing", icon: Route, color: "text-accent", activeColor: "tab-active text-accent" },
+  { id: "events", label: "Events", icon: Activity, color: "text-error", activeColor: "tab-active text-error" },
 ];
 
 export function getDefaultIssueDrawerTab(issueState) {

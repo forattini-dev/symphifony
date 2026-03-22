@@ -25,8 +25,8 @@ function ColumnBadge({ count, className }) {
 }
 
 // Kanban columns — grouped by who acts:
-//   Planning (AI), Needs Approval (Human), In Progress (AI), Blocked (Human), Done (terminal)
-const COLUMNS = ["Planning", "Needs Approval", "In Progress", "Blocked", "Done"];
+//   Planning (AI), In Progress (AI), Needs Approval (Human), Blocked (Human), Done (terminal)
+const COLUMNS = ["Planning", "In Progress", "Needs Approval", "Blocked", "Done"];
 const PLANNING_STATES = new Set(["Planning"]);
 const NEEDS_APPROVAL_STATES = new Set(["PendingApproval", "PendingDecision"]);
 const IN_PROGRESS_STATES = new Set(["Queued", "Running", "Reviewing"]);

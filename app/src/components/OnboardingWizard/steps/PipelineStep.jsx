@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Rocket, Loader2, CircleCheck, CircleX, ArrowDown } from "lucide-react";
-import { PIPELINE_ROLES, getEffortOptionsForRole } from "../constants";
+import { PIPELINE_ROLES, getEffortOptionsForRole, EFFORT_OPTIONS } from "../constants";
 
 const ROLE_MODEL_KEY = { planner: "plan", executor: "execute", reviewer: "review" };
 
@@ -36,6 +36,39 @@ function PipelineStep({
 }) {
   const providerList = Array.isArray(providers) ? providers : [];
   const availableProviders = providerList.filter((p) => p.available !== false);
+  const allSameProvider = pipeline.planner && pipeline.planner === pipeline.executor && pipeline.planner === pipeline.reviewer;
+  const bulkEffortOptions = useMemo(() => {
+    const supports = PIPELINE_ROLES.map((role) => new Set(getEffortOptionsForRole(role.role, pipeline).map((opt) => opt.value)));
+    if (supports.length === 0) return EFFORT_OPTIONS;
+    const common = [...supports[0]].filter((value) => supports.every((set) => set.has(value)));
+    const ordered = EFFORT_OPTIONS.filter((opt) => common.includes(opt.value));
+    return ordered.length > 0 ? ordered : EFFORT_OPTIONS;
+  }, [pipeline]);
+  const normalizedBulkEffort = useMemo(() => {
+    const sameEffort = efforts.planner === efforts.executor && efforts.planner === efforts.reviewer ? efforts.planner : null;
+    const target = sameEffort || bulkEffortOptions[0]?.value || "high";
+    return bulkEffortOptions.some((opt) => opt.value === target) ? target : "high";
+  }, [efforts, bulkEffortOptions]);
+
+  const getProviderName = (provider) => provider?.id || provider?.name || provider;
+  const getModelByProvider = (providerName) => {
+    const providerModels = modelsByProvider?.[providerName] || [];
+    return providerModels[0]?.id || "";
+  };
+
+  const applyProviderToAll = (provider) => {
+    const providerName = getProviderName(provider);
+    if (!providerName) return;
+    const selectedModel = getModelByProvider(providerName);
+    setPipeline({ planner: providerName, executor: providerName, reviewer: providerName });
+    setModels({ plan: selectedModel, execute: selectedModel, review: selectedModel });
+  };
+
+  const applyEffortToAll = (effort) => {
+    if (!effort) return;
+    if (!bulkEffortOptions.some((opt) => opt.value === effort)) return;
+    setEfforts({ planner: effort, executor: effort, reviewer: effort });
+  };
 
   // Auto-clamp effort when provider changes
   useEffect(() => {
@@ -70,10 +103,43 @@ function PipelineStep({
         </div>
       ) : (
         <>
+          {/* Quick apply for all stages */}
+          <div className="bg-base-200 rounded-xl p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold mb-2">Apply to all stages</h3>
+              <p className="text-xs text-base-content/50 mb-2">Use one CLI and one effort across Planner, Executor, and Reviewer.</p>
+              <div className="flex flex-wrap gap-2">
+                {availableProviders.map((prov) => {
+                  const name = getProviderName(prov);
+                  const isActive = allSameProvider && pipeline.planner === name;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      className={`btn btn-xs ${isActive ? "btn-primary" : "btn-soft"}`}
+                      onClick={() => applyProviderToAll(prov)}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[10px] text-base-content/40 mb-2">Effort (applies to all)</div>
+              <EffortPills
+                options={bulkEffortOptions}
+                value={normalizedBulkEffort}
+                onChange={applyEffortToAll}
+              />
+            </div>
+          </div>
+
           {/* Provider availability strip */}
           <div className="flex flex-wrap gap-2 justify-center">
             {providerList.map((prov) => {
-              const name = prov.id || prov.name || prov;
+              const name = getProviderName(prov);
               const available = prov.available !== false;
               return (
                 <span
