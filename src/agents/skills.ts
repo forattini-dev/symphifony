@@ -1,15 +1,21 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseFrontmatter } from "./catalog.ts";
 
 export type DiscoveredSkill = {
   name: string;
   content: string;
+  description?: string;
+  whenToUse?: string;
+  avoidIf?: string;
 };
 
 export type DiscoveredAgent = {
   name: string;
   description: string;
+  whenToUse?: string;
+  avoidIf?: string;
 };
 
 export type DiscoveredCommand = {
@@ -44,7 +50,14 @@ export function discoverSkills(workspacePath: string): DiscoveredSkill[] {
         const content = readFileSync(skillFile, "utf8").trim();
         if (content) {
           seen.add(entry.name);
-          skills.push({ name: entry.name, content });
+          const fm = parseFrontmatter(content);
+          skills.push({
+            name: entry.name,
+            content,
+            description: fm.description || undefined,
+            whenToUse: fm.when_to_use || fm.whenToUse || undefined,
+            avoidIf: fm.avoid_if || fm.avoidIf || undefined,
+          });
         }
       } catch {
         // skip unreadable skills
@@ -100,7 +113,13 @@ export function discoverAgents(workspacePath: string): DiscoveredAgent[] {
         const content = readFileSync(join(basePath, entry.name), "utf8").trim();
         if (content) {
           seen.add(name);
-          agents.push({ name, description: extractFirstLine(content) });
+          const fm = parseFrontmatter(content);
+          agents.push({
+            name,
+            description: fm.description || extractFirstLine(content),
+            whenToUse: fm.when_to_use || fm.whenToUse || undefined,
+            avoidIf: fm.avoid_if || fm.avoidIf || undefined,
+          });
         }
       } catch {
         // skip unreadable
@@ -182,7 +201,10 @@ export function buildCapabilitiesManifest(
     sections.push("Specialized procedures available for this workspace:");
     const show = skills.slice(0, remaining);
     for (const skill of show) {
-      sections.push(`- **${skill.name}**`);
+      let line = `- **${skill.name}**`;
+      if (skill.description) line += ` — ${skill.description}`;
+      if (skill.whenToUse) line += ` (Use when: ${skill.whenToUse})`;
+      sections.push(line);
       itemCount++;
     }
     if (skills.length > show.length) {
@@ -197,7 +219,11 @@ export function buildCapabilitiesManifest(
     sections.push("You can delegate to these specialist agents via the Agent tool:");
     const show = agents.slice(0, remaining);
     for (const agent of show) {
-      sections.push(`- **${agent.name}**${agent.description ? ` — ${agent.description}` : ""}`);
+      let line = `- **${agent.name}**`;
+      if (agent.description) line += ` — ${agent.description}`;
+      if (agent.whenToUse) line += ` (Use when: ${agent.whenToUse})`;
+      if (agent.avoidIf) line += ` (Avoid if: ${agent.avoidIf})`;
+      sections.push(line);
     }
     if (agents.length > show.length) {
       sections.push(`- ...and ${agents.length - show.length} more available`);

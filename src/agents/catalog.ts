@@ -34,7 +34,7 @@ export type InstallResult = {
 
 // ── Catalog loaders ──────────────────────────────────────────────────────────
 
-function parseFrontmatter(content: string): Record<string, string> {
+export function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
   const result: Record<string, string> = {};

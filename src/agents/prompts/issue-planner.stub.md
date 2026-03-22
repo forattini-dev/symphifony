@@ -10,13 +10,26 @@ FAST MODE: Be brief and direct. Minimize reasoning depth.
 {{#if availableCapabilities}}
 ## Installed Capabilities (recommend from these lists)
 
-{{#if availableSkills.length}}Skills available: {{#each availableSkills}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
-{{#if availableAgents.length}}Agents available: {{#each availableAgents}}{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
-{{#if availableCommands.length}}Commands available: {{#each availableCommands}}/{{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+{{#if availableSkills.length}}
+### Skills
+{{#each availableSkills}}
+- **{{name}}**{{#if description}} — {{description}}{{/if}}{{#if whenToUse}} (Use when: {{whenToUse}}){{/if}}
+{{/each}}
+{{/if}}
+{{#if availableAgents.length}}
+### Agents
+{{#each availableAgents}}
+- **{{name}}**{{#if description}} — {{description}}{{/if}}{{#if whenToUse}} (Use when: {{whenToUse}}){{/if}}{{#if avoidIf}} (Avoid if: {{avoidIf}}){{/if}}
+{{/each}}
+{{/if}}
+{{#if availableCommands.length}}
+### Commands
+{{#each availableCommands}}
+- /{{name}}
+{{/each}}
+{{/if}}
 
 Recommend skills and agents ONLY from these lists. Do not invent names.
-Skills improve execution quality by providing specialized instructions.
-Agents provide domain expertise (e.g., "Senior Developer", "Frontend Designer").
 Only recommend when there is a concrete benefit — not everything needs skills or agents.
 {{/if}}
 

@@ -26,8 +26,8 @@ export async function buildPlanPrompt(title: string, description: string, fast =
     fast,
     images: images?.length ? images : undefined,
     availableCapabilities: hasCapabilities,
-    availableSkills: skills.map((s) => ({ name: s.name })),
-    availableAgents: agents.map((a) => ({ name: a.name })),
+    availableSkills: skills.map((s) => ({ name: s.name, description: s.description || "", whenToUse: s.whenToUse || "" })),
+    availableAgents: agents.map((a) => ({ name: a.name, description: a.description || "", whenToUse: a.whenToUse || "", avoidIf: a.avoidIf || "" })),
     availableCommands: commands.map((c) => ({ name: c.name })),
   });
 }
