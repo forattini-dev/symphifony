@@ -294,6 +294,7 @@ export async function handleStatePatch(state: RuntimeState, issue: IssueEntry, p
   if (!nextState || !ALLOWED_STATES.includes(nextState)) {
     throw new Error(`Unsupported state: ${String(payload.state)}`);
   }
+  const sourceState = issue.state;
 
   // Find the FSM event path from current state to target
   const path = findIssueStateMachineTransitionPath(null, issue.state, nextState);
@@ -304,6 +305,15 @@ export async function handleStatePatch(state: RuntimeState, issue: IssueEntry, p
   // Execute each event in the path
   for (const event of path) {
     await transitionIssue(issue, event, { note: `Manual state update: ${nextState}`, reason: toStringValue(payload.reason) });
+  }
+
+  if (nextState === "Running" && sourceState === "Queued") {
+    try {
+      const { enqueue } = await import("../persistence/plugins/queue-workers.ts");
+      await enqueue(issue, "execute");
+    } catch (error) {
+      logger.warn({ issueId: issue.id, err: error }, "[Issues] Failed to enqueue after manual Running transition");
+    }
   }
 
   if (nextState === "PendingApproval") {

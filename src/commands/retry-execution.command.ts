@@ -37,8 +37,10 @@ export async function retryExecutionCommand(
     );
   }
 
+  issue.attempts += 1;
+
   await transitionIssueCommand(
-    { issue, target: "Queued", note: note ?? `Retry execution for ${issue.identifier} (attempt ${issue.attempts + 1}).` },
+    { issue, target: "Queued", note: note ?? `Retry execution for ${issue.identifier} (attempt ${issue.attempts}).` },
     deps,
   );
   // FSM onEnterQueued handles: archive previousAttemptSummaries, clear lastError/nextRetryAt, enqueue

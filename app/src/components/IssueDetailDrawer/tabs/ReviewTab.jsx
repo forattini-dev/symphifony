@@ -78,7 +78,10 @@ export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
   }
 
   const handleApprove = () => { setVerdict("approved"); onStateChange?.(issue.id, "Approved"); };
-  const handleRework = () => { setVerdict("rework"); onStateChange?.(issue.id, "Queued"); };
+  const handleRework = () => {
+    setVerdict("rework");
+    onRetry?.(issue.id);
+  };
   const handleReject = () => { setVerdict("rejected"); onStateChange?.(issue.id, "Blocked"); };
 
   const mergeResult = issue.mergeResult;

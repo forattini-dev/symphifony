@@ -3,7 +3,7 @@ import { IssueCard } from "./IssueCard.jsx";
 import { EmptyState } from "./EmptyState.jsx";
 import { Lightbulb, Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle, RotateCcw, ArrowRight, ChevronDown, X } from "lucide-react";
 import { useDragAndDrop } from "../hooks/useDragAndDrop.js";
-import { getIssueTransitions, ISSUE_STATE_MACHINE } from "../utils.js";
+import { getIssueTransitions } from "../utils.js";
 
 function ColumnBadge({ count, className }) {
   const prevRef = useRef(count);
@@ -321,7 +321,7 @@ function computeBulkTransitions(selectedIds, issues) {
 
   // Get valid transitions for each selected issue (excluding current state)
   const transitionSets = selectedIssues.map((issue) => {
-    const transitions = ISSUE_STATE_MACHINE[issue.state] || [];
+    const transitions = getIssueTransitions(issue.state);
     return new Set(transitions.filter((s) => s !== issue.state));
   });
 

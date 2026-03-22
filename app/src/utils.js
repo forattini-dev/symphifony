@@ -89,8 +89,13 @@ export const ISSUE_STATE_MACHINE = {
   Archived:  [],
 };
 
+const MANUAL_TRANSITION_HIDDEN = {
+  Queued: new Set(["Running"]),
+  Reviewing: new Set(["Running"]),
+};
+
 export function getIssueTransitions(state) {
   if (!Array.isArray(ISSUE_STATE_MACHINE[state])) return STATES;
-  const next = ISSUE_STATE_MACHINE[state];
+  const next = ISSUE_STATE_MACHINE[state].filter((target) => !(MANUAL_TRANSITION_HIDDEN[state]?.has(target)));
   return [state, ...next.filter((s) => s !== state)];
 }

@@ -9,6 +9,7 @@ import { findIssue, mutateIssueState, parseIssue } from "../routes/helpers.ts";
 import { cleanWorkspace } from "../domains/workspace.ts";
 import { detectAvailableProviders } from "../agents/providers.ts";
 import { analyzeParallelizability } from "../persistence/plugins/scheduler.ts";
+import { enqueue } from "../persistence/plugins/queue-workers.ts";
 import { collectProvidersUsage } from "../agents/providers-usage.ts";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -22,6 +23,7 @@ import { cancelIssueCommand } from "../commands/cancel-issue.command.ts";
 import { approvePlanCommand } from "../commands/approve-plan.command.ts";
 import { executeIssueCommand } from "../commands/execute-issue.command.ts";
 import { replanIssueCommand } from "../commands/replan-issue.command.ts";
+import { requestReworkCommand } from "../commands/request-rework.command.ts";
 import { mergeWorkspaceCommand } from "../commands/merge-workspace.command.ts";
 import { pushWorkspaceCommand } from "../commands/push-workspace.command.ts";
 import { transitionIssueCommand } from "../commands/transition-issue.command.ts";
@@ -143,8 +145,14 @@ export function registerStateRoutes(
       if (!nextState) {
         throw new Error(`Unsupported state: ${String(payload.state)}`);
       }
+      if (nextState === "Running" && issue.state !== "Queued") {
+        return c.json({ ok: false, error: "Manual transition to Running is only supported from Queued." }, 400);
+      }
       const container = getContainer();
       await transitionIssueCommand({ issue, target: nextState, note: `Manual state update: ${nextState}` }, container);
+      if (nextState === "Running") {
+        await enqueue(issue, "execute");
+      }
       // nextRetryAt/lastError are now handled by FSM entry actions
       if (nextState === "Cancelled" && payload.reason) {
         issue.lastError = toStringValue(payload.reason);
@@ -183,6 +191,7 @@ export function registerStateRoutes(
         );
       } else if (issue.state === "Approved") {
         // Done → reopen for rework (e.g. after merge conflicts)
+        issue.attempts += 1;
         await transitionIssueCommand(
           { issue, target: "Planning", note: "Requeued for rework after merge conflicts." },
           container,
@@ -197,6 +206,15 @@ export function registerStateRoutes(
             container,
           );
         }
+      } else if (issue.state === "Reviewing" || issue.state === "PendingDecision") {
+        await requestReworkCommand(
+          {
+            issue,
+            reviewerFeedback: issue.lastError || "Manual rework request.",
+            note: `Manual rework requested for ${issue.identifier}.`,
+          },
+          container,
+        );
       } else if (issue.state === "PendingApproval") {
         await transitionIssueCommand(
           { issue, target: "Queued", note: "Manual retry — queued for execution." },

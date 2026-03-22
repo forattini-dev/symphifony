@@ -23,7 +23,7 @@ import { ReviewTab } from "./tabs/ReviewTab.jsx";
 
 // ── DrawerFooter ─────────────────────────────────────────────────────────────
 
-function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeError, mergeNotice, mergeMode }) {
+function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, mergeBusy, mergeError, mergeNotice, mergeMode }) {
   const footerStyle = { paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" };
   const [executeBusy, setExecuteBusy] = useState(false);
   const [executeError, setExecuteError] = useState(null);
@@ -106,7 +106,7 @@ function DrawerFooter({ issue, onStateChange, onMerge, onPush, mergeBusy, mergeE
             </button>
             <button
               className="btn btn-warning btn-sm gap-1.5 flex-1"
-              onClick={() => onStateChange?.(issue.id, "Queued")}
+              onClick={() => onRetry?.(issue.id)}
             >
               <RotateCcw className="size-4" /> Rework
             </button>
@@ -402,6 +402,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
         <DrawerFooter
           issue={issue}
           onStateChange={onStateChange}
+          onRetry={onRetry}
           onMerge={handleMerge}
           onPush={handlePush}
           mergeBusy={mergeBusy}
