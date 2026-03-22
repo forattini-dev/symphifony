@@ -5,6 +5,7 @@ import { api } from "../../../api";
 function AgentsSkillsStep({
   selectedAgents, setSelectedAgents,
   existingAgents,
+  autoSelectAgents = true,
 }) {
   const [catalogAgents, setCatalogAgents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -35,7 +36,7 @@ function AgentsSkillsStep({
     loadCatalog().then((agents) => {
       const existingNames = new Set((existingAgents || []).map((a) => a.name));
       const autoAgents = agents.filter((a) => !existingNames.has(a.name)).map((a) => a.name);
-      if (autoAgents.length > 0 && selectedAgents.length === 0) {
+      if (autoSelectAgents && autoAgents.length > 0 && selectedAgents.length === 0) {
         setSelectedAgents(autoAgents);
       }
     }).finally(() => setLoading(false));

@@ -177,8 +177,11 @@ export async function startApiServer(
       "GET /analytics": () => serveAppShell(),
       "GET /agents": () => serveAppShell(),
       "GET /settings": () => serveAppShell(),
+      "GET /settings/project": () => serveAppShell(),
       "GET /settings/general": () => serveAppShell(),
+      "GET /settings/agents": () => serveAppShell(),
       "GET /settings/notifications": () => serveAppShell(),
+      "GET /settings/preferences": () => serveAppShell(),
       "GET /settings/workflow": () => serveAppShell(),
       "GET /settings/providers": () => serveAppShell(),
       "GET /api/health": (c: any) =>

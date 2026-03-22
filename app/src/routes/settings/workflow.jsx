@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
-import { useSettings, getSettingValue, getSettingsList, SETTINGS_QUERY_KEY, upsertSettingPayload } from "../../hooks.js";
+import { SETTINGS_QUERY_KEY, upsertSettingPayload } from "../../hooks.js";
 import {
   Lightbulb,
   Play,
@@ -177,17 +177,12 @@ export const Route = createFileRoute("/settings/workflow")({
 
 function WorkflowSettings() {
   const qc = useQueryClient();
-  const settingsQuery = useSettings();
-  const settings = getSettingsList(settingsQuery.data);
   const [workflow, setWorkflow] = useState(null);
   const [providers, setProviders] = useState([]);
   const [modelsByProvider, setModelsByProvider] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingStage, setSavingStage] = useState(null);
   const [restoring, setRestoring] = useState(false);
-  const [autoReviewApproval, setAutoReviewApproval] = useState(true);
-  const [savingAutoReviewApproval, setSavingAutoReviewApproval] = useState(false);
-  const [autoReviewApprovalSaved, setAutoReviewApprovalSaved] = useState(false);
   const saveTimer = useRef(null);
 
   const syncWorkflowSettingCache = useCallback((nextWorkflow) => {
@@ -218,41 +213,6 @@ function WorkflowSettings() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    const savedAutoReviewApproval = getSettingValue(settings, "runtime.autoReviewApproval", true);
-    if (typeof savedAutoReviewApproval === "boolean") {
-      setAutoReviewApproval(savedAutoReviewApproval);
-    }
-  }, [settings]);
-
-  const handleAutoReviewApprovalChange = useCallback((value) => {
-    const nextValue = Boolean(value);
-    const previousValue = autoReviewApproval;
-    setAutoReviewApproval(nextValue);
-    setSavingAutoReviewApproval(true);
-    setAutoReviewApprovalSaved(false);
-
-    api.post(`/settings/${encodeURIComponent("runtime.autoReviewApproval")}`, {
-      scope: "runtime",
-      value: nextValue,
-      source: "user",
-    }).then(() => {
-      qc.setQueryData(SETTINGS_QUERY_KEY, (current) => upsertSettingPayload(current, {
-        id: "runtime.autoReviewApproval",
-        scope: "runtime",
-        value: nextValue,
-        source: "user",
-        updatedAt: new Date().toISOString(),
-      }));
-      setAutoReviewApprovalSaved(true);
-      setTimeout(() => setAutoReviewApprovalSaved(false), 1400);
-    }).catch(() => {
-      setAutoReviewApproval(previousValue);
-    }).finally(() => {
-      setSavingAutoReviewApproval(false);
-    });
-  }, [autoReviewApproval, qc]);
-
   // Auto-save with debounce
   const autoSave = useCallback((newWorkflow, changedStage) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -343,30 +303,10 @@ function WorkflowSettings() {
 
       <div className="card bg-base-200">
         <div className="card-body gap-3 p-4">
-          <h3 className="card-title text-sm">Review approval behavior</h3>
+          <h3 className="card-title text-sm">Pipeline</h3>
           <p className="text-xs opacity-50">
-            Pick how issues move out of review after a successful reviewer pass.
+            Configure providers/models/effort by stage and persist directly to workflow settings.
           </p>
-          <label className="label cursor-pointer justify-start gap-3">
-            <input
-              type="checkbox"
-              className="toggle toggle-primary"
-              checked={autoReviewApproval}
-              onChange={(e) => handleAutoReviewApprovalChange(e.target.checked)}
-              disabled={savingAutoReviewApproval}
-            />
-            <span className="label-text text-sm">Automatic review approval</span>
-          </label>
-          <p className="text-xs opacity-50">
-            {autoReviewApproval
-              ? "Checked: reviewer success moves issues directly to Done."
-              : "Unchecked: reviewer success moves issues to Pending Decision for manual approval."
-            }
-          </p>
-          <div className="text-xs min-h-[1rem]">
-            {savingAutoReviewApproval && <span className="text-warning flex items-center gap-1"><Loader2 className="size-3 animate-spin" /> saving</span>}
-            {!savingAutoReviewApproval && autoReviewApprovalSaved && <span className="text-success flex items-center gap-1"><Check className="size-3" /> saved</span>}
-          </div>
         </div>
       </div>
 

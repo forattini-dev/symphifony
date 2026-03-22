@@ -1,12 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useDashboard } from "../../context/DashboardContext";
-import {
-  ThemeSection,
-  ConcurrencySection,
-  ConnectionSection,
-  PwaSection,
-  SetupWizardSection,
-} from "../../components/SettingsView";
+import { ConnectionSection, PwaSection, SetupWizardSection } from "../../components/SettingsView";
 
 export const Route = createFileRoute("/settings/general")({
   component: GeneralSettings,
@@ -14,18 +8,12 @@ export const Route = createFileRoute("/settings/general")({
 
 function GeneralSettings() {
   const ctx = useDashboard();
+
   return (
     <div className="space-y-5">
       <ConnectionSection status={ctx.status} wsStatus={ctx.wsStatus} />
-      <ConcurrencySection
-        concurrency={ctx.concurrency}
-        setConcurrency={ctx.setConcurrency}
-        saveConcurrency={ctx.saveConcurrency}
-        savePending={ctx.saveConcPending}
-      />
       <PwaSection pwa={ctx.pwa} />
       <SetupWizardSection />
-      <ThemeSection theme={ctx.theme} onThemeChange={ctx.setTheme} />
     </div>
   );
 }
