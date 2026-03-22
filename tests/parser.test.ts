@@ -347,6 +347,29 @@ describe("parsePlanOutput", () => {
     it("parses suggestedSkills as empty array when not present", () => {
       const plan = parsePlanOutput(JSON.stringify(GPT54_MINI_OUTPUT));
       assert.deepEqual(plan!.suggestedSkills, []);
+      assert.deepEqual(plan!.suggestedAgents, []);
+    });
+
+    it("parses suggestedSkills and suggestedAgents when present", () => {
+      const output = {
+        ...GPT54_MINI_OUTPUT,
+        suggestedSkills: ["frontend-design", "critique"],
+        suggestedAgents: ["Senior Developer"],
+      };
+      const plan = parsePlanOutput(JSON.stringify(output));
+      assert.deepEqual(plan!.suggestedSkills, ["frontend-design", "critique"]);
+      assert.deepEqual(plan!.suggestedAgents, ["Senior Developer"]);
+    });
+
+    it("parses snake_case suggested_skills as suggestedSkills", () => {
+      const output = {
+        ...GPT54_MINI_OUTPUT,
+        suggested_skills: ["testing"],
+        suggested_agents: ["Code Reviewer"],
+      };
+      const plan = parsePlanOutput(JSON.stringify(output));
+      assert.deepEqual(plan!.suggestedSkills, ["testing"]);
+      assert.deepEqual(plan!.suggestedAgents, ["Code Reviewer"]);
     });
 
     it("parses when output has codex preamble header + JSON + token count", () => {

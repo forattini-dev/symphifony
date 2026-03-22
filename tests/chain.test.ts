@@ -183,6 +183,30 @@ describe("claude chain", () => {
     assert.ok(result!.prompt.includes(title), "prompt contains issue title");
   });
 
+  it("step 3 — compile execution for claude: prompt includes suggested skills with /slash syntax", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan({ suggestedSkills: ["frontend-design", "critique"] }) });
+    const provider = makeProvider({ provider: "claude", role: "executor" });
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.prompt.includes("/frontend-design"), "has skill with slash prefix");
+    assert.ok(result!.prompt.includes("/critique"), "has second skill");
+  });
+
+  it("step 3 — compile execution for claude: prompt includes suggested agents", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan({ suggestedAgents: ["Senior Developer"] }) });
+    const provider = makeProvider({ provider: "claude", role: "executor" });
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.prompt.includes("Senior Developer"), "has agent name");
+    assert.ok(result!.prompt.includes("Agent"), "references Agent tool");
+  });
+
+  it("step 3 — compile execution for claude: no skills/agents section when empty", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan({ suggestedSkills: [], suggestedAgents: [] }) });
+    const provider = makeProvider({ provider: "claude", role: "executor" });
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(!result!.prompt.includes("## Skills"), "no skills section");
+    assert.ok(!result!.prompt.includes("## Agents"), "no agents section");
+  });
+
   it("step 3 — compile execution for claude: payload is populated", async () => {
     const issue = makeIssue(title, description, { plan: makePlan() });
     const provider = makeProvider({ provider: "claude", role: "executor" });
@@ -346,6 +370,14 @@ describe("codex chain", () => {
 
     assert.ok(result !== null, "compilation succeeded");
     assert.ok(result!.command.includes("--add-dir"), "has --add-dir flags for suggested paths");
+  });
+
+  it("step 3 — compile execution for codex: prompt includes suggested skills with /slash syntax", async () => {
+    const issue = makeIssue(title, description, { plan: makePlan({ suggestedSkills: ["testing", "review-pr"] }) });
+    const provider = makeProvider({ provider: "codex", role: "executor" });
+    const result = await compileExecution(issue, provider, BASE_CONFIG, WORKSPACE, "");
+    assert.ok(result!.prompt.includes("/testing"), "has skill with slash prefix");
+    assert.ok(result!.prompt.includes("/review-pr"), "has second skill");
   });
 
   it("step 3 — compile execution for codex: adapter meta is correct", async () => {
