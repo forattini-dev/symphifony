@@ -45,10 +45,11 @@ Target paths: {{suggestedPaths | join ", "}}
 Focus changes on these paths. Do not make unnecessary changes elsewhere.
 {{/if}}
 
-{{#if skillsToUse.length}}
-## Specialized Procedures
-{{#each skillsToUse}}
-- Apply **{{name}}** procedure: {{why}}
+{{#if suggestedSkills.length}}
+## Skills
+Invoke these skills during execution:
+{{#each suggestedSkills}}
+- Run **/{{this}}** for specialized quality checks and procedures.
 {{/each}}
 {{/if}}
 

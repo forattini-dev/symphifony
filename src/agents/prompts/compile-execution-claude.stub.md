@@ -23,21 +23,22 @@ Role: executor. Implement the required changes.
 
 {{planPrompt}}
 
-{{#if subagentsToUse.length}}
-## Subagent Strategy (Claude-specific)
-You have access to the Agent tool for spawning subagents. Use them for:
-{{#each subagentsToUse}}
-- **{{name}}** ({{role}}): {{why}}
+{{#if suggestedAgents.length}}
+## Agents (Claude-specific)
+You have access to the Agent tool for spawning subagents. Use these agents for this task:
+{{#each suggestedAgents}}
+- Use the **{{this}}** agent for specialized work in its domain.
 {{/each}}
 
-Launch subagents for independent subtasks to maximize parallelism.
+Launch agents for independent subtasks to maximize parallelism.
 Use the main thread for coordination and integration.
 {{/if}}
 
-{{#if skillsToUse.length}}
-## Skills to Activate
-{{#each skillsToUse}}
-- Invoke **/{{name}}** - {{why}}
+{{#if suggestedSkills.length}}
+## Skills
+Invoke these skills during execution:
+{{#each suggestedSkills}}
+- Run **/{{this}}** for specialized quality checks and procedures.
 {{/each}}
 {{/if}}
 
