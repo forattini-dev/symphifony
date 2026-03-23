@@ -88,11 +88,13 @@ describe("buildClaudeCommand", () => {
 // ── buildCodexCommand ─────────────────────────────────────────────────────────
 
 describe("buildCodexCommand", () => {
-  it("produces the base skeleton", () => {
+  it("produces the exact base skeleton (catches stale/invalid flags)", () => {
     const cmd = buildCodexCommand({});
-    assert.ok(cmd.startsWith("codex exec"), "starts with 'codex exec'");
-    assert.ok(cmd.includes("--skip-git-repo-check"), "has skip-git-repo-check");
-    assert.ok(cmd.endsWith('< "$FIFONY_PROMPT_FILE"'), "ends with stdin redirection");
+    assert.equal(
+      cmd,
+      'codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox < "$FIFONY_PROMPT_FILE"',
+      "base command must match exactly — if this fails, a flag was added/removed",
+    );
   });
 
   it("includes --model when a non-default model is provided", () => {
