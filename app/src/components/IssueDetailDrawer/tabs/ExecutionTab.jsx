@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle, Terminal, SlidersHorizontal, Zap } from "lucide-react";
 import { api } from "../../../api.js";
 import { formatDate, formatDuration } from "../../../utils.js";
@@ -62,8 +62,17 @@ export function ExecutionTab({ issue, workflowConfig }) {
   const executeConfig = workflowConfig?.workflow?.execute;
   const [liveOutput, setLiveOutput] = useState("");
   const handleLiveOutput = useCallback((value) => setLiveOutput(value || ""), []);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const outputRef = useRef(null);
   const commandOutput = isRunning ? (liveOutput || issue.commandOutputTail || "") : (issue.commandOutputTail || "");
   const hasCommandOutput = Boolean(commandOutput);
+
+  // Auto-scroll to bottom when output updates
+  useEffect(() => {
+    if (autoScroll && outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [commandOutput, autoScroll]);
 
   return (
     <div className="space-y-5">
@@ -100,9 +109,20 @@ export function ExecutionTab({ issue, workflowConfig }) {
             <div className="font-semibold text-sm flex items-center gap-1.5">
               <Terminal className="size-4 opacity-50" /> CLI Output
             </div>
-            <CopyButton text={commandOutput} />
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs checkbox-primary"
+                  checked={autoScroll}
+                  onChange={(e) => setAutoScroll(e.target.checked)}
+                />
+                <span className="text-xs opacity-50">Auto-scroll</span>
+              </label>
+              <CopyButton text={commandOutput} />
+            </div>
           </div>
-          <pre className="text-xs bg-base-200 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-[50vh] overflow-y-auto">
+          <pre ref={outputRef} className="text-xs bg-base-200 rounded-box p-3 overflow-x-auto whitespace-pre-wrap max-h-[50vh] overflow-y-auto">
             {commandOutput}
           </pre>
         </div>

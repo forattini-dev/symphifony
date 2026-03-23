@@ -48,10 +48,15 @@ function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, mergeBus
   const isMergedState = issue.state === "Merged";
   const isMerged = !!issue.mergedAt || isMergedState;
 
-  // Planning: approve button lives inside PlanningTab, nothing to show here
+  // Hooks must be called unconditionally (Rules of Hooks)
+  const [gitClean, setGitClean] = useState(null);
+  useEffect(() => {
+    if (!isDone || isMerged) return;
+    api.get("/git/status").then((s) => setGitClean(s.isClean !== false)).catch(() => setGitClean(null));
+  }, [isDone, isMerged]);
+
   if (isPlanning) return null;
 
-  // PendingApproval: show Execute button to dispatch to Queued
   if (isPlanned) {
     return (
       <div className="px-6 py-3 border-t border-base-300 shrink-0 space-y-1.5" style={footerStyle}>
@@ -83,15 +88,7 @@ function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, mergeBus
     );
   }
 
-  // Reviewing/PendingDecision: actions are now inside ReviewTab
   if (isInReview) return null;
-
-  // Fetch git cleanliness when issue is ready for merge
-  const [gitClean, setGitClean] = useState(null); // null = loading, true = clean, false = dirty
-  useEffect(() => {
-    if (!isDone || isMerged) return;
-    api.get("/git/status").then((s) => setGitClean(s.isClean !== false)).catch(() => setGitClean(null));
-  }, [isDone, isMerged]);
 
   if (isDone && !isMerged) {
     const isPushPr = mergeMode === "push-pr";
