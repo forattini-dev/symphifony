@@ -185,6 +185,7 @@ export async function ensureNotStale(state: RuntimeState, staleTimeoutMs: number
       const staleMinutes = Math.round((Date.now() - Date.parse(issue.updatedAt)) / 60_000);
       const reason = `Stale execution — no updates for over ${staleMinutes} minute(s) in ${issue.state} state.`;
       logger.info({ issueId: issue.id, identifier: issue.identifier, state: issue.state, updatedAt: issue.updatedAt }, "[Scheduler] Recovering stale issue → Blocked");
+      issue.lastFailedPhase = issue.state === "Reviewing" ? "review" : "execute";
       issue.attempts += 1;
       issue.nextRetryAt = getNextRetryAt(issue, state.config.retryDelayMs);
       issue.startedAt = undefined;

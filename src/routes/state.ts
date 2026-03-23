@@ -211,10 +211,20 @@ export function registerStateRoutes(
           );
         }
       } else if (issue.state === "Blocked") {
-        await retryExecutionCommand(
-          { issue, note: "Manual retry from Blocked." },
-          container,
-        );
+        if (issue.lastFailedPhase === "review") {
+          // Execution was fine, only review failed — skip re-execution
+          issue.lastError = undefined;
+          issue.lastFailedPhase = undefined;
+          await transitionIssueCommand(
+            { issue, target: "Reviewing", note: "Retrying review (execution was already successful)." },
+            container,
+          );
+        } else {
+          await retryExecutionCommand(
+            { issue, note: "Manual retry from Blocked." },
+            container,
+          );
+        }
       } else if (issue.state === "Approved") {
         // Done → reopen for rework (e.g. after merge conflicts)
         issue.attempts += 1;

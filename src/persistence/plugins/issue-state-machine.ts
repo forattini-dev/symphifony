@@ -117,7 +117,7 @@ export const issueStateMachineConfig = {
           on: { APPROVE: "Approved", REQUEUE: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
         },
         Blocked: {
-          on: { UNBLOCK: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
+          on: { UNBLOCK: "Queued", REVIEW: "Reviewing", REPLAN: "Planning", CANCEL: "Cancelled" },
           entry: "onEnterBlocked",
         },
         Approved: {
