@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useRef, useEffect, useState } from "react";
 import { IssueCard } from "./IssueCard.jsx";
 import { EmptyState } from "./EmptyState.jsx";
-import { Lightbulb, Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle, RotateCcw, ArrowRight, ChevronDown, X } from "lucide-react";
+import { Lightbulb, Plus, Play, Eye, AlertTriangle, CheckCircle, XCircle, RotateCcw, ArrowRight, ChevronDown, X, Info } from "lucide-react";
 import { useDragAndDrop } from "../hooks/useDragAndDrop.js";
 import { getIssueTransitions } from "../utils.js";
 import { useHotkeys } from "react-hotkeys-hook";
@@ -73,6 +73,14 @@ const EMPTY_CONFIG = {
   "In Progress": { icon: Play, desc: "Issues move here when agents start" },
   Blocked: { icon: AlertTriangle, desc: "Needs attention" },
   Done: { icon: CheckCircle, desc: "Completed" },
+};
+
+const COLUMN_TOOLTIP = {
+  Planning: "AI is generating the execution plan.\nStates: Planning",
+  "Needs Approval": "Waiting for your decision — approve, rework, or replan.\nStates: PendingApproval, PendingDecision",
+  "In Progress": "AI agents are working — executing or reviewing code.\nStates: Queued, Running, Reviewing",
+  Blocked: "Failed or stale — needs retry or manual intervention.\nStates: Blocked",
+  Done: "Completed — ready to merge or already merged.\nStates: Approved, Merged, Cancelled",
 };
 
 function SkeletonCard({ delay = 0 }) {
@@ -246,6 +254,11 @@ function KanbanColumn({ col, issues, empty, badgeClass, dragState, registerColum
           {col}
           {col === "In Progress" && hasRunningAgents && (
             <span className="issue-phase-dot" title="Agents working" />
+          )}
+          {COLUMN_TOOLTIP[col] && (
+            <div className="lg:tooltip lg:tooltip-bottom" data-tip={COLUMN_TOOLTIP[col]}>
+              <Info className="size-3 opacity-30 hover:opacity-60 transition-opacity cursor-help" />
+            </div>
           )}
         </h3>
         <ColumnBadge count={issues.length} className={badgeClass} />
