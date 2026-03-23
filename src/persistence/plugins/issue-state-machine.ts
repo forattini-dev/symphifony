@@ -362,6 +362,7 @@ export const issueStateMachineConfig = {
         issue.lastError = reason || undefined;
         issue.cancelledReason = reason || issue.cancelledReason;
         emitFsmEvent(issue.id, "state", `${issue.identifier} cancelled${reason ? `: ${reason.slice(0, 100)}` : ""}.`);
+        // Worktree cleanup is handled by cleanTerminalWorkspaces() in queue-workers (background task)
       }
       const res = issueResource(machine);
       if (res) {

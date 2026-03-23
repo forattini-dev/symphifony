@@ -11,6 +11,7 @@ import { getContainer } from "../container.ts";
 import { createIssueCommand } from "../../commands/create-issue.command.ts";
 import { cancelIssueCommand } from "../../commands/cancel-issue.command.ts";
 import { mergeWorkspaceCommand } from "../../commands/merge-workspace.command.ts";
+import { pushWorkspaceCommand } from "../../commands/push-workspace.command.ts";
 import { transitionIssueCommand } from "../../commands/transition-issue.command.ts";
 import { findIssue } from "../../routes/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
@@ -191,7 +192,7 @@ async function cancelIssue(c: unknown) {
 
   await cancelIssueCommand(
     { issue },
-    getContainer(),
+    { ...getContainer(), state: context.state },
   );
   addEvent(context.state, issue.id, "manual", `Manual cancel requested for ${issue.id}.`);
   await persistState(context.state);
@@ -216,15 +217,27 @@ async function approveAndMerge(c: unknown) {
 
   try {
     const container = getContainer();
-    logger.info({ issueId, state: issue.state, testApplied: issue.testApplied }, "[API] POST /api/issues/:id/approve-and-merge");
+    const mergeMode = context.state.config.mergeMode;
+    logger.info({ issueId, state: issue.state, testApplied: issue.testApplied, mergeMode }, "[API] POST /api/issues/:id/approve-and-merge");
 
-    // mergeWorkspaceCommand handles: approve transition, merge, cleanup
-    await mergeWorkspaceCommand(
-      { issue, squashAlreadyApplied: issue.testApplied ?? false },
-      { ...container, state: context.state },
-    );
+    if (mergeMode === "push-pr") {
+      // Push-PR mode: approve, then push to remote + create PR
+      if (issue.state !== "Approved") {
+        await transitionIssueCommand(
+          { issue, target: "Approved", note: "Approved for push-pr." },
+          container,
+        );
+      }
+      await pushWorkspaceCommand({ issue }, { ...container, state: context.state });
+    } else {
+      // Local merge mode: approve + merge (squash or git merge --no-ff)
+      await mergeWorkspaceCommand(
+        { issue, squashAlreadyApplied: issue.testApplied ?? false },
+        { ...container, state: context.state },
+      );
+    }
 
-    addEvent(context.state, issue.id, "manual", `Approved and merged ${issue.identifier}.`);
+    addEvent(context.state, issue.id, "manual", `Approved and ${mergeMode === "push-pr" ? "pushed PR for" : "merged"} ${issue.identifier}.`);
     await persistState(context.state);
     return { body: { ok: true, issue } };
   } catch (error) {
@@ -271,6 +284,7 @@ export default {
     commandOutputTail: "string|optional",
     terminalWeek: "string|optional",
     usage: "json|optional",
+    testApplied: "boolean|optional",
     tokenUsage: "json|optional",
     tokensByPhase: "json|optional",
     tokensByModel: "json|optional",

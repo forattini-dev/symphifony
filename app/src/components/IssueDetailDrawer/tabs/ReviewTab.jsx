@@ -74,17 +74,17 @@ export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
 
   // ── Reset on issue change ───────────────────────────────────────────────────
   useEffect(() => {
+    setTested(!!issue.testApplied);
     setDiffData(null);
     setExpandedFile(null);
     setMergePreview(null);
     setGitClean(null);
-    setTested(false);
     setTestError(null);
     setReworkOpen(false);
     setReworkNote("");
     setMergeError(null);
     setReviewImages(issue.images ?? []);
-  }, [issueId]);
+  }, [issueId, issue.testApplied]);
 
   useEffect(() => { fetchDiff(); }, [fetchDiff]);
   useEffect(() => { fetchMergePreview(); }, [fetchMergePreview]);
@@ -417,48 +417,48 @@ export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
               </div>
             )}
 
-            {/* Evidence images */}
-            <div className="space-y-2 pt-2 border-t border-base-300">
-              <div className="text-xs font-semibold flex items-center gap-1.5 opacity-70">
-                <ImageIcon className="size-3.5" /> Evidence
-              </div>
-              <input
-                ref={reviewFileRef}
-                type="file"
-                multiple
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => uploadReviewImages(Array.from(e.target.files ?? []))}
-              />
-              {reviewImages.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {reviewImages.map((imgPath, i) => {
-                    const filename = imgPath.split("/").pop();
-                    const src = `/api/issues/${encodeURIComponent(issueId)}/images/${encodeURIComponent(filename)}`;
-                    return (
-                      <a key={i} href={src} target="_blank" rel="noreferrer" className="block">
-                        <img src={src} alt={filename} className="size-20 object-cover rounded-lg border border-base-300 hover:opacity-80 transition-opacity" />
-                      </a>
-                    );
-                  })}
-                </div>
-              )}
-              {reviewImages.length === 0 && (
-                <p className="text-xs opacity-40">No screenshots attached. Paste or upload images as evidence.</p>
-              )}
-              <button
-                type="button"
-                className="btn btn-xs btn-soft btn-ghost gap-1"
-                onClick={() => reviewFileRef.current?.click()}
-                disabled={imgUploading}
-              >
-                {imgUploading ? <Loader className="size-3 animate-spin" /> : <Paperclip className="size-3" />}
-                Attach Screenshot
-              </button>
-            </div>
+            <div className="h-0" /> {/* spacer — evidence section moved outside isInReview */}
           </div>
         </div>
       )}
+
+      {/* ── Evidence (always visible — not gated by review state) ──────────── */}
+
+      <Section title="Evidence" icon={ImageIcon}>
+        <input
+          ref={reviewFileRef}
+          type="file"
+          multiple
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => uploadReviewImages(Array.from(e.target.files ?? []))}
+        />
+        {reviewImages.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {reviewImages.map((imgPath, i) => {
+              const filename = imgPath.split("/").pop();
+              const src = `/api/issues/${encodeURIComponent(issueId)}/images/${encodeURIComponent(filename)}`;
+              return (
+                <a key={i} href={src} target="_blank" rel="noreferrer" className="block">
+                  <img src={src} alt={filename} className="size-20 object-cover rounded-lg border border-base-300 hover:opacity-80 transition-opacity" />
+                </a>
+              );
+            })}
+          </div>
+        )}
+        {reviewImages.length === 0 && (
+          <p className="text-xs opacity-40">No screenshots attached. Paste or upload images as evidence.</p>
+        )}
+        <button
+          type="button"
+          className="btn btn-xs btn-soft btn-ghost gap-1 mt-2"
+          onClick={() => reviewFileRef.current?.click()}
+          disabled={imgUploading}
+        >
+          {imgUploading ? <Loader className="size-3 animate-spin" /> : <Paperclip className="size-3" />}
+          Attach Screenshot
+        </button>
+      </Section>
 
 
       {/* ── Phase 3: Decision ──────────────────────────────────────────────── */}

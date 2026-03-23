@@ -168,7 +168,7 @@ export function registerStateRoutes(
         const result = await pushWorkspaceCommand({ issue, state }, container);
         return c.json({ ok: true, prUrl: result.prUrl, ghAvailable: result.ghAvailable });
       }
-      const result = await mergeWorkspaceCommand({ issue, state }, container);
+      const result = await mergeWorkspaceCommand({ issue, state, squashAlreadyApplied: issue.testApplied ?? false }, container);
       return c.json({ ok: true, ...result });
     } catch (error) {
       const issueId = parseIssue(c);
