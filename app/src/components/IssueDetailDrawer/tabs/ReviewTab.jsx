@@ -80,7 +80,7 @@ export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
   const handleApprove = () => { setVerdict("approved"); onStateChange?.(issue.id, "Approved"); };
   const handleRework = () => {
     setVerdict("rework");
-    onRetry?.(issue.id);
+    onRetry?.(issue.id, note || undefined);
   };
   const handleReject = () => { setVerdict("rejected"); onStateChange?.(issue.id, "Blocked"); };
 
@@ -297,7 +297,7 @@ export function ReviewTab({ issue, issueId, onStateChange, onRetry }) {
           <textarea
             className="textarea textarea-bordered w-full text-sm"
             rows={3}
-            placeholder="Optional: leave a note about your decision..."
+            placeholder="Describe what needs to change (sent to the agent on Rework)..."
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />

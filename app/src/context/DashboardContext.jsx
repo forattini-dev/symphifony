@@ -167,7 +167,7 @@ export function DashboardProvider({ children }) {
   });
 
   const retryMut = useMutation({
-    mutationFn: (id) => api.post(`/issues/${encodeURIComponent(id)}/retry`),
+    mutationFn: ({ id, feedback }) => api.post(`/issues/${encodeURIComponent(id)}/retry`, feedback ? { feedback } : undefined),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["runtime-state"] }),
     onError: (e) => showToast(e.message),
   });
@@ -251,7 +251,7 @@ export function DashboardProvider({ children }) {
     selectedIssue, setSelectedIssue,
     // Mutations
     updateState: (id, state) => updateState.mutate({ id, state }),
-    retryIssue: (id) => retryMut.mutate(id),
+    retryIssue: (id, feedback) => retryMut.mutate({ id, feedback }),
     cancelIssue: (id) => cancelMut.mutate(id),
     refresh: () => refreshMut.mutate(),
     // Settings

@@ -402,5 +402,15 @@ export async function runIssueOnce(
     state.metrics = computeMetrics(state.issues);
     state.updatedAt = now();
     await container.persistencePort.persistState(state);
+
+    // Re-enqueue review if the issue transitioned to Reviewing during execution.
+    // The FSM onEnterReviewing enqueues the review, but drain() discards it because
+    // the issue is still in the `running` set at that point (this finally hasn't run yet).
+    if (issue.state === "Reviewing") {
+      try {
+        const { enqueue } = await import("../persistence/plugins/queue-workers.ts");
+        await enqueue(issue, "review");
+      } catch { /* non-critical — stale check will catch it */ }
+    }
   }
 }

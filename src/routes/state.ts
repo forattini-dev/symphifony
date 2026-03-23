@@ -185,6 +185,13 @@ export function registerStateRoutes(
 
   app.post("/api/issues/:id/retry", async (c: any) => {
     logger.info({ issueId: parseIssue(c) }, "[API] POST /api/issues/:id/retry");
+    // Extract optional rework feedback from request body
+    let feedback: string | undefined;
+    try {
+      const body = await c.req.json();
+      if (body?.feedback) feedback = toStringValue(body.feedback);
+    } catch { /* no body or invalid JSON — fine */ }
+
     return mutateIssueState(state, c, async (issue) => {
       const container = getContainer();
       if (TERMINAL_STATES.has(issue.state)) {
@@ -229,8 +236,10 @@ export function registerStateRoutes(
         await requestReworkCommand(
           {
             issue,
-            reviewerFeedback: issue.lastError || "Manual rework request.",
-            note: `Manual rework requested for ${issue.identifier}.`,
+            reviewerFeedback: feedback || issue.lastError || "Manual rework request.",
+            note: feedback
+              ? `Rework requested for ${issue.identifier}: ${feedback.slice(0, 200)}`
+              : `Manual rework requested for ${issue.identifier}.`,
           },
           container,
         );
