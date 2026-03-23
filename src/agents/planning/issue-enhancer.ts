@@ -1,8 +1,9 @@
 import { appendFileTail, extractJsonObjects } from "../../concerns/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
-import { detectAvailableProviders, normalizeAgentProvider, resolveAgentCommand } from "../providers.ts";
+import { detectAvailableProviders } from "../providers.ts";
 import type { RuntimeConfig } from "../../types.ts";
 import { renderPrompt } from "../prompting.ts";
+import { resolvePlanStageConfig, getPlanCommand } from "./planning-prompts.ts";
 import { env } from "node:process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -28,16 +29,6 @@ type EnhanceResult = {
   provider: string;
 };
 
-function getProviderCommand(
-  provider: string,
-  config: RuntimeConfig,
-): string {
-  // Only use config.agentCommand when the provider matches the configured one.
-  // Otherwise each provider falls through to its own default command.
-  const explicit = provider === config.agentProvider ? (config.agentCommand || "") : "";
-  return resolveAgentCommand(provider, explicit, "", "");
-}
-
 async function buildPrompt(field: EnhancementField, title: string, description: string, issueType?: string, images?: string[]): Promise<string> {
   const context = {
     title: title || "(empty)",
@@ -53,7 +44,7 @@ async function buildPrompt(field: EnhancementField, title: string, description: 
   return renderPrompt("issue-enhancer-description", context);
 }
 
-function parseEnhancerOutput(raw: string, expectedField: EnhancementField): string {
+export function parseEnhancerOutput(raw: string, expectedField: EnhancementField): string {
   const text = raw.trim();
   if (!text) {
     throw new Error("AI provider returned an empty response.");
@@ -104,8 +95,13 @@ function parseCandidate(raw: string, expectedField: EnhancementField): string {
     if (value && !isPlaceholder && (!field || field === expectedField)) {
       return value;
     }
-    if (typeof parsed.result === "string") {
-      const nested = parsed.result.trim();
+    // Check nested JSON in result/response fields (Gemini CLI wraps output in {response:"..."})
+    const nestedSource =
+      typeof parsed.result === "string" ? parsed.result :
+      typeof parsed.response === "string" ? parsed.response :
+      undefined;
+    if (nestedSource) {
+      const nested = nestedSource.trim();
       if (nested) {
         const nestedClean = nested.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
         for (const nestedCandidate of extractJsonObjects(nestedClean)) {
@@ -233,73 +229,37 @@ export async function enhanceIssueField(
   const title = typeof payload.title === "string" ? payload.title.trim() : "";
   const description = typeof payload.description === "string" ? payload.description.trim() : "";
   const issueType = typeof payload.issueType === "string" ? payload.issueType.trim() : undefined;
-  const requestedProvider = normalizeAgentProvider(
-    typeof payload.preferredProvider === "string" ? payload.preferredProvider : payload.provider ?? config.agentProvider,
-  );
-  const providers = detectAvailableProviders();
-  const availableSet = new Set(providers.filter((entry) => entry.available).map((entry) => entry.name));
-  const orderedProviders: string[] = [];
-  const addProvider = (candidate: string) => {
-    if (availableSet.has(candidate) && !orderedProviders.includes(candidate)) {
-      orderedProviders.push(candidate);
-    }
-  };
-
-  addProvider(requestedProvider);
-  // Fall back to any other available provider, in detection order
-  for (const entry of providers) {
-    if (entry.available) addProvider(entry.name);
-  }
-
-  if (!orderedProviders.length) {
-    const known = providers.map((entry) => `${entry.name}:${entry.available ? "available" : "missing"}`).join(", ");
-    throw new Error(`No AI provider available (codex/claude). Detected: ${known}`);
-  }
-
   const images = Array.isArray(payload.images) ? payload.images.filter((p): p is string => typeof p === "string") : undefined;
-  const prompt = await buildPrompt(field, title, description, issueType, images);
-  const errors: string[] = [];
 
-  // JSON schema for structured enhance output via OpenAI API
-  const enhanceSchema = {
-    type: "object" as const,
-    properties: {
-      field: { type: "string" as const },
-      value: { type: "string" as const },
-    },
-    required: ["field", "value"] as const,
-    additionalProperties: false as const,
-  };
+  // Use the same provider/model as the plan stage — single source of truth
+  const { provider: selectedProvider, model: planModel } = await resolvePlanStageConfig(config);
 
-  for (const selectedProvider of orderedProviders) {
-    // ── All providers: spawn CLI process ──
-    const command = getProviderCommand(selectedProvider, config);
-    if (!command) {
-      errors.push(`Provider "${selectedProvider}" has no command.`);
-      continue;
-    }
-
-    try {
-      const output = await runProviderCommand(
-        command,
-        selectedProvider,
-        prompt,
-        title,
-        description,
-        field,
-        config.commandTimeoutMs,
-        images,
-      );
-      logger.info({ provider: selectedProvider, field, rawOutput: output.slice(0, 2000) }, "Enhance raw output");
-      const value = parseEnhancerOutput(output, field);
-      logger.info({ provider: selectedProvider, field, parsedValue: value }, "Enhance parsed value");
-      return { field, value, provider: selectedProvider };
-    } catch (error) {
-      errors.push(
-        `Provider "${selectedProvider}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+  const providers = detectAvailableProviders();
+  const isAvailable = providers.some((p) => p.name === selectedProvider && p.available);
+  if (!isAvailable) {
+    const known = providers.map((entry) => `${entry.name}:${entry.available ? "available" : "missing"}`).join(", ");
+    throw new Error(`Configured plan provider "${selectedProvider}" is not available. Detected: ${known}`);
   }
 
-  throw new Error(`Could not enhance issue field. ${errors.join(" | ")}`);
+  const command = getPlanCommand(selectedProvider, planModel, images);
+  if (!command) {
+    throw new Error(`No command configured for plan provider "${selectedProvider}".`);
+  }
+
+  const prompt = await buildPrompt(field, title, description, issueType, images);
+
+  const output = await runProviderCommand(
+    command,
+    selectedProvider,
+    prompt,
+    title,
+    description,
+    field,
+    config.commandTimeoutMs,
+    images,
+  );
+  logger.info({ provider: selectedProvider, model: planModel, field, rawOutput: output.slice(0, 2000) }, "Enhance raw output");
+  const value = parseEnhancerOutput(output, field);
+  logger.info({ provider: selectedProvider, field, parsedValue: value.slice(0, 500) }, "Enhance parsed value");
+  return { field, value, provider: selectedProvider };
 }

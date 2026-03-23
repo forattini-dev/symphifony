@@ -118,3 +118,4 @@ const FAST_BOOT = CLI_ARGS.includes("--fast-boot");
 export const SKIP_SOURCE = FAST_BOOT || CLI_ARGS.includes("--skip-source");
 export const SKIP_SCAN = FAST_BOOT || CLI_ARGS.includes("--skip-scan");
 export const SKIP_RECOVERY = FAST_BOOT || CLI_ARGS.includes("--skip-recovery");
+export const QUIET_MODE = CLI_ARGS.includes("--quiet") || CLI_ARGS.includes("--silent");

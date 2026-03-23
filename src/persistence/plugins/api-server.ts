@@ -13,6 +13,7 @@ import {
   FRONTEND_MASKABLE_ICON_SVG,
   FRONTEND_OFFLINE_HTML,
   FRONTEND_SERVICE_WORKER_JS,
+  QUIET_MODE,
 } from "../../concerns/constants.ts";
 import { NATIVE_RESOURCE_CONFIGS } from "../resources/index.ts";
 import { logger } from "../../concerns/logger.ts";
@@ -155,7 +156,7 @@ export async function startApiServer(
     docs: { enabled: true, title: "Fifony API", version: "1.0.0", description: "Local orchestration API for Fifony" },
     cors: { enabled: true, origin: "*" },
     security: { enabled: false },
-    logging: { enabled: true, excludePaths: ["/health", "/status", "/**/*.js", "/**/*.css", "/**/*.svg"] },
+    logging: { enabled: !QUIET_MODE, excludePaths: ["/health", "/status", "/**/*.js", "/**/*.css", "/**/*.svg"] },
     compression: { enabled: true, threshold: 1024 },
     health: { enabled: true },
     resources: {
