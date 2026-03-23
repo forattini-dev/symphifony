@@ -116,10 +116,23 @@ function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, mergeBus
     );
   }
 
+  // Fetch git cleanliness when issue is ready for merge
+  const [gitClean, setGitClean] = useState(null); // null = loading, true = clean, false = dirty
+  useEffect(() => {
+    if (!isDone || isMerged) return;
+    api.get("/git/status").then((s) => setGitClean(s.isClean !== false)).catch(() => setGitClean(null));
+  }, [isDone, isMerged]);
+
   if (isDone && !isMerged) {
     const isPushPr = mergeMode === "push-pr";
     return (
       <div className="px-6 py-3 border-t border-base-300 shrink-0 space-y-2" style={footerStyle}>
+        {gitClean === false && (
+          <div className="alert alert-warning text-xs py-1.5">
+            <AlertTriangle className="size-3.5" />
+            <span>Project has uncommitted changes — merge will fail. Commit or stash them first.</span>
+          </div>
+        )}
         {mergeError && (
           <div className="alert alert-error text-sm py-2">
             <AlertTriangle className="size-4" /> {mergeError}

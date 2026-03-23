@@ -31,6 +31,10 @@ export type GitRepoStatus = {
   isGit: boolean;
   hasCommits: boolean;
   branch: string | null;
+  /** Working tree is clean (no uncommitted or untracked changes). Null if not a git repo. */
+  isClean?: boolean;
+  /** Number of untracked files. */
+  untrackedCount?: number;
 };
 
 const SKIP_DIRS = new Set([
@@ -203,7 +207,17 @@ export function getGitRepoStatus(dir: string): GitRepoStatus {
     }
   })();
 
-  return { isGit: true, hasCommits, branch };
+  let isClean = true;
+  let untrackedCount = 0;
+  if (hasCommits) {
+    try {
+      const porcelain = execSync("git status --porcelain", { cwd: dir, encoding: "utf8", timeout: 5_000 }).trim();
+      isClean = porcelain.length === 0;
+      untrackedCount = porcelain.split("\n").filter((l) => l.startsWith("??")).length;
+    } catch { /* non-critical */ }
+  }
+
+  return { isGit: true, hasCommits, branch, isClean, untrackedCount };
 }
 
 function gitRequirementMessage(action: string): string {
@@ -271,6 +285,43 @@ export function detectDefaultBranch(dir: string): string {
   }
 }
 
+/** CLI config directories to copy from project root to worktree (typically gitignored). */
+const CLI_CONFIG_DIRS = [".claude", ".codex", ".gemini"];
+/** Project-root files to copy (CLAUDE.md provides project instructions to the agent). */
+const CLI_CONFIG_FILES = ["CLAUDE.md"];
+
+/**
+ * Copy CLI config dirs and files from project root into the worktree.
+ * git worktree only checks out tracked files — .gitignored config dirs like .claude/
+ * would be missing, causing the agent to lose skills, commands, and CLAUDE.md.
+ */
+function copyCliConfigDirs(sourceRoot: string, worktreePath: string): void {
+  for (const dir of CLI_CONFIG_DIRS) {
+    const src = join(sourceRoot, dir);
+    const dst = join(worktreePath, dir);
+    if (existsSync(src) && statSync(src).isDirectory() && !existsSync(dst)) {
+      try {
+        execSync(`cp -R "${src}" "${dst}"`, { stdio: "pipe", timeout: 10_000 });
+        logger.debug({ dir, worktreePath }, "[Workspace] Copied CLI config dir to worktree");
+      } catch (err) {
+        logger.warn({ err: String(err), dir }, "[Workspace] Failed to copy CLI config dir");
+      }
+    }
+  }
+  for (const file of CLI_CONFIG_FILES) {
+    const src = join(sourceRoot, file);
+    const dst = join(worktreePath, file);
+    if (existsSync(src) && !existsSync(dst)) {
+      try {
+        execSync(`cp "${src}" "${dst}"`, { stdio: "pipe", timeout: 5_000 });
+        logger.debug({ file, worktreePath }, "[Workspace] Copied CLI config file to worktree");
+      } catch (err) {
+        logger.warn({ err: String(err), file }, "[Workspace] Failed to copy CLI config file");
+      }
+    }
+  }
+}
+
 /** Create a git worktree for the issue at the given path. */
 export async function createGitWorktree(issue: IssueEntry, worktreePath: string, baseBranch?: string): Promise<void> {
   let headCommitAtStart = "";
@@ -302,6 +353,10 @@ export async function createGitWorktree(issue: IssueEntry, worktreePath: string,
   issue.baseBranch = resolvedBaseBranch;
   issue.headCommitAtStart = headCommitAtStart;
   issue.worktreePath = worktreePath;
+
+  // Copy CLI config dirs that are typically gitignored (.claude/, .codex/, .gemini/)
+  // Without these, the agent loses CLAUDE.md, skills, commands, and project-level config
+  copyCliConfigDirs(TARGET_ROOT, worktreePath);
 
   logger.debug({ issueId: issue.id, branchName, baseBranch: resolvedBaseBranch, worktreePath }, "[Agent] Git worktree created");
 }

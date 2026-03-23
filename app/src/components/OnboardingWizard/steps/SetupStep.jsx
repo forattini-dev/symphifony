@@ -179,6 +179,22 @@ function BranchCard({ currentBranch, onBranchCreated, onGitStatusChange }) {
         </div>
       )}
 
+      {/* Untracked files warning — merge will fail if working tree is dirty */}
+      {gitStatus?.isGit && gitStatus?.hasCommits && gitStatus?.isClean === false && (
+        <div className="alert alert-info py-3 text-sm">
+          <AlertTriangle className="size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Working tree has uncommitted changes</p>
+            <p className="opacity-80 mt-0.5">
+              {gitStatus.untrackedCount > 0
+                ? `${gitStatus.untrackedCount} untracked file${gitStatus.untrackedCount > 1 ? "s" : ""} found. `
+                : ""}
+              Commit or stash your changes before merging issues — fifony requires a clean working tree to merge agent work.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Git initialized */}
       {isGit && (
         <div className="flex flex-col gap-4">
