@@ -336,7 +336,7 @@ jobs:
           JS
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
