@@ -78,7 +78,7 @@ export type IssueEntry = {
   /** When the workspace was merged into TARGET_ROOT */
   mergedAt?: string;
   /** Summary of the merge result */
-  mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number; conflictFiles?: string[] };
+  mergeResult?: { copied: number; deleted: number; skipped: number; conflicts: number; conflictFiles?: string[]; conflictResolution?: { resolved: boolean; provider: string; resolvedFiles: string[]; durationMs: number; output?: string; resolvedAt: string } };
   /** Summary of pre-merge rebase attempt (auto-rebase before merge to resolve diverged branches) */
   rebaseResult?: { success: boolean; conflictFiles: string[]; rebasedAt: string };
   /** Why the issue was merged — set for both auto and manual merges */

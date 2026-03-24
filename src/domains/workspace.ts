@@ -604,8 +604,9 @@ function ensureWorktreeCommitted(issue: IssueEntry): void {
 
 export { ensureWorktreeCommitted };
 
-/** Merge a worktree branch into TARGET_ROOT using git merge --no-ff. */
-function mergeWorktree(issue: IssueEntry, worktreePath: string): MergeResult {
+/** Merge a worktree branch into TARGET_ROOT using git merge --no-ff.
+ *  When abortOnConflict is false, conflict markers are left in place for agent resolution. */
+function mergeWorktree(issue: IssueEntry, worktreePath: string, abortOnConflict = true): MergeResult {
   const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
   ensureWorktreeCommitted(issue);
 
@@ -639,7 +640,7 @@ function mergeWorktree(issue: IssueEntry, worktreePath: string): MergeResult {
       { cwd: TARGET_ROOT, stdio: "pipe" },
     );
   } catch (err: any) {
-    // Merge failed — collect conflict files and abort
+    // Merge failed — collect conflict files
     try {
       const conflictOut = execSync(
         "git diff --name-only --diff-filter=U",
@@ -647,8 +648,12 @@ function mergeWorktree(issue: IssueEntry, worktreePath: string): MergeResult {
       );
       result.conflicts.push(...conflictOut.trim().split("\n").filter(Boolean));
     } catch {}
-    try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
-    logger.warn({ issueId: issue.id, err: String(err) }, "[Agent] Git merge failed, aborted");
+    if (abortOnConflict) {
+      try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+      logger.warn({ issueId: issue.id, err: String(err) }, "[Agent] Git merge failed, aborted");
+    } else {
+      logger.info({ issueId: issue.id, conflicts: result.conflicts }, "[Agent] Git merge has conflicts — leaving markers for agent resolution");
+    }
   }
 
   return result;
@@ -669,10 +674,10 @@ export function shouldSkipMergePath(relativePath: string): boolean {
 }
 
 /** Merge a worktree branch into TARGET_ROOT. */
-export function mergeWorkspace(issue: IssueEntry): MergeResult {
+export function mergeWorkspace(issue: IssueEntry, abortOnConflict = true): MergeResult {
   ensureGitRepoReadyForWorktrees(TARGET_ROOT, "merge issues");
   assertIssueHasGitWorktree(issue, "merge");
-  return mergeWorktree(issue, issue.worktreePath);
+  return mergeWorktree(issue, issue.worktreePath, abortOnConflict);
 }
 
 // ── Dry merge (pre-merge conflict detection) ────────────────────────────────

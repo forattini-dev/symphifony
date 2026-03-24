@@ -10,6 +10,8 @@ import { logger } from "../concerns/logger.ts";
 import { ensureGitRepoReadyForWorktrees, parseDiffStats } from "../domains/workspace.ts";
 import { runValidationGate } from "../domains/validation.ts";
 import { now } from "../concerns/helpers.ts";
+import { resolveConflictsWithAgent } from "../domains/merge-conflict-resolver.ts";
+import { resolvePlanStageConfig } from "../agents/planning/planning-prompts.ts";
 
 export type MergeWorkspaceInput = {
   issue: IssueEntry;
@@ -125,9 +127,68 @@ export async function mergeWorkspaceCommand(
       }
     } catch { /* non-critical */ }
 
-    // Standard git merge --no-ff
-    const mergeResult = mergeWorkspace(issue);
+    // Standard git merge --no-ff (don't abort on conflict — agent may resolve)
+    const mergeResult = mergeWorkspace(issue, /* abortOnConflict */ false);
     result = mergeResult;
+
+    // ── Layer 2: Agent-based conflict resolution ──────────────────────────
+    if (result.conflicts.length > 0) {
+      deps.eventStore.addEvent(issue.id, "info", `Merge conflicts in ${result.conflicts.length} file(s): ${result.conflicts.join(", ")}. Attempting agent-based resolution...`);
+      logger.info({ issueId: issue.id, conflicts: result.conflicts }, "[Merge] Conflicts detected — spawning agent to resolve");
+
+      try {
+        const { provider, model } = await resolvePlanStageConfig(state.config);
+        const resolution = await resolveConflictsWithAgent({
+          issue,
+          conflictFiles: result.conflicts,
+          provider,
+          model,
+          targetRoot: TARGET_ROOT,
+        });
+
+        if (resolution.resolved) {
+          // Agent resolved all conflicts — complete the merge commit
+          try {
+            execSync("git add -A", { cwd: TARGET_ROOT, stdio: "pipe", timeout: 10_000 });
+            execSync(
+              `git commit --no-edit`,
+              { cwd: TARGET_ROOT, stdio: "pipe", timeout: 10_000 },
+            );
+            result.conflicts = [];
+            deps.eventStore.addEvent(issue.id, "info", `Agent (${resolution.provider}) resolved ${resolution.resolvedFiles.length} conflict(s) in ${Math.round(resolution.durationMs / 1000)}s.`);
+            logger.info({ issueId: issue.id, provider: resolution.provider, durationMs: resolution.durationMs }, "[Merge] Agent resolved all conflicts — merge committed");
+          } catch (commitErr) {
+            // Commit failed even after resolution — abort
+            try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+            deps.eventStore.addEvent(issue.id, "error", `Agent resolved conflicts but merge commit failed: ${String(commitErr)}`);
+            logger.error({ issueId: issue.id, err: String(commitErr) }, "[Merge] Commit after conflict resolution failed");
+          }
+        } else {
+          // Agent failed to resolve — abort the merge
+          try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+          deps.eventStore.addEvent(issue.id, "error", `Agent-based conflict resolution failed (${resolution.provider}, ${Math.round(resolution.durationMs / 1000)}s). ${resolution.resolvedFiles.length}/${result.conflicts.length} files resolved.`);
+          logger.warn({ issueId: issue.id, resolvedFiles: resolution.resolvedFiles, provider: resolution.provider }, "[Merge] Agent failed to resolve all conflicts");
+        }
+
+        // Store resolution info on the issue
+        issue.mergeResult = {
+          ...issue.mergeResult!,
+          conflictResolution: {
+            resolved: resolution.resolved,
+            provider: resolution.provider,
+            resolvedFiles: resolution.resolvedFiles,
+            durationMs: resolution.durationMs,
+            output: resolution.output.slice(-500),
+            resolvedAt: resolution.resolvedAt,
+          },
+        };
+      } catch (err) {
+        // Resolution threw — abort merge and continue with normal conflict flow
+        try { execSync("git merge --abort", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+        deps.eventStore.addEvent(issue.id, "error", `Agent conflict resolution threw: ${String(err)}`);
+        logger.error({ issueId: issue.id, err: String(err) }, "[Merge] Conflict resolution threw unexpectedly");
+      }
+    }
   }
 
   issue.mergeResult = {
@@ -136,10 +197,11 @@ export async function mergeWorkspaceCommand(
     skipped: result.skipped.length,
     conflicts: result.conflicts.length,
     conflictFiles: result.conflicts.length > 0 ? result.conflicts : undefined,
+    ...(issue.mergeResult?.conflictResolution ? { conflictResolution: issue.mergeResult.conflictResolution } : {}),
   };
 
   if (result.conflicts.length > 0) {
-    deps.eventStore.addEvent(issue.id, "error", `Merge conflicts: ${result.conflicts.join(", ")}`);
+    deps.eventStore.addEvent(issue.id, "error", `Merge aborted — ${result.conflicts.length} conflict(s) remain: ${result.conflicts.join(", ")}`);
     await deps.persistencePort.persistState(state);
     return result;
   }
