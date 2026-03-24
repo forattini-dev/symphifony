@@ -144,7 +144,7 @@ export async function runPlanningProcess(options: {
     let outputBytes = 0;
     const onData = (chunk: Buffer | string) => {
       const text = String(chunk);
-      stdout = appendFileTail(stdout, text, 32_000);
+      stdout = appendFileTail(stdout, text, 128_000);
       outputBytes += text.length;
       onChunk?.(outputBytes);
     };

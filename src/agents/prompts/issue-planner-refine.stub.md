@@ -27,4 +27,4 @@ Rules:
 - Re-evaluate estimatedComplexity if the scope changed significantly.
 - Update suggestedPaths, suggestedSkills, and suggestedAgents if affected by the changes.
 
-Return strict JSON. No text outside JSON.
+You may explore the codebase to inform your revisions. After your analysis, return the revised plan as a single JSON code block (```json ... ```) as the LAST thing in your output.
