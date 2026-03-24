@@ -29,7 +29,7 @@ describe("buildClaudeCommand", () => {
     const cmd = buildClaudeCommand({});
     assert.ok(cmd.startsWith("claude "), "starts with 'claude '");
     assert.ok(cmd.includes("--print"), "has --print");
-    assert.ok(cmd.includes("--bare"), "has --bare");
+    assert.ok(!cmd.includes("--bare"), "no --bare (breaks OAuth auth)");
     assert.ok(cmd.includes("--dangerously-skip-permissions"), "has tool-access flag");
     assert.ok(cmd.includes("--no-session-persistence"), "has no-session-persistence");
     assert.ok(cmd.includes("--output-format json"), "has output-format json");

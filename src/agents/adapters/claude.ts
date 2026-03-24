@@ -21,7 +21,8 @@ export const collectClaudeUsageFromCli = (): Promise<ProviderUsageSnapshot | nul
 // ── Command builder ───────────────────────────────────────────────────────────
 
 export function buildClaudeCommand(options: ProviderCommandOptions): string {
-  const parts = ["claude", "--print", "--bare"];
+  // NOTE: do NOT use --bare — it disables OAuth/keychain auth and requires ANTHROPIC_API_KEY
+  const parts = ["claude", "--print"];
 
   if (options.readOnly) {
     // Read-only mode: no file edits, no tool access — safe for planning/review
