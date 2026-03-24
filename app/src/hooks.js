@@ -224,7 +224,6 @@ export const SETTINGS_QUERY_KEY = ["settings"];
 const SETTING_ID_UI_THEME = "ui.theme";
 const SETTING_ID_UI_NOTIFICATIONS_ENABLED = "ui.notifications.enabled";
 export const SETTING_ID_UI_ISSUES_STATE_FILTER = "ui.issues.stateFilter";
-export const SETTING_ID_UI_ISSUES_CATEGORY_FILTER = "ui.issues.categoryFilter";
 export const SETTING_ID_UI_ISSUES_COMPLETION_FILTER = "ui.issues.completionFilter";
 export const SETTING_ID_UI_EVENTS_KIND = "ui.events.kind";
 export const SETTING_ID_UI_EVENTS_ISSUE_ID = "ui.events.issueId";

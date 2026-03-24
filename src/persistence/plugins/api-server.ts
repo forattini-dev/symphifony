@@ -184,8 +184,8 @@ export async function startApiServer(
       "GET /settings/general": () => serveAppShell(),
       "GET /settings/agents": () => serveAppShell(),
       "GET /settings/notifications": () => serveAppShell(),
-      "GET /settings/preferences": () => serveAppShell(),
       "GET /settings/workflow": () => serveAppShell(),
+      "GET /settings/hotkeys": () => serveAppShell(),
       "GET /settings/providers": () => serveAppShell(),
       "GET /api/health": (c: any) =>
         c.json({ status: state.booting ? "booting" : "ready" }),
