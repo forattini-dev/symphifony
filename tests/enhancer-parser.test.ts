@@ -81,6 +81,58 @@ ${JSON.stringify({
     assert.ok(!result.includes("...") || result.includes("{"), "should not return placeholder");
   });
 
+  // ── Codex CLI noise with unbalanced braces ─────────────────────────────
+
+  it("extracts JSON from Codex output with unbalanced CSS braces in echoed prompt", () => {
+    // Codex CLI echoes the full prompt to stdout, including CSS snippets with
+    // unclosed braces that corrupt extractJsonObjects' depth tracker
+    const raw = [
+      "Reading prompt from stdin...",
+      "OpenAI Codex v0.116.0 (research preview)",
+      "--------",
+      "workdir: /tmp/fifony-enhance-abc123",
+      "model: gpt-5.4-mini",
+      "--------",
+      "user",
+      'Return strict JSON only with this schema:',
+      '{ "field": "description", "value": "..." }',
+      "",
+      "Current description: ## Problem",
+      "  120|    .parallax-dog {",
+      "  121|      @apply absolute z-20 rounded-2xl border;",
+      "  Plugin: vite:css",
+      "  120|    .parallax-dog {",
+      "  121|      @apply absolute z-20;",
+      "mcp startup: no servers",
+      "codex",
+      '{ "field": "description", "value": "## Problema\\nCorrigir classe CSS inválida." }',
+      "tokens used",
+      "2,515",
+    ].join("\n");
+
+    assert.equal(
+      parseEnhancerOutput(raw, "description"),
+      "## Problema\nCorrigir classe CSS inválida.",
+    );
+  });
+
+  it("extracts title from Codex output with noise before response JSON", () => {
+    const raw = [
+      "Reading prompt from stdin...",
+      "--------",
+      "user",
+      '{ "field": "title", "value": "..." }',
+      "Some echoed prompt content with { unbalanced braces",
+      "codex",
+      '{ "field": "title", "value": "fix: resolve invalid Tailwind class" }',
+    ].join("\n");
+
+    assert.equal(
+      parseEnhancerOutput(raw, "title"),
+      "fix: resolve invalid Tailwind class",
+    );
+  });
+
   it("rejects mismatched field", () => {
     const raw = '{"field": "description", "value": "wrong field"}';
     // When expecting "title" but got "description", should not match
