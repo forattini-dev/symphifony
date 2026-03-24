@@ -467,6 +467,7 @@ export function BoardView({ issues, onStateChange, onRetry, onCancel, onSelect, 
   const grouped = useMemo(() => {
     const buckets = Object.fromEntries(COLUMNS.map((c) => [c, []]));
     for (const issue of issues) {
+      if (!issue?.identifier) continue;
       if (HIDDEN_STATES.has(issue.state)) continue;
       let col;
       if (PLANNING_STATES.has(issue.state)) col = "Planning";
