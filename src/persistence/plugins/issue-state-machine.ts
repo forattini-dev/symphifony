@@ -1,13 +1,12 @@
 import type { AttemptSummary, IssueEntry, IssueState } from "../../types.ts";
-import { S3DB_ISSUE_RESOURCE, TARGET_ROOT, TERMINAL_STATES } from "../../concerns/constants.ts";
-import { computeDiffStats, syncIssueDiffStatsToStore } from "../../domains/workspace.ts";
+import { S3DB_ISSUE_RESOURCE, TERMINAL_STATES } from "../../concerns/constants.ts";
+import { computeDiffStats, removeTestWorkspace, syncIssueDiffStatsToStore } from "../../domains/workspace.ts";
 import { extractFailureInsights } from "../../agents/failure-analyzer.ts";
 import { invalidateMetrics } from "../metrics-cache.ts";
 import { markIssueDirty } from "../dirty-tracker.ts";
 import { isoWeek, now } from "../../concerns/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { join } from "node:path";
 
 // ── Event emitter callback (set after container init to avoid circular deps) ──
@@ -18,24 +17,39 @@ export function setFsmEventEmitter(emitter: FsmEventEmitter | null): void {
   fsmEventEmitter = emitter;
 }
 
-/** Auto-revert a test squash applied to TARGET_ROOT if issue.testApplied is true.
- *  Safe: uses reset HEAD + checkout instead of reset --hard + clean -fd to preserve untracked files. */
-function autoRevertTestSquash(issue: IssueEntry): void {
+/** Remove any managed isolated test workspace associated with the issue. */
+function cleanupActiveTestWorkspace(issue: IssueEntry): void {
   if (!issue.testApplied) return;
   try {
-    execSync("git reset HEAD", { cwd: TARGET_ROOT, stdio: "pipe", timeout: 15_000 });
-    execSync("git checkout -- .", { cwd: TARGET_ROOT, stdio: "pipe", timeout: 15_000 });
-    logger.info({ issueId: issue.id }, "[FSM] Auto-reverted test squash from TARGET_ROOT (untracked files preserved)");
+    removeTestWorkspace(issue);
+    logger.info({ issueId: issue.id }, "[FSM] Removed isolated test workspace");
   } catch (err) {
-    logger.warn({ err: String(err), issueId: issue.id }, "[FSM] Failed to auto-revert test squash");
+    logger.warn({ err: String(err), issueId: issue.id }, "[FSM] Failed to remove isolated test workspace");
   }
-  issue.testApplied = false;
 }
 
-/** Emit an event from FSM actions. No-op if container isn't ready yet (early boot). */
+/** Emit an event from FSM actions. No-op if container isn't ready yet (early boot).
+ *  Also sends web push notification for state transitions. */
 function emitFsmEvent(issueId: string, kind: string, message: string): void {
   if (fsmEventEmitter) {
     try { fsmEventEmitter(issueId, kind, message); } catch { /* non-critical */ }
+  }
+  // Fire-and-forget web push for state transitions
+  if (kind === "state") {
+    import("../../domains/web-push.ts").then(({ sendPushToAll, isWebPushReady, SETTING_ID_PUSH_SUBSCRIPTIONS }) => {
+      if (!isWebPushReady()) return;
+      import("../settings.ts").then(({ persistSetting }) => {
+        sendPushToAll(
+          { title: "fifony", body: message, tag: issueId, url: "/kanban" },
+          async (subs) => {
+            await persistSetting(SETTING_ID_PUSH_SUBSCRIPTIONS, subs, {
+              scope: "system",
+              source: "system",
+            });
+          },
+        ).catch(() => {});
+      }).catch(() => {});
+    }).catch(() => {});
   }
 }
 
@@ -179,7 +193,7 @@ export const issueStateMachineConfig = {
     onEnterPlanning: async (context: Record<string, unknown>, _event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
-        autoRevertTestSquash(issue);
+        cleanupActiveTestWorkspace(issue);
         issue.planningStatus = "idle";
         issue.planningError = undefined;
         issue.nextRetryAt = undefined;
@@ -213,7 +227,7 @@ export const issueStateMachineConfig = {
     onEnterQueued: async (context: Record<string, unknown>, event: string, _machine: Machine) => {
       const issue = resolveIssue(context);
       if (issue) {
-        autoRevertTestSquash(issue);
+        cleanupActiveTestWorkspace(issue);
 
         // Event-specific field prep (business rules live here, not in handlers)
         if (event === "REQUEUE") {
@@ -364,7 +378,7 @@ export const issueStateMachineConfig = {
       const week = isoWeek();
       const reason = typeof context.reason === "string" ? context.reason : (typeof context.note === "string" ? context.note : undefined);
       if (issue) {
-        autoRevertTestSquash(issue);
+        cleanupActiveTestWorkspace(issue);
         issue.completedAt = ts;
         issue.terminalWeek = week;
         issue.nextRetryAt = undefined;

@@ -1,10 +1,19 @@
-import type { JsonRecord, RuntimeState, RuntimeSettingScope, RuntimeSettingSource } from "../types.ts";
+import type { JsonRecord, RuntimeState, RuntimeSettingScope, RuntimeSettingSource, WorkflowConfig } from "../types.ts";
 import { logger } from "../concerns/logger.ts";
+import {
+  getVapidPublicKey,
+  addSubscription,
+  removeSubscription,
+  getSubscriptionCount,
+  SETTING_ID_PUSH_SUBSCRIPTIONS,
+  type PushSubscriptionData,
+} from "../domains/web-push.ts";
 import { now, clamp } from "../concerns/helpers.ts";
 import { addEvent } from "../domains/issues.ts";
 import { persistState } from "../persistence/store.ts";
 import { detectAvailableProviders, discoverModels } from "../agents/providers.ts";
 import { resolveProjectMetadata, SETTING_ID_PROJECT_NAME } from "../domains/project.ts";
+import type { RouteRegistrar } from "./http.ts";
 import {
   applyPersistedSettings,
   buildDefaultWorkflowConfig,
@@ -21,16 +30,16 @@ const VALID_SETTING_SCOPES = new Set<RuntimeSettingScope>(["runtime", "providers
 const VALID_SETTING_SOURCES = new Set<RuntimeSettingSource>(["user", "detected", "workflow", "system"]);
 
 export function registerSettingsRoutes(
-  app: any,
+  app: RouteRegistrar,
   state: RuntimeState,
 ): void {
-  app.get("/api/settings", async (c: any) => {
+  app.get("/api/settings", async (c) => {
     const settings = await loadRuntimeSettings();
     return c.json({ settings });
   });
 
-  app.get("/api/settings/:id", async (c: any) => {
-    const settingId = c.req?.param ? c.req.param("id") : "";
+  app.get("/api/settings/:id", async (c) => {
+    const settingId = c.req.param("id") || "";
     const settings = await loadRuntimeSettings();
     const setting = settings.find((entry) => entry.id === settingId);
     if (!setting) {
@@ -39,8 +48,8 @@ export function registerSettingsRoutes(
     return c.json({ ok: true, setting });
   });
 
-  app.post("/api/settings/:id", async (c: any) => {
-    const settingId = c.req?.param ? c.req.param("id") : "";
+  app.post("/api/settings/:id", async (c) => {
+    const settingId = c.req.param("id") || "";
     if (!settingId) {
       return c.json({ ok: false, error: "Setting id is required" }, 400);
     }
@@ -81,7 +90,7 @@ export function registerSettingsRoutes(
     return c.json({ ok: true, setting });
   });
 
-  app.post("/api/config/concurrency", async (c: any) => {
+  app.post("/api/config/concurrency", async (c) => {
     const payload = await c.req.json() as JsonRecord;
     const value = typeof payload.concurrency === "number" ? payload.concurrency : undefined;
     if (!value || value < 1 || value > 10) {
@@ -95,7 +104,7 @@ export function registerSettingsRoutes(
     return c.json({ ok: true, workerConcurrency: state.config.workerConcurrency });
   });
 
-  app.get("/api/config/workflow", async (c: any) => {
+  app.get("/api/config/workflow", async (c) => {
     const settings = await loadRuntimeSettings();
     const saved = getWorkflowConfig(settings);
     const includeDetails = c.req.query("details") === "1";
@@ -110,24 +119,57 @@ export function registerSettingsRoutes(
     return c.json({ ok: true, workflow: saved || defaultConfig, isDefault: !saved, providers, models });
   });
 
-  app.get("/api/config/models", async (c: any) => {
+  app.get("/api/config/models", async (c) => {
     const providers = detectAvailableProviders();
     const models = await discoverModels(providers);
     return c.json({ ok: true, models });
   });
 
-  app.post("/api/config/workflow", async (c: any) => {
+  app.post("/api/config/workflow", async (c) => {
     try {
       const payload = await c.req.json() as JsonRecord;
-      const workflow = payload.workflow as any;
+      const workflow = payload.workflow as Partial<WorkflowConfig> | undefined;
       if (!workflow?.plan?.provider || !workflow?.execute?.provider || !workflow?.review?.provider) {
         return c.json({ ok: false, error: "Invalid workflow config. Each stage needs provider, model, and effort." }, 400);
       }
-      await persistWorkflowConfig(workflow);
+      await persistWorkflowConfig(workflow as WorkflowConfig);
       addEvent(state, undefined, "manual", `Workflow config updated: plan=${workflow.plan.provider}/${workflow.plan.model}, execute=${workflow.execute.provider}/${workflow.execute.model}, review=${workflow.review.provider}/${workflow.review.model}.`);
       return c.json({ ok: true, workflow });
     } catch (error) {
       return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
     }
+  });
+
+  // ── Web Push endpoints ──────────────────────────────────────────────────
+
+  app.get("/api/push/vapid-public-key", (c) => {
+    const key = getVapidPublicKey();
+    if (!key) return c.json({ ok: false, error: "Web push not configured" }, 503);
+    return c.json({ ok: true, publicKey: key });
+  });
+
+  app.post("/api/push/subscribe", async (c) => {
+    const body = await c.req.json() as { subscription?: PushSubscriptionData };
+    const sub = body?.subscription;
+    if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+      return c.json({ ok: false, error: "Invalid push subscription" }, 400);
+    }
+    const persist = async (subs: PushSubscriptionData[]) => {
+      await persistSetting(SETTING_ID_PUSH_SUBSCRIPTIONS, subs, { source: "system" });
+    };
+    await addSubscription(sub, persist);
+    return c.json({ ok: true, subscriptions: getSubscriptionCount() });
+  });
+
+  app.post("/api/push/unsubscribe", async (c) => {
+    const body = await c.req.json() as { endpoint?: string };
+    if (!body?.endpoint) {
+      return c.json({ ok: false, error: "Endpoint is required" }, 400);
+    }
+    const persist = async (subs: PushSubscriptionData[]) => {
+      await persistSetting(SETTING_ID_PUSH_SUBSCRIPTIONS, subs, { source: "system" });
+    };
+    await removeSubscription(body.endpoint, persist);
+    return c.json({ ok: true });
   });
 }

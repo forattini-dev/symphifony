@@ -1,7 +1,21 @@
 const CACHE_VERSION = "__BUILD_TIMESTAMP__";
 const CORE_CACHE = `fifony-core-${CACHE_VERSION}`;
 const ASSET_CACHE = `fifony-assets-${CACHE_VERSION}`;
-const APP_SHELL_ROUTES = ["/kanban", "/issues", "/agents", "/settings", "/onboarding"];
+const APP_SHELL_ROUTES = [
+  "/onboarding",
+  "/kanban",
+  "/issues",
+  "/analytics",
+  "/agents",
+  "/settings",
+  "/settings/project",
+  "/settings/general",
+  "/settings/agents",
+  "/settings/notifications",
+  "/settings/workflow",
+  "/settings/hotkeys",
+  "/settings/providers",
+];
 const APP_SHELL_FILES = ["/offline.html", "/manifest.webmanifest", "/favicon.png", "/icon-192.png", "/icon-512.png"];
 const API_PREFIXES = ["/api/", "/docs", "/ws"];
 
@@ -132,6 +146,43 @@ self.addEventListener("fetch", (event) => {
       });
     }
   })());
+});
+
+// ── Web Push notification handler ─────────────────────────────────────────
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+  try {
+    const data = event.data.json();
+    const title = data.title || "fifony";
+    const options = {
+      body: data.body || "",
+      icon: "/icon-192.png",
+      badge: "/favicon.png",
+      tag: data.tag || "fifony-push",
+      data: { url: data.url || "/kanban" },
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+  } catch {
+    // Malformed push payload — ignore
+  }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/kanban";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window" }).then((clients) => {
+      // Focus existing tab if open
+      for (const client of clients) {
+        if (client.url.includes(url) && "focus" in client) {
+          return client.focus();
+        }
+      }
+      // Otherwise open new tab
+      return self.clients.openWindow(url);
+    }),
+  );
 });
 
 // Broadcast offline status to all window clients

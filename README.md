@@ -200,7 +200,7 @@ Dictate issue titles and descriptions by voice. Click the microphone button next
 
 ### PWA
 
-Install as a desktop app. Offline app shell with update detection banner. Desktop notifications when issues change state (requires browser tab open). Service worker caches shell and static assets.
+Install as a desktop app. Offline app shell with update detection banner. Web push notifications for state transitions (works even with browser closed — enable in Settings > Notifications). Desktop notifications also available when tab is open. Service worker caches shell and static assets.
 
 ---
 
@@ -217,7 +217,7 @@ fifony pulls agents and skills from four open-source reference repositories duri
 
 Repositories are cloned to `~/.fifony/repositories/` and synced on demand. During onboarding, fifony scans them and recommends agents/skills matching your project's domain. You pick what to install.
 
-Agents install to `.claude/agents/` and `.codex/agents/`. Skills load from `SKILL.md` files in `.claude/skills/` or `.codex/skills/`. fifony infers the right agent from the issue description and target file paths — capability routing is automatic.
+Agents install to `.claude/agents/` and `.codex/agents/`. Skills load from `SKILL.md` files in `.claude/skills/` or `.codex/skills/`. fifony exposes workspace-local capability discovery and matching from issue text and target file paths so clients can suggest the right agent, skill, or command.
 
 ```bash
 # Manage reference repositories from the CLI
@@ -328,7 +328,7 @@ FIFONY_LOG_FILE=0                     # set to 1 to also write .fifony/fifony-lo
 | **Analytics** | `EventualConsistencyPlugin` tracks token usage, code churn (lines added/removed), and event counts with daily cohort rollups. |
 | **Agents** | Wraps local CLIs (Claude, Codex, Gemini). Per-stage provider, model, and reasoning effort. No proprietary model logic. |
 | **Isolation** | Each issue gets its own git worktree branch. Parallel work on the same repo without file conflicts. |
-| **Routing** | Capability labels derived from issue text and file paths drive automatic agent/provider selection. |
+| **Routing** | Capability matching derives suggested agents, skills, and commands from issue text and file paths. Provider/stage selection still comes from workflow configuration. |
 
 ---
 

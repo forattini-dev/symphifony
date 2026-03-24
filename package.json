@@ -33,6 +33,7 @@
     "prepack": "pnpm build",
     "prepublishOnly": "pnpm build",
     "mcp": "pnpm prompts:generate && node ./bin/fifony.js mcp",
+    "lint": "tsx ./scripts/lint.ts",
     "test": "node --import tsx/esm --test 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "release:check": "bash scripts/release-check.sh"
@@ -69,6 +70,7 @@
     "react-hotkeys-hook": "^5.2.4",
     "recker": "^1.0.86",
     "s3db.js": "21.3.16",
+    "web-push": "^3.6.7",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

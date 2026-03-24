@@ -11,8 +11,10 @@ import {
   applyPersistedSettings,
   loadRuntimeSettings,
   persistDetectedProvidersSetting,
+  persistSetting,
   syncRuntimeConfigSettings,
 } from "./persistence/settings.ts";
+import { initWebPush } from "./domains/web-push.ts";
 import { buildQueueTitle, detectProjectName, resolveProjectMetadata } from "./domains/project.ts";
 import {
   detectAvailableProviders,
@@ -238,6 +240,22 @@ async function main() {
   }
 
   installGracefulShutdown(state);
+
+  // Initialize web push (generates VAPID keys on first run)
+  try {
+    const settings = await loadRuntimeSettings();
+    await initWebPush(
+      async (id) => settings.find((s) => s.id === id)?.value,
+      async (id, value, scope) => {
+        const normalizedScope = scope === "runtime" || scope === "providers" || scope === "ui" || scope === "system"
+          ? scope
+          : "system";
+        await persistSetting(id, value, { scope: normalizedScope, source: "system" });
+      },
+    );
+  } catch (err) {
+    logger.warn({ err: String(err) }, "[Boot] Web push init failed — push notifications disabled");
+  }
 
   logger.info("[Boot] Runtime ready");
   hydrateTokenLedger(state.issues);
