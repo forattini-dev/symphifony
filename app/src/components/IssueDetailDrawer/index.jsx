@@ -269,7 +269,8 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
   }, [tab]);
 
   if (!issue && !visible) return null;
-  const displayIssue = issue || {};
+  if (!issue) return null;
+  const displayIssue = issue;
   const isPendingPlanning = issue?.state === "Planning" && !issue?.plan && !issue?.planningError && issue?.planningStatus !== "planning";
 
   return (
