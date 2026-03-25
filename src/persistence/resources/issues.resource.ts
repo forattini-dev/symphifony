@@ -238,7 +238,7 @@ export default {
     assignedToWorker: "boolean|required",
     createdAt: "datetime|required",
     updatedAt: "datetime|required",
-    history: "json|required",
+    history: "json|optional",
     startedAt: "datetime|optional",
     completedAt: "datetime|optional",
     attempts: "number|required",
