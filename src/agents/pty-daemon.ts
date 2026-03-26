@@ -25,7 +25,7 @@
  *   commandSlice   First 200 chars of the original command (for PID file)
  */
 
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import type { Socket } from "node:net";
@@ -91,6 +91,10 @@ async function main(): Promise<void> {
   let outputTail = "";
   const OUTPUT_RING_CHARS = 300_000; // ~300KB ring buffer for reattach
 
+  const MAX_LOG_BYTES = 10 * 1024 * 1024;    // rotate when file reaches 10MB
+  const TARGET_LOG_BYTES = 5 * 1024 * 1024;  // keep last 5MB after rotation
+  let bytesWritten = 0;
+
   const server = createServer((socket) => {
     clients.add(socket);
     socket.on("close", () => clients.delete(socket));
@@ -153,7 +157,19 @@ async function main(): Promise<void> {
 
   ptyProcess.onData((data) => {
     outputTail = appendTail(outputTail, data, OUTPUT_RING_CHARS);
-    try { appendFileSync(liveLogFile, data); } catch {}
+    const encoded = Buffer.from(data);
+    try { appendFileSync(liveLogFile, encoded); } catch {}
+    bytesWritten += encoded.length;
+    // Rotate: when file hits 10MB, keep only the last 5MB
+    if (bytesWritten >= MAX_LOG_BYTES) {
+      try {
+        const content = readFileSync(liveLogFile);
+        if (content.length > TARGET_LOG_BYTES) {
+          writeFileSync(liveLogFile, content.slice(content.length - TARGET_LOG_BYTES));
+        }
+      } catch {}
+      bytesWritten = 0;
+    }
     broadcast(JSON.stringify({ t: "d", v: data }) + "\n");
   });
 
