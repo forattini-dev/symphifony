@@ -11,6 +11,8 @@ Ele deve concentrar:
 - job files e watcher de processo
 - semântica de `plan`, `execute`, `review`, `retry`, `re-review`
 - política de `harnessMode`
+- calibração adaptativa de `harnessMode` usando histórico de `contractNegotiationRuns` e `reviewRuns`
+- calibração adaptativa de `checkpointPolicy` usando histórico de checkpoint review e final review
 - contract negotiation planner↔reviewer antes da execução quando o plano é `contractual`
 - seleção do perfil do evaluator por tipo de issue/risco
 - roteamento explícito de provider por fase (`execute` vs `review`)
@@ -30,7 +32,7 @@ Ele deve concentrar:
 
 - dispatch guard `canDispatchAgent`
 - execução das fases `runPlanPhase`, `runExecutePhase`, `runReviewPhase`
-- watcher de crash de processos
+- watcher de crash de processos via stale check (`ensureNotStale`) e `recoverOrphans` na boot
 - derivação de operação semântica do agente
 - requeue automático quando review falha
 - budget de auto retries por review
@@ -45,6 +47,7 @@ Ele deve concentrar:
 - integração de `checkpointPolicy`
   `checkpointed`: o `fsm-agent` roda um checkpoint review real entre `execute` e `Reviewing`
   falha no checkpoint volta para `Queued` ou `Blocked` sem passar pelo review final
+  `final_only`: mantém contract negotiation e review final, mas evita o gate intermediário quando checkpoint não mostra lift suficiente
 - roteamento explícito por fase
   `execute` usa somente providers de execução
   `review` resolve um reviewer dedicado, separado do pipeline de execução
@@ -60,6 +63,12 @@ Ele deve concentrar:
 - trilha de política do harness
   quando o FSM muda `harnessMode` ou troca rework por replan, ele registra a decisão em `policyDecisions`
   isso torna a política auditável na issue, em vez de ficar implícita só em events soltos
+- adaptive harness policy orientada por histórico real
+  a seleção de `harnessMode` passou a considerar não só gate pass e first-pass review, mas também o quanto o `contract negotiation`
+  costuma encontrar concerns bloqueantes e forçar refinamentos para aquele profile de review
+- adaptive checkpoint policy orientada por histórico real
+  o `checkpointPolicy` deixou de ser sinónimo de `contractual`
+  o FSM agora pode manter um plano `contractual` com `final_only` quando o contrato já puxa a qualidade para cima e o checkpoint não agrega lift
 - policy enforcement do `grading_report`
   critérios bloqueantes em falta viram `FAIL`
   critérios advisory em falta viram `SKIP` estruturado
@@ -104,6 +113,16 @@ Não devem viver aqui:
   rotas e bootstrap; o plugin permanece com as regras de máquina de estado.
 - [src/agents/adapters](/home/cyber/Work/FF/fifony/src/agents/adapters)
   Cada provider CLI já tem wrapper próprio: `claude.ts`, `codex.ts`, `gemini.ts` implementam compilação de comando, parser de saída e integração de schema. O harness referencia apenas o contrato do adapter.
+
+- [src/agents/command-executor.ts](/home/cyber/Work/FF/fifony/src/agents/command-executor.ts)
+  Infraestrutura de execução do CLI: spawn via PTY daemon (detached, sobrevive a crashes),
+  inline PTY (fallback) ou bare spawn (Docker). Reattach automático a daemon vivo na boot.
+  `writeToDaemon()` injeta texto no PTY stdin para slash commands em tempo real.
+  Ver [docs/PTY-daemon.md](/home/cyber/Work/FF/fifony/docs/PTY-daemon.md) para modelo completo.
+
+- [src/agents/pid-manager.ts](/home/cyber/Work/FF/fifony/src/agents/pid-manager.ts)
+  Tracking de PID do agente e do daemon PTY. `isAgentStillRunning()` verifica daemon antes
+  do PID bare. `issueHasResumableSession()` retorna `true` apenas se o processo está vivo de facto.
 
 ## Contrato da fronteira (nova)
 
