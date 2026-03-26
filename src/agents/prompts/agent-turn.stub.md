@@ -1,6 +1,16 @@
 Continue working on {{issueIdentifier}}.
 Turn {{turnIndex}} of {{maxTurns}}.
 
+{{#if isFinalTurns}}
+⚠️ **Turn budget warning: {{turnsRemaining}} turn(s) remaining.**
+This is one of your last turns. Prioritize delivering working, testable code over perfection.
+If the issue cannot be completed in {{turnsRemaining}} turn(s), write a `fifony-result.json` with `"status": "blocked"` and a clear summary of what remains.
+{{/if}}
+{{#if isContextPressure}}
+⚠️ **Context pressure: ~{{contextWindowPct}}% of context window used.**
+Avoid loading large files unnecessarily. Prefer targeted edits over full rewrites. If helpful, write a checkpoint file summarizing progress so far.
+{{/if}}
+
 Base objective:
 {{basePrompt}}
 

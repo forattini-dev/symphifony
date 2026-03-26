@@ -24,10 +24,24 @@ import {
   buildProviderSessionKey,
 } from "./session-state.ts";
 import { readAgentDirective, addTokenUsage } from "./directive-parser.ts";
-import { buildTurnPrompt, buildProviderBasePrompt, buildRetryContext } from "./prompt-builder.ts";
+import { buildTurnPrompt, buildProviderBasePrompt, buildRetryContext, resolveContextWindow } from "./prompt-builder.ts";
 import { runCommandWithTimeout, runHook } from "./command-executor.ts";
 import { record as recordTokens } from "../domains/tokens.ts";
 import { buildContextMarkdown, buildTraceFromContext } from "./context-engine.ts";
+import { markIssueDirty } from "../persistence/dirty-tracker.ts";
+import {
+  attachNodeArtifacts,
+  BLUEPRINT_EXECUTION_NODE_IDS,
+  buildBlueprintBrief,
+  buildHarnessBlueprint,
+  finalizeBlueprintRun,
+  shouldRunBlueprintNode,
+  startBlueprintRun,
+  summarizeDeterministicNode,
+  updateBlueprintNodeRun,
+  writeBlueprintArtifact,
+  writeBlueprintJsonArtifact,
+} from "./blueprints.ts";
 
 /** Compute the versioned stdout output filename for a given phase/version/attempt/turn. */
 function resolveOutputFileName(role: string, planVersion: number, attempt: number, turn: number): string {
@@ -100,6 +114,11 @@ export async function runAgentSession(
       markdown: "",
     };
   });
+  issue.contextReportsByRole = {
+    ...(issue.contextReportsByRole ?? {}),
+    [provider.role]: "report" in contextResult.pack ? contextResult.pack.report : undefined,
+  };
+  markIssueDirty(issue.id);
   const effectiveBasePrompt = contextResult.markdown
     ? `${contextResult.markdown}\n\n${basePromptText}`
     : basePromptText;
@@ -190,6 +209,39 @@ export async function runAgentSession(
       parts.push(`| cumulative: ${cumulative.totalTokens.toLocaleString()}`);
     }
     addEvent(state, issue.id, "info", parts.join(" "));
+  }
+
+  // Context overflow detection — check after each turn so the next turn's prompt
+  // can steer the agent toward checkpointing before context is fully exhausted.
+  // Also catches explicit context_length_exceeded signals in the CLI output.
+  const ctxOverflowSignals = [
+    "context_length_exceeded",
+    "context window",
+    "too many tokens",
+    "maximum context",
+    "prompt is too long",
+  ];
+  const hasOverflowSignal = ctxOverflowSignals.some((s) =>
+    turnResult.output.toLowerCase().includes(s),
+  );
+  const cumulativeTokens = issue.tokenUsage?.totalTokens ?? 0;
+  const contextWindow = resolveContextWindow(issue.tokenUsage?.model);
+  const contextPct = contextWindow ? Math.round((cumulativeTokens / contextWindow) * 100) : null;
+  const isNearLimit = (contextPct !== null && contextPct >= 80) || hasOverflowSignal;
+  if (isNearLimit && directive.status === "continue") {
+    const reason = hasOverflowSignal
+      ? "Context overflow signal detected in output"
+      : `Context at ~${contextPct}% (${cumulativeTokens.toLocaleString()} / ${contextWindow?.toLocaleString()} tokens)`;
+    logger.warn({ issueId: issue.id, identifier: issue.identifier, turn: turnIndex, contextPct, reason }, "[Agent] Context pressure — steering next turn toward checkpoint");
+    addEvent(state, issue.id, "warn", `Context pressure on turn ${turnIndex}: ${reason}. Next turn will prioritize checkpointing.`);
+    // Override nextPrompt to steer the agent toward compacting its work
+    nextPrompt = [
+      nextPrompt,
+      "",
+      "IMPORTANT: Context is nearly full. Before continuing any new work:",
+      "1. Write a `checkpoint.md` file summarizing: what has been done, what files were changed, and what remains.",
+      "2. Keep all subsequent operations minimal and targeted.",
+    ].join("\n").trim();
   }
 
   // Accumulate tools/skills/agents/commands used across turns
@@ -286,9 +338,18 @@ export async function runAgentPipeline(
 
   // Compile plan-aware execution if plan exists
   const compiled = await compileExecution(issue, activeProvider, state.config, workspacePath, skillContext, capabilitiesManifest);
+  const blueprint = issue.plan ? buildHarnessBlueprint(issue.plan, state.config) : null;
+  const blueprintRun = blueprint ? startBlueprintRun(issue, blueprint, "execute") : null;
+  if (issue.plan && blueprint) {
+    issue.plan.blueprint = blueprint;
+    issue.plan.executionContract.blueprintId = blueprint.id;
+    issue.plan.executionContract.delegationPolicy = blueprint.delegationPolicy;
+    issue.plan.executionContract.budgetPolicy = blueprint.budgetPolicy;
+  }
 
   let providerPrompt: string;
   let effectiveProvider = activeProvider;
+  let implementInputsArtifact = null;
 
   if (compiled) {
     providerPrompt = compiled.prompt;
@@ -301,6 +362,26 @@ export async function runAgentPipeline(
       const envFile = join(workspacePath, ".compiled-env.sh");
       const envLines = Object.entries(compiled.env).map(([k, v]) => `export ${k}=${JSON.stringify(v)}`).join("\n");
       writeFileSync(envFile, envLines, "utf8");
+    }
+    if (blueprint && blueprintRun) {
+      implementInputsArtifact = writeBlueprintJsonArtifact(
+        workspacePath,
+        blueprintRun.id,
+        BLUEPRINT_EXECUTION_NODE_IDS.implement,
+        "inputs",
+        {
+          command: compiled.command,
+          env: compiled.env,
+          adapter: compiled.meta.adapter,
+          model: compiled.meta.model,
+          reasoningEffort: compiled.meta.reasoningEffort,
+          subagentsRequested: compiled.meta.subagentsRequested,
+          validationHooks: {
+            pre: compiled.preHooks,
+            post: compiled.postHooks,
+          },
+        },
+      );
     }
   } else {
     providerPrompt = await buildProviderBasePrompt(activeProvider, issue, basePromptText, workspacePath, skillContext, capabilitiesManifest);
@@ -321,9 +402,191 @@ export async function runAgentPipeline(
   pipeline.history.push(`[${now()}] Running ${effectiveProvider.role}:${effectiveProvider.provider} in cycle ${pipeline.cycle}${compiled ? ` [${compiled.meta.adapter} adapter]` : ""}.`);
   await persistAgentPipelineState(pipelineFile, pipeline);
 
+  if (blueprint && blueprintRun && shouldRunBlueprintNode(blueprint, BLUEPRINT_EXECUTION_NODE_IDS.ingestContext, "execute")) {
+    const contextNodeId = BLUEPRINT_EXECUTION_NODE_IDS.ingestContext;
+    updateBlueprintNodeRun(blueprintRun, contextNodeId, "running");
+    const contextResult = await buildContextMarkdown({
+      role: effectiveProvider.role,
+      title: issue.title,
+      description: issue.description,
+      issue,
+      workspacePath,
+      runtimeState: state,
+    }).catch(() => ({ pack: null, markdown: "" }));
+    const contextArtifacts = [
+      writeBlueprintArtifact(
+        workspacePath,
+        blueprintRun.id,
+        contextNodeId,
+        "summary",
+        contextResult.markdown || "# Ingest Context\n\nNo context markdown generated.\n",
+      ),
+      writeBlueprintJsonArtifact(
+        workspacePath,
+        blueprintRun.id,
+        contextNodeId,
+        "result",
+        contextResult.pack ?? { role: effectiveProvider.role, hits: [] },
+      ),
+    ];
+    attachNodeArtifacts(blueprintRun, contextNodeId, contextArtifacts);
+    updateBlueprintNodeRun(blueprintRun, contextNodeId, "completed");
+  }
+
+  if (blueprint && blueprintRun && shouldRunBlueprintNode(blueprint, BLUEPRINT_EXECUTION_NODE_IDS.hydrateRules, "execute")) {
+    const rulesNodeId = BLUEPRINT_EXECUTION_NODE_IDS.hydrateRules;
+    updateBlueprintNodeRun(blueprintRun, rulesNodeId, "running");
+    const artifacts = [
+      writeBlueprintArtifact(
+        workspacePath,
+        blueprintRun.id,
+        rulesNodeId,
+        "summary",
+        summarizeDeterministicNode("Hydrate Rules", {
+          skills: skills.map((entry) => entry.name),
+          agents: agents.map((entry) => entry.name),
+          commands: commands.map((entry) => entry.name),
+        }),
+      ),
+      writeBlueprintArtifact(
+        workspacePath,
+        blueprintRun.id,
+        rulesNodeId,
+        "result",
+        capabilitiesManifest || "# Capabilities\n\nNo capabilities manifest generated.\n",
+      ),
+    ];
+    attachNodeArtifacts(blueprintRun, rulesNodeId, artifacts);
+    updateBlueprintNodeRun(blueprintRun, rulesNodeId, "completed");
+  }
+
+  if (blueprint && blueprintRun) {
+    const implementNodeId = BLUEPRINT_EXECUTION_NODE_IDS.implement;
+    updateBlueprintNodeRun(blueprintRun, implementNodeId, "running");
+    const artifacts = [
+      writeBlueprintArtifact(
+        workspacePath,
+        blueprintRun.id,
+        implementNodeId,
+        "brief",
+        buildBlueprintBrief(issue, issue.plan!, blueprint, blueprint.nodes.find((entry) => entry.id === implementNodeId)!, effectiveProvider),
+      ),
+    ];
+    if (implementInputsArtifact) artifacts.push(implementInputsArtifact);
+    attachNodeArtifacts(blueprintRun, implementNodeId, artifacts);
+  }
+
   const result = await runAgentSession(state, issue, effectiveProvider, pipeline.cycle, workspacePath, providerPrompt, basePromptFile);
 
+  if (blueprint && blueprintRun) {
+    const implementNodeId = BLUEPRINT_EXECUTION_NODE_IDS.implement;
+    const implementArtifacts = [
+      writeBlueprintArtifact(
+        workspacePath,
+        blueprintRun.id,
+        implementNodeId,
+        "result",
+        result.output || "",
+      ),
+    ];
+    if (result.continueRequested) {
+      implementArtifacts.push(
+        writeBlueprintArtifact(
+          workspacePath,
+          blueprintRun.id,
+          implementNodeId,
+          "resume",
+          `# Resume\n\nAgent requested continuation for ${issue.identifier}.\n`,
+        ),
+      );
+    }
+    attachNodeArtifacts(blueprintRun, implementNodeId, implementArtifacts);
+    updateBlueprintNodeRun(
+      blueprintRun,
+      implementNodeId,
+      result.success ? "completed" : result.blocked ? "failed" : result.continueRequested ? "running" : "failed",
+      result.success ? {} : { error: result.output.slice(-4000) },
+    );
+  }
+
   if (result.success) {
+    if (compiled && blueprint && blueprintRun && shouldRunBlueprintNode(blueprint, BLUEPRINT_EXECUTION_NODE_IDS.runLocalGates, "execute")) {
+      const localGateNodeId = BLUEPRINT_EXECUTION_NODE_IDS.runLocalGates;
+      updateBlueprintNodeRun(blueprintRun, localGateNodeId, "running");
+      const executedCommands = [...compiled.preHooks, ...compiled.postHooks];
+      const gateArtifacts = [
+        writeBlueprintArtifact(
+          workspacePath,
+          blueprintRun.id,
+          localGateNodeId,
+          "brief",
+          buildBlueprintBrief(issue, issue.plan!, blueprint, blueprint.nodes.find((entry) => entry.id === localGateNodeId)!),
+        ),
+      ];
+      attachNodeArtifacts(blueprintRun, localGateNodeId, gateArtifacts);
+
+      try {
+        for (const command of executedCommands) {
+          await runHook(command, workspacePath, issue, "blueprint_local_gate");
+        }
+        const resultArtifact = writeBlueprintArtifact(
+          workspacePath,
+          blueprintRun.id,
+          localGateNodeId,
+          "result",
+          summarizeDeterministicNode("Run Local Gates", {
+            commands: executedCommands,
+            status: executedCommands.length > 0 ? "pass" : "skipped",
+          }),
+        );
+        attachNodeArtifacts(blueprintRun, localGateNodeId, [resultArtifact]);
+        updateBlueprintNodeRun(
+          blueprintRun,
+          localGateNodeId,
+          executedCommands.length > 0 ? "completed" : "skipped",
+          executedCommands.length > 0 ? {} : { skippedReason: "No local gate commands were compiled for this plan." },
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failureArtifact = writeBlueprintArtifact(
+          workspacePath,
+          blueprintRun.id,
+          localGateNodeId,
+          "result",
+          `# Local Gate Failure\n\n${message}\n`,
+        );
+        attachNodeArtifacts(blueprintRun, localGateNodeId, [failureArtifact]);
+        updateBlueprintNodeRun(blueprintRun, localGateNodeId, "failed", { error: message });
+        finalizeBlueprintRun(blueprintRun, "failed");
+        return {
+          success: false,
+          blocked: false,
+          continueRequested: false,
+          code: result.code,
+          output: message,
+          turns: result.turns,
+          artifacts: failureArtifact ? [failureArtifact] : [],
+        };
+      }
+    }
+
+    if (blueprint && blueprintRun) {
+      const handoffNodeId = BLUEPRINT_EXECUTION_NODE_IDS.handoff;
+      updateBlueprintNodeRun(blueprintRun, handoffNodeId, "running");
+      const artifacts = [
+        writeBlueprintArtifact(
+          workspacePath,
+          blueprintRun.id,
+          handoffNodeId,
+          "resume",
+          `# Handoff\n\nExecution completed for ${issue.identifier}.\n\nNext stage: review.\n`,
+        ),
+      ];
+      attachNodeArtifacts(blueprintRun, handoffNodeId, artifacts);
+      updateBlueprintNodeRun(blueprintRun, handoffNodeId, "completed");
+      finalizeBlueprintRun(blueprintRun, "completed");
+    }
+
     if (pipeline.activeIndex < providers.length - 1) {
       pipeline.activeIndex += 1;
       pipeline.history.push(`[${now()}] ${activeProvider.role}:${activeProvider.provider} completed; advancing to next provider.`);
@@ -350,11 +613,13 @@ export async function runAgentPipeline(
   }
 
   if (result.blocked) {
+    if (blueprintRun) finalizeBlueprintRun(blueprintRun, "failed");
     pipeline.history.push(`[${now()}] ${activeProvider.role}:${activeProvider.provider} blocked the pipeline.`);
     await persistAgentPipelineState(pipelineFile, pipeline);
     return result;
   }
 
+  if (blueprintRun) finalizeBlueprintRun(blueprintRun, "failed");
   pipeline.history.push(`[${now()}] ${activeProvider.role}:${activeProvider.provider} failed the pipeline.`);
   await persistAgentPipelineState(pipelineFile, pipeline);
   return result;

@@ -97,6 +97,35 @@ export async function buildPrompt(issue: IssueEntry, _workflowDefinition: null):
   return `${rendered}\n\n${planSection}`;
 }
 
+// Approximate context window sizes by model name fragment (conservative lower bounds).
+// Used to compute context pressure % when the provider doesn't surface this directly.
+const CONTEXT_WINDOW_BY_MODEL: Array<[string, number]> = [
+  ["claude-3-5", 200_000],
+  ["claude-3-7", 200_000],
+  ["claude-opus-4", 200_000],
+  ["claude-sonnet-4", 200_000],
+  ["claude-haiku-4", 200_000],
+  ["claude", 200_000],
+  ["gemini-2.5", 1_000_000],
+  ["gemini-2.0", 1_000_000],
+  ["gemini-1.5", 1_000_000],
+  ["gemini", 128_000],
+  ["gpt-4o", 128_000],
+  ["gpt-4", 128_000],
+  ["o1", 200_000],
+  ["o3", 200_000],
+  ["codex", 128_000],
+];
+
+export function resolveContextWindow(model: string | undefined): number | null {
+  if (!model) return null;
+  const lc = model.toLowerCase();
+  for (const [fragment, size] of CONTEXT_WINDOW_BY_MODEL) {
+    if (lc.includes(fragment)) return size;
+  }
+  return null;
+}
+
 export async function buildTurnPrompt(
   issue: IssueEntry,
   basePrompt: string,
@@ -107,10 +136,25 @@ export async function buildTurnPrompt(
 ): Promise<string> {
   if (turnIndex === 1) return basePrompt;
 
+  const turnsRemaining = maxTurns - turnIndex + 1;
+  const isFinalTurns = turnsRemaining <= 2;
+
+  // Compute context pressure from accumulated token usage
+  const cumulativeTokens = issue.tokenUsage?.totalTokens ?? 0;
+  const contextWindow = resolveContextWindow(issue.tokenUsage?.model);
+  const contextWindowPct = contextWindow && cumulativeTokens > 0
+    ? Math.round((cumulativeTokens / contextWindow) * 100)
+    : null;
+  const isContextPressure = contextWindowPct !== null && contextWindowPct >= 70;
+
   return renderPrompt("agent-turn", {
     issueIdentifier: issue.identifier,
     turnIndex,
     maxTurns,
+    turnsRemaining,
+    isFinalTurns,
+    isContextPressure,
+    contextWindowPct: contextWindowPct ?? 0,
     basePrompt,
     continuation: nextPrompt.trim() || "Continue the work, inspect the workspace, and move the issue toward completion.",
     outputTail: previousOutput.trim() || "No previous output captured.",
