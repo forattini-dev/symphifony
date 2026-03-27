@@ -3,11 +3,9 @@ import {
   FolderRoot,
   ListOrdered,
   Cpu,
-  ShieldCheck,
   Bell,
   Users,
   SlidersHorizontal,
-  Palette,
   Settings,
   Server,
 } from "lucide-react";
@@ -16,12 +14,10 @@ const TABS = [
   { to: "/settings/project",       label: "Project",       icon: FolderRoot },
   { to: "/settings/pipeline",      label: "Pipeline",      icon: ListOrdered },
   { to: "/settings/execution",     label: "Execution",     icon: Cpu },
-  { to: "/settings/quality",       label: "Quality",       icon: ShieldCheck },
-  { to: "/settings/agents",        label: "Agents",        icon: Users },
+  { to: "/settings/agents",        label: "Assets",        icon: Users },
   { to: "/settings/services",      label: "Services",      icon: Server },
   { to: "/settings/notifications", label: "Notifications", icon: Bell },
   { to: "/settings/providers",     label: "Providers",     icon: SlidersHorizontal },
-  { to: "/settings/appearance",    label: "Appearance",    icon: Palette },
   { to: "/settings/system",        label: "System",        icon: Settings },
 ];
 

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useHotkeysContext } from "react-hotkeys-hook";
 import { useDashboard } from "../../context/DashboardContext";
-import { ConnectionSection, PwaSection, SetupWizardSection } from "../../components/SettingsView";
+import { ConnectionSection, PwaSection, SetupWizardSection, ThemeSection } from "../../components/SettingsView";
 import { Keyboard, Command, Globe, PanelRight, Columns3, List, FlaskConical, Trash2, Loader2 } from "lucide-react";
 import { api } from "../../api.js";
 import { useRuntimeDoctor, useRuntimeProbe, useRuntimeStatus } from "../../hooks.js";
@@ -377,6 +377,7 @@ function SystemSettings() {
 
       <DevProfileCard />
       <RuntimeHealthCard />
+      <ThemeSection theme={ctx.theme} onThemeChange={ctx.setTheme} />
     </div>
   );
 }

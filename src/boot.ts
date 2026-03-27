@@ -31,6 +31,7 @@ import {
   reconcileManagedServiceStates,
   startAutoConfiguredServices,
   initManagedServiceWatcher,
+  listServiceStatuses,
 } from "./domains/services.ts";
 import {
   reconcileAgentStateTransitions,
@@ -309,7 +310,11 @@ async function main() {
     );
     for (const t of autoStartTransitions) {
       logger.info({ id: t.id, command: t.to }, "[Boot] Service auto-started");
-      startServiceLogBroadcasting(t.id, STATE_ROOT);
+    }
+    // Start log broadcaster for every currently-running service
+    // (covers both auto-started and services already running from a prior session)
+    for (const status of listServiceStatuses(services, STATE_ROOT)) {
+      if (status.running) startServiceLogBroadcasting(status.id, STATE_ROOT);
     }
   } catch (err) {
     logger.warn({ err }, "[Boot] Service init failed — continuing");

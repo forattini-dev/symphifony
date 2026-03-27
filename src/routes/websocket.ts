@@ -12,6 +12,39 @@ export const wsClients = new Map<string, WsSendFn>(); // socketId → send
 export let broadcastSeq = 0;
 export let lastBroadcastIssueSnapshot: Map<string, string> = new Map(); // id → JSON
 
+// ── Service log rooms ─────────────────────────────────────────────────────────
+// Clients subscribe to a specific service's log stream.
+// Chunks are only sent to subscribed clients — not broadcasted to everyone.
+
+const serviceLogRooms = new Map<string, Set<string>>(); // serviceId → Set<socketId>
+
+export function subscribeServiceLogRoom(socketId: string, serviceId: string): void {
+  if (!serviceLogRooms.has(serviceId)) serviceLogRooms.set(serviceId, new Set());
+  serviceLogRooms.get(serviceId)!.add(socketId);
+}
+
+export function unsubscribeServiceLogRoom(socketId: string, serviceId: string): void {
+  serviceLogRooms.get(serviceId)?.delete(socketId);
+}
+
+export function unsubscribeFromAllRooms(socketId: string): void {
+  for (const room of serviceLogRooms.values()) room.delete(socketId);
+}
+
+export function serviceLogRoomSize(serviceId: string): number {
+  return serviceLogRooms.get(serviceId)?.size ?? 0;
+}
+
+export function sendToServiceLogRoom(serviceId: string, data: string): void {
+  const room = serviceLogRooms.get(serviceId);
+  if (!room || room.size === 0) return;
+  for (const socketId of [...room]) {
+    const send = wsClients.get(socketId);
+    if (!send) { room.delete(socketId); continue; }
+    try { send(data); } catch { wsClients.delete(socketId); room.delete(socketId); }
+  }
+}
+
 export function sendToAllClients(data: string): void {
   for (const [socketId, send] of [...wsClients]) {
     try { send(data); } catch (error) {
@@ -106,16 +139,23 @@ export function makeWebSocketConfig(state: RuntimeState) {
         logger.debug(`WebSocket initial send failed for ${socketId}: ${String(error)}`);
       }
     },
-    onMessage: (_socketId: string, message: string | Buffer, send: WsSendFn) => {
+    onMessage: (socketId: string, message: string | Buffer, send: WsSendFn) => {
       try {
         const msg = JSON.parse(typeof message === "string" ? message : message.toString("utf8"));
         if (msg.type === "ping") {
           send(JSON.stringify({ type: "pong", timestamp: now() }));
+        } else if (msg.type === "service:log:subscribe" && typeof msg.id === "string") {
+          subscribeServiceLogRoom(socketId, msg.id);
+          logger.debug({ socketId, serviceId: msg.id }, "[WebSocket] Subscribed to service log room");
+        } else if (msg.type === "service:log:unsubscribe" && typeof msg.id === "string") {
+          unsubscribeServiceLogRoom(socketId, msg.id);
+          logger.debug({ socketId, serviceId: msg.id }, "[WebSocket] Unsubscribed from service log room");
         }
       } catch {}
     },
     onClose: (socketId: string) => {
       wsClients.delete(socketId);
+      unsubscribeFromAllRooms(socketId);
       logger.debug(`WebSocket client disconnected: ${socketId} (total: ${wsClients.size})`);
     },
   };

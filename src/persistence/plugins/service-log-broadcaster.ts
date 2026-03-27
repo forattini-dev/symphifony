@@ -12,7 +12,7 @@ import {
   watch,
   type FSWatcher,
 } from "node:fs";
-import { sendToAllClients, wsClients } from "../../routes/websocket.ts";
+import { sendToServiceLogRoom, serviceLogRoomSize } from "../../routes/websocket.ts";
 import { serviceLogPath } from "./fsm-service.ts";
 import { logger } from "../../concerns/logger.ts";
 
@@ -50,7 +50,7 @@ export function startServiceLogBroadcasting(id: string, fifonyDir: string): void
   const entry: Entry = { watcher: null!, position: 0 };
 
   const flush = () => {
-    if (wsClients.size === 0) return;
+    if (serviceLogRoomSize(id) === 0) return;
     try {
       // Reset position on truncation (new service session)
       const size = statSync(logPath).size;
@@ -59,7 +59,7 @@ export function startServiceLogBroadcasting(id: string, fifonyDir: string): void
     const result = readNewBytes(logPath, entry.position);
     if (!result) return;
     entry.position = result.newPosition;
-    sendToAllClients(JSON.stringify({ type: "service:log", id, chunk: result.chunk }));
+    sendToServiceLogRoom(id, JSON.stringify({ type: "service:log", id, chunk: result.chunk }));
   };
 
   try {

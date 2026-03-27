@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
@@ -7,10 +7,10 @@ import { SettingsSection } from "../../components/SettingsSection.jsx";
 import { RefreshCcw, Eye, RotateCcw, Check } from "lucide-react";
 
 export const Route = createFileRoute("/settings/quality")({
-  component: QualitySettings,
+  beforeLoad: () => { throw redirect({ to: "/settings/execution" }); },
 });
 
-function QualitySettings() {
+export function QualitySettingsPanel() {
   const qc = useQueryClient();
   const settingsQuery = useSettings();
   const settings = getSettingsList(settingsQuery.data);

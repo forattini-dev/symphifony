@@ -7,7 +7,7 @@ import {
 import { api } from "../../api";
 
 export const Route = createFileRoute("/settings/agents")({
-  component: AgentsSettings,
+  component: AssetsSettings,
 });
 
 const PER_PAGE = 25;
@@ -66,7 +66,7 @@ function SourcesSection({ onCatalogRefresh }) {
   return (
     <div className="card bg-base-200">
       <div className="card-body gap-3 p-4">
-        <h3 className="font-semibold text-sm">Sources</h3>
+        <h3 className="font-semibold text-sm">Asset Sources</h3>
         {error && <div className="alert alert-warning text-xs py-1">{error}</div>}
         {loading ? (
           <div className="flex items-center gap-2 text-xs opacity-60">
@@ -194,7 +194,7 @@ function CatalogBrowser() {
     setInstallError("");
 
     const tasks = [];
-    if (selectedAgents.length > 0) tasks.push({ label: "Agents", run: () => api.post("/install/agents", { agents: selectedAgents }) });
+    if (selectedAgents.length > 0) tasks.push({ label: "Assets", run: () => api.post("/install/agents", { agents: selectedAgents }) });
     if (selectedSkills.length > 0) tasks.push({ label: "Skills", run: () => api.post("/install/skills", { skills: selectedSkills }) });
 
     try {
@@ -261,7 +261,7 @@ function CatalogBrowser() {
                 onClick={() => setActiveTab("agents")}
               >
                 <Bot className="size-3 inline mr-1 -mt-0.5" />
-                Agents ({agents.length})
+                Assets ({agents.length})
               </button>
               <button
                 className={`px-3 py-1 rounded-md transition-colors ${activeTab === "skills" ? "bg-base-100 shadow-sm" : "opacity-60 hover:opacity-100"}`}
@@ -486,7 +486,7 @@ function CatalogBrowser() {
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
-function AgentsSettings() {
+function AssetsSettings() {
   const [catalogVersion, setCatalogVersion] = useState(0);
 
   return (

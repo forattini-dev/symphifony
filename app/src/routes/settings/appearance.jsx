@@ -1,12 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useDashboard } from "../../context/DashboardContext";
-import { ThemeSection } from "../../components/SettingsView";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/settings/appearance")({
-  component: AppearanceSettings,
+  beforeLoad: () => { throw redirect({ to: "/settings/system" }); },
 });
-
-function AppearanceSettings() {
-  const ctx = useDashboard();
-  return <ThemeSection theme={ctx.theme} onThemeChange={ctx.setTheme} />;
-}

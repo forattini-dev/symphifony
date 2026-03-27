@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
+import { sendWsMessage } from "../hooks.js";
 
 // ── Service log pub/sub (WebSocket push path) ───────────────────────────────
 
@@ -52,8 +53,11 @@ export function useServices({ pollInterval = 3_000 } = {}) {
 /**
  * Streams log output for a service.
  *
- * Primary path: WebSocket push via "service:log" events (zero client polling).
- * Fallback: HTTP polling every second when WS chunks haven't arrived yet.
+ * On mount: fetches the full log tail via HTTP once, then subscribes to the
+ * service's log room on the WebSocket. The server pushes new chunks as they
+ * arrive (fs.watch-driven), so there is NO client-side polling.
+ *
+ * On unmount: unsubscribes from the room so the server stops sending chunks.
  *
  * Returns { log, connected } — connected = true once first data arrives.
  */
@@ -61,31 +65,24 @@ export function useServiceLog(id, enabled = false) {
   const [log, setLog] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
-  const sizeRef = useRef(0);
-  const wsReceivedRef = useRef(false); // true after first WS chunk — disables HTTP fallback
 
   useEffect(() => {
     if (!enabled || !id) {
       setLog("");
       setConnected(false);
       setError(null);
-      sizeRef.current = 0;
-      wsReceivedRef.current = false;
       return;
     }
 
     let alive = true;
-    sizeRef.current = 0;
-    wsReceivedRef.current = false;
     setError(null);
 
     const encId = encodeURIComponent(id);
 
-    // Initial load — fetch full tail once
+    // 1. Fetch full log tail once (initial render)
     api.get(`/services/${encId}/log`).then((res) => {
       if (!alive) return;
       setLog(res.logTail ?? "");
-      if (res.logSize !== undefined) sizeRef.current = res.logSize;
       setConnected(true);
       setError(null);
     }).catch((err) => {
@@ -94,43 +91,22 @@ export function useServiceLog(id, enabled = false) {
       setError(err instanceof Error ? err.message : "Failed to load logs.");
     });
 
-    // WS subscription — primary real-time path (no polling)
+    // 2. Subscribe to the WS room — server will push chunks from now on
+    sendWsMessage({ type: "service:log:subscribe", id });
+
+    // 3. Listen for incoming chunks
     const unsub = onServiceLog(id, (chunk) => {
       if (!alive) return;
-      wsReceivedRef.current = true;
       setLog((prev) => prev + chunk);
       setConnected(true);
     });
 
-    // HTTP fallback — only runs until the first WS chunk arrives
-    const fetchIncremental = async () => {
-      if (!alive || wsReceivedRef.current) return;
-      try {
-        const after = sizeRef.current;
-        const res = after > 0
-          ? await api.get(`/services/${encId}/log?after=${after}`)
-          : await api.get(`/services/${encId}/log`);
-        if (!alive) return;
-        if (after > 0 && res.text !== undefined) {
-          if (res.text) setLog((prev) => prev + res.text);
-        } else if (res.logTail !== undefined) {
-          setLog(res.logTail ?? "");
-        }
-        if (res.logSize !== undefined) sizeRef.current = res.logSize;
-        setConnected(true);
-      } catch { /* non-critical */ }
-    };
-
-    const pollId = setInterval(fetchIncremental, 1_000);
-
     return () => {
       alive = false;
-      clearInterval(pollId);
+      sendWsMessage({ type: "service:log:unsubscribe", id });
       unsub();
       setConnected(false);
       setError(null);
-      sizeRef.current = 0;
-      wsReceivedRef.current = false;
     };
   }, [id, enabled]);
 

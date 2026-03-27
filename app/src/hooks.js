@@ -41,6 +41,17 @@ function applyWsPayload(current, payload) {
  * Merges incoming delta/full payloads into the ["runtime-state"] query cache.
  * Returns connection status: "connected" | "connecting" | "disconnected" | "error".
  */
+// ── Module-level WS send (set by the singleton WebSocket connection) ─────────
+
+let _activeSend = null;
+
+/** Send a message on the shared runtime WebSocket. No-op if not connected. */
+export function sendWsMessage(msg) {
+  if (_activeSend) {
+    try { _activeSend(JSON.stringify(msg)); } catch {}
+  }
+}
+
 export function useRuntimeWebSocket(onMessage) {
   const [status, setStatus] = useState("disconnected");
   const qc = useQueryClient();
@@ -67,6 +78,7 @@ export function useRuntimeWebSocket(onMessage) {
 
       ws.onopen = () => {
         setStatus("connected");
+        _activeSend = (data) => ws.send(data);
         backoff = 2000; // Reset backoff on successful connection
       };
 
@@ -80,6 +92,7 @@ export function useRuntimeWebSocket(onMessage) {
 
       ws.onclose = () => {
         setStatus("disconnected");
+        _activeSend = null;
         if (alive) {
           timer = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, MAX_BACKOFF);

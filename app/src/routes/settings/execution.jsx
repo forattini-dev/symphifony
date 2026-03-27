@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
 import { useSettings, getSettingsList, getSettingValue, SETTINGS_QUERY_KEY, upsertSettingPayload } from "../../hooks.js";
 import { SettingsSection } from "../../components/SettingsSection.jsx";
+import { QualitySettingsPanel } from "./quality.jsx";
 import {
   Container, Cpu, FlaskConical, GitMerge, Check, Loader2, AlertTriangle,
 } from "lucide-react";
@@ -316,6 +317,8 @@ function ExecutionSettings() {
           <span className="label-text text-sm">{autoReviewApproval ? "Enabled" : "Disabled"}</span>
         </label>
       </SettingsSection>
+
+      <QualitySettingsPanel />
     </div>
   );
 }
