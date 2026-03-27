@@ -528,55 +528,127 @@ function ServiceDrawer({ service, onClose, onRefresh }) {
   );
 }
 
-// ── ServiceRow ─────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────────
 
-function ServiceRow({ service, selected, onSelect }) {
+function formatLogSize(bytes) {
+  if (bytes == null || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+// ── ServiceCard ─────────────────────────────────────────────────────────────────
+
+function ServiceCard({ service, selected, onSelect }) {
+  const [busy, setBusy] = useState(false);
   const state = service.state ?? (service.running ? "running" : "stopped");
   const info = stateInfo(state);
+  const canStart = state === "stopped" || state === "crashed";
+  const canStop = state === "running" || state === "starting";
+
+  const handleAction = useCallback(async (e, action) => {
+    e.stopPropagation();
+    setBusy(true);
+    try { await api.post(`/services/${service.id}/${action}`, {}); }
+    finally { setBusy(false); }
+  }, [service.id]);
+
+  const logSizeStr = formatLogSize(service.logSize);
 
   return (
     <button
       type="button"
       onClick={() => onSelect(service.id)}
-      className={`group w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-base-200/80 last:border-b-0 transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30
-        ${selected ? "bg-base-200" : "hover:bg-base-200/50"}`}
+      className={`group relative text-left border-l-2 ${info.strip} rounded-sm bg-base-100 transition-all duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30
+        ${selected ? "ring-1 ring-primary/40 bg-base-200/60" : "hover:bg-base-200/40"}`}
     >
-      {/* State indicator */}
-      <Circle className={`size-2 shrink-0 ${info.dot} ${info.spinning ? "animate-pulse" : ""}`} />
+      <div className="px-3 py-2.5">
+        {/* Row 1: name + state badge */}
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="font-semibold text-sm leading-none truncate flex-1 min-w-0">{service.name}</span>
+          <span className={`badge badge-xs shrink-0 ${info.badge} leading-none`}>
+            {info.spinning && <Loader2 className="size-2.5 animate-spin mr-0.5" />}
+            {info.label}
+          </span>
+        </div>
 
-      {/* Name + command */}
-      <div className="min-w-0 flex-1">
-        <div className="font-medium text-sm leading-none mb-1 truncate">{service.name}</div>
-        <div className="font-mono text-[11px] opacity-30 truncate">{service.command}</div>
+        {/* Row 2: command */}
+        <div className="font-mono text-[10px] opacity-25 truncate mb-2 leading-none">{service.command}</div>
+
+        {/* Row 3: stats */}
+        <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[10px] tabular-nums opacity-40 leading-tight">
+          {service.running && service.startedAt && (
+            <span className="flex items-center gap-1">
+              <span className="opacity-60">up</span>
+              <UptimeCounter startedAt={service.startedAt} running />
+            </span>
+          )}
+          {service.pid && state === "running" && (
+            <span><span className="opacity-60">pid</span> {service.pid}</span>
+          )}
+          {service.port && (
+            <span><span className="opacity-60">:</span>{service.port}</span>
+          )}
+          {logSizeStr && (
+            <span><span className="opacity-60">log</span> {logSizeStr}</span>
+          )}
+          {service.crashCount > 0 && (
+            <span className="text-error/70 flex items-center gap-0.5">
+              <AlertTriangle className="size-2.5" />{service.crashCount}
+            </span>
+          )}
+          {service.autoStart && (
+            <span className="opacity-40">auto</span>
+          )}
+        </div>
       </div>
 
-      {/* Uptime — visible on wider columns */}
-      {service.running && service.startedAt && (
-        <span className="hidden xl:block text-xs tabular-nums opacity-30 shrink-0">
-          <UptimeCounter startedAt={service.startedAt} running />
-        </span>
-      )}
-
-      {/* Badge */}
-      <span className={`badge badge-xs shrink-0 ${info.badge}`}>{info.label}</span>
-
-      {/* Chevron */}
-      <ChevronRight className={`size-3 shrink-0 transition-opacity duration-150 ${selected ? "opacity-40" : "opacity-0 group-hover:opacity-20"}`} />
+      {/* Quick actions — visible on hover */}
+      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-100">
+        {canStart && (
+          <span
+            role="button"
+            tabIndex={-1}
+            className="btn btn-xs btn-ghost h-5 min-h-0 w-5 p-0 text-success hover:bg-success/10"
+            onClick={(e) => handleAction(e, "start")}
+            title="Start"
+          >
+            {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+          </span>
+        )}
+        {canStop && (
+          <span
+            role="button"
+            tabIndex={-1}
+            className="btn btn-xs btn-ghost h-5 min-h-0 w-5 p-0 text-error hover:bg-error/10"
+            onClick={(e) => handleAction(e, "stop")}
+            title="Stop"
+          >
+            {busy ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+          </span>
+        )}
+      </div>
     </button>
   );
 }
 
-// ── SkeletonRow ────────────────────────────────────────────────────────────────
+// ── SkeletonCard ────────────────────────────────────────────────────────────────
 
-function SkeletonRow() {
+function SkeletonCard() {
   return (
-    <div className="flex items-center gap-3 px-4 py-3.5 border-b border-base-200/80 animate-pulse">
-      <div className="size-2 rounded-full bg-base-300 shrink-0" />
-      <div className="flex-1 space-y-1.5 min-w-0">
-        <div className="h-3 w-24 rounded bg-base-300" />
-        <div className="h-2 w-40 rounded bg-base-300" />
+    <div className="border-l-2 border-base-300 rounded-sm bg-base-100 animate-pulse">
+      <div className="px-3 py-2.5">
+        <div className="flex items-center gap-2 mb-1.5">
+          <div className="h-3.5 w-24 rounded bg-base-300 flex-1 max-w-[8rem]" />
+          <div className="h-4 w-12 rounded-full bg-base-300 shrink-0" />
+        </div>
+        <div className="h-2.5 w-36 rounded bg-base-300 mb-2" />
+        <div className="flex items-center gap-3">
+          <div className="h-2.5 w-12 rounded bg-base-300" />
+          <div className="h-2.5 w-10 rounded bg-base-300" />
+          <div className="h-2.5 w-14 rounded bg-base-300" />
+        </div>
       </div>
-      <div className="h-4 w-14 rounded-full bg-base-300 shrink-0" />
     </div>
   );
 }
@@ -615,66 +687,81 @@ function ServicesPage() {
   const runningCount = services.filter((s) => s.running).length;
 
   return (
-    <div className="flex-1 flex min-h-0 overflow-hidden">
-      {/* ── Left: service list ──────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-base-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <Server className="size-3.5 opacity-35" />
-            <span className="text-xs font-semibold opacity-55 uppercase tracking-widest">Services</span>
-            {!loading && services.length > 0 && (
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-base-200 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <Server className="size-3.5 opacity-35" />
+          <span className="text-xs font-semibold opacity-55 uppercase tracking-widest">Services</span>
+          {!loading && services.length > 0 && (
+            <div className="flex items-center gap-1.5">
               <span className="text-[11px] opacity-30 tabular-nums">{runningCount}/{services.length}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            {services.length > 0 && !allRunning && (
-              <button className="btn btn-xs btn-ghost opacity-50 hover:opacity-90" onClick={handleStartAll}>
-                Start all
-              </button>
-            )}
-            {anyRunning && (
-              <button className="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-90" onClick={handleStopAll}>
-                Stop all
-              </button>
-            )}
-          </div>
+              <div className="w-16 h-1 rounded-full bg-base-300 overflow-hidden">
+                <div
+                  className="h-full bg-success/60 rounded-full transition-all duration-300"
+                  style={{ width: `${(runningCount / services.length) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
+        <div className="flex items-center gap-1">
+          {services.length > 0 && !allRunning && (
+            <button className="btn btn-xs btn-ghost opacity-50 hover:opacity-90" onClick={handleStartAll}>
+              Start all
+            </button>
+          )}
+          {anyRunning && (
+            <button className="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-90" onClick={handleStopAll}>
+              Stop all
+            </button>
+          )}
+        </div>
+      </div>
 
+      {/* Grid content area */}
+      <div className="flex-1 overflow-y-auto p-3">
         {/* Loading */}
         {loading && (
-          <>
-            <SkeletonRow />
-            <SkeletonRow />
-            <SkeletonRow />
-          </>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
         )}
 
         {/* Empty */}
         {!loading && services.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12">
+          <div className="flex flex-col items-center justify-center gap-3 px-6 py-16">
             <Server className="size-8 opacity-10" />
             <div className="text-center">
               <p className="text-sm font-medium opacity-60">No services configured</p>
               <p className="text-xs opacity-35 mt-1">
-                Add services in Settings → Services to manage them here.
+                Add services in Settings to manage them here.
               </p>
             </div>
           </div>
         )}
 
-        {/* Rows */}
-        {services.map((service) => (
-          <ServiceRow
-            key={service.id}
-            service={service}
-            selected={service.id === selectedId}
-            onSelect={handleSelect}
-          />
-        ))}
+        {/* Cards grid */}
+        {!loading && services.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {services.map((service) => (
+              <ServiceCard
+                key={service.id}
+                service={service}
+                selected={service.id === selectedId}
+                onSelect={handleSelect}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* ── Overlay drawer ─────────────────────────────────────────────────── */}
+      {/* Overlay drawer */}
       {selectedService && (
         <ServiceDrawer
           key={selectedService.id}
