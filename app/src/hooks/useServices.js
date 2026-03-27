@@ -18,9 +18,19 @@ export function dispatchServiceLog(id, chunk) {
   for (const cb of serviceLogSubs.get(id) ?? []) cb(chunk);
 }
 
+// ── Service state pub/sub (WebSocket push path) ──────────────────────────────
+
+const serviceStateSubs = new Set(); // Set<(update: {id, state, running, pid}) => void>
+
+/** Called by DashboardContext when a "service" WS message arrives. */
+export function dispatchServiceUpdate(update) {
+  for (const cb of serviceStateSubs) cb(update);
+}
+
 /**
  * Fetches all service statuses and polls at `pollInterval` ms.
  * Pass `pollInterval: false` (or 0) to disable polling — use when WS is connected.
+ * Regardless of polling, always patches state from WS "service" messages instantly.
  */
 export function useServices({ pollInterval = 3_000 } = {}) {
   const [services, setServices] = useState([]);
@@ -46,6 +56,17 @@ export function useServices({ pollInterval = 3_000 } = {}) {
     const id = setInterval(fetchAll, pollInterval);
     return () => clearInterval(id);
   }, [fetchAll, pollInterval]);
+
+  // Patch individual service state from WS push — instant, no re-fetch needed
+  useEffect(() => {
+    const handler = ({ id, state, running, pid }) => {
+      setServices((prev) =>
+        prev.map((s) => s.id === id ? { ...s, state, running, pid: pid ?? s.pid } : s)
+      );
+    };
+    serviceStateSubs.add(handler);
+    return () => serviceStateSubs.delete(handler);
+  }, []);
 
   return { services, loading, refresh: fetchAll };
 }

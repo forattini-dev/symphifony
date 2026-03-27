@@ -18,7 +18,7 @@ import {
   SETTING_ID_UI_EVENTS_ISSUE_ID,
 } from "../hooks";
 import { useNotifications } from "../hooks/useNotifications";
-import { dispatchServiceLog } from "../hooks/useServices.js";
+import { dispatchServiceLog, dispatchServiceUpdate } from "../hooks/useServices.js";
 import { dispatchIssueLog } from "../hooks/useIssueLog.js";
 import { STATES } from "../utils";
 import { resolveProjectMeta } from "../project-meta.js";
@@ -71,6 +71,10 @@ export function DashboardProvider({ children }) {
   const handleRuntimeSocketMessage = useCallback((msg) => {
     if (msg?.type === "service:log") {
       dispatchServiceLog(msg.id, msg.chunk);
+      return;
+    }
+    if (msg?.type === "service" && msg.id) {
+      dispatchServiceUpdate(msg);
       return;
     }
     if (msg?.type === "issue:log") {
