@@ -162,6 +162,7 @@ export function useRuntimeState({ pollInterval = 3000, showAll = false } = {}) {
     queryKey: ["runtime-state", showAll],
     queryFn: () => api.get(showAll ? "/state?all=1" : "/state"),
     refetchInterval: pollInterval,
+    refetchOnWindowFocus: true,
   });
 }
 

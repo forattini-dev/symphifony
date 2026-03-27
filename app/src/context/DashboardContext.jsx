@@ -19,6 +19,7 @@ import {
 } from "../hooks";
 import { useNotifications } from "../hooks/useNotifications";
 import { dispatchServiceLog } from "../hooks/useServices.js";
+import { dispatchIssueLog } from "../hooks/useIssueLog.js";
 import { STATES } from "../utils";
 import { resolveProjectMeta } from "../project-meta.js";
 
@@ -72,6 +73,10 @@ export function DashboardProvider({ children }) {
       dispatchServiceLog(msg.id, msg.chunk);
       return;
     }
+    if (msg?.type === "issue:log") {
+      dispatchIssueLog(msg.id, msg.chunk);
+      return;
+    }
     if (Array.isArray(msg?.events)) {
       setEventSnapshot(msg.events);
     }
@@ -80,7 +85,8 @@ export function DashboardProvider({ children }) {
   const wsStatus = useRuntimeWebSocket(handleRuntimeSocketMessage);
   const liveMode = wsStatus === "connected";
 
-  const runtime = useRuntimeState({ pollInterval: liveMode ? false : 3000, showAll: completionFilter === "all" });
+  // In live mode, WS pushes updates — keep a slow fallback poll to catch any missed messages.
+  const runtime = useRuntimeState({ pollInterval: liveMode ? 10000 : 3000, showAll: completionFilter === "all" });
   const events = useRuntimeEvents(eventKind, eventIssueId, liveMode ? false : 2500);
   const providers = useProviders({ pollInterval: liveMode ? false : 15000 });
   const parallelism = useParallelism({ pollInterval: liveMode ? false : 15000 });

@@ -98,8 +98,15 @@ describe("contract negotiation parser", () => {
 
 describe("contract negotiation readiness", () => {
   it("reports contractual blockers until negotiation is approved", () => {
-    const issue = makeIssue({ contractNegotiationStatus: "failed" });
+    // "pending" = not yet approved → blocks
+    const issue = makeIssue({ contractNegotiationStatus: "pending" });
     assert.match(getPlanExecutionBlocker(issue) || "", /requires approved contract negotiation/i);
+    assert.equal(needsContractNegotiationWork(issue), true);
+  });
+
+  it("treats failed negotiation as non-blocking — user chose to proceed at own risk", () => {
+    const issue = makeIssue({ contractNegotiationStatus: "failed" });
+    assert.equal(getPlanExecutionBlocker(issue), null);
     assert.equal(needsContractNegotiationWork(issue), false);
   });
 
@@ -124,7 +131,8 @@ describe("contract negotiation FSM gates", () => {
   });
 
   it("blocks PendingApproval -> Queued when the contractual negotiation is not approved", async () => {
-    const issue = makeIssue({ state: "PendingApproval", contractNegotiationStatus: "failed" });
+    // "pending" = has never been approved → blocks execution
+    const issue = makeIssue({ state: "PendingApproval", contractNegotiationStatus: "pending" });
 
     await assert.rejects(
       () => transitionIssueCommand({ issue, target: "Queued", note: "Try to execute early." }),

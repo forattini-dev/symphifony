@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { X, FileText, Clock, GitBranch } from "lucide-react";
 import { api } from "../api.js";
 import { formatDuration, timeAgo } from "../utils.js";
+import { useIssueLog } from "../hooks/useIssueLog.js";
 
 const ROLE_BADGE = {
   planner: "badge-info",
@@ -68,12 +69,12 @@ function TurnLogLine({ turn }) {
 export function AgentSessionLogModal({ issue, onClose }) {
   const [sessions, setSessions] = useState([]);
   const [lastFetched, setLastFetched] = useState(null);
-  const [liveTail, setLiveTail] = useState(null);
   const logRef = useRef(null);
   const prevTurnsCount = useRef(0);
-  const prevLogTail = useRef(null);
+  const prevLiveLog = useRef(null);
   const [elapsed, setElapsed] = useState(0);
   const isActive = ACTIVE_STATES.has(issue?.state);
+  const { log: liveLog } = useIssueLog(issue?.id, isActive);
 
   const fetchSessions = useCallback(async () => {
     if (!issue?.id) return;
@@ -114,32 +115,16 @@ export function AgentSessionLogModal({ issue, onClose }) {
       .sort((a, b) => a.turn - b.turn);
   }, [sessions]);
 
-  // Poll live log tail when active
-  const fetchLive = useCallback(async () => {
-    if (!issue?.id) return;
-    try {
-      const res = await api.get(`/issues/${encodeURIComponent(issue.id)}/live`);
-      setLiveTail(res);
-    } catch { /* ignore */ }
-  }, [issue?.id]);
-
-  useEffect(() => {
-    if (!isActive) return;
-    fetchLive();
-    const id = setInterval(fetchLive, 2000);
-    return () => clearInterval(id);
-  }, [fetchLive, isActive]);
-
   // Auto-scroll on new turns or new log content
   useEffect(() => {
     const newTurns = allTurns.length > prevTurnsCount.current;
-    const newLog = liveTail?.logTail !== prevLogTail.current;
+    const newLog = liveLog !== prevLiveLog.current;
     if ((newTurns || newLog) && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
     prevTurnsCount.current = allTurns.length;
-    prevLogTail.current = liveTail?.logTail;
-  }, [allTurns, liveTail?.logTail]);
+    prevLiveLog.current = liveLog;
+  }, [allTurns, liveLog]);
 
   // Close on Escape
   useEffect(() => {
@@ -230,15 +215,15 @@ export function AgentSessionLogModal({ issue, onClose }) {
             </div>
           )}
 
-          {/* Live tail — only shown when active and has output */}
-          {isActive && liveTail?.logTail && (
+          {/* Live log — WS-streamed, only shown when active and has output */}
+          {isActive && liveLog && (
             <div className="mt-3">
               <div className="flex items-center gap-1.5 mb-2 opacity-30">
                 <span className="size-1.5 rounded-full bg-success animate-pulse inline-block" />
                 <span className="text-[9px] uppercase tracking-widest font-bold">Live output</span>
               </div>
               <pre className="text-[11px] bg-base-300 rounded-box p-3 whitespace-pre-wrap opacity-70 leading-relaxed break-all">
-                {liveTail.logTail}
+                {liveLog}
               </pre>
             </div>
           )}

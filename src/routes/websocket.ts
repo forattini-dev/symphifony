@@ -66,9 +66,39 @@ export function sendToAnalyticsRoom(topic: string, data: Record<string, unknown>
   }
 }
 
+// ── Issue log rooms ───────────────────────────────────────────────────────────
+// Clients subscribe to a specific issue's live-output.log stream.
+// The broadcaster (issue-log-broadcaster.ts) pushes new chunks as the agent writes.
+
+const issueLogRooms = new Map<string, Set<string>>(); // issueId → Set<socketId>
+
+export function subscribeIssueLogRoom(socketId: string, issueId: string): void {
+  if (!issueLogRooms.has(issueId)) issueLogRooms.set(issueId, new Set());
+  issueLogRooms.get(issueId)!.add(socketId);
+}
+
+export function unsubscribeIssueLogRoom(socketId: string, issueId: string): void {
+  issueLogRooms.get(issueId)?.delete(socketId);
+}
+
+export function issueLogRoomSize(issueId: string): number {
+  return issueLogRooms.get(issueId)?.size ?? 0;
+}
+
+export function sendToIssueLogRoom(issueId: string, data: string): void {
+  const room = issueLogRooms.get(issueId);
+  if (!room || room.size === 0) return;
+  for (const socketId of [...room]) {
+    const send = wsClients.get(socketId);
+    if (!send) { room.delete(socketId); continue; }
+    try { send(data); } catch { wsClients.delete(socketId); room.delete(socketId); }
+  }
+}
+
 export function unsubscribeFromAllRooms(socketId: string): void {
   for (const room of serviceLogRooms.values()) room.delete(socketId);
   for (const room of analyticsRooms.values()) room.delete(socketId);
+  for (const room of issueLogRooms.values()) room.delete(socketId);
 }
 
 export function serviceLogRoomSize(serviceId: string): number {
@@ -196,6 +226,12 @@ export function makeWebSocketConfig(state: RuntimeState) {
         } else if (msg.type === "analytics:unsubscribe" && typeof msg.topic === "string") {
           unsubscribeAnalyticsRoom(socketId, msg.topic);
           logger.debug({ socketId, topic: msg.topic }, "[WebSocket] Unsubscribed from analytics room");
+        } else if (msg.type === "issue:log:subscribe" && typeof msg.id === "string") {
+          subscribeIssueLogRoom(socketId, msg.id);
+          logger.debug({ socketId, issueId: msg.id }, "[WebSocket] Subscribed to issue log room");
+        } else if (msg.type === "issue:log:unsubscribe" && typeof msg.id === "string") {
+          unsubscribeIssueLogRoom(socketId, msg.id);
+          logger.debug({ socketId, issueId: msg.id }, "[WebSocket] Unsubscribed from issue log room");
         }
       } catch {}
     },

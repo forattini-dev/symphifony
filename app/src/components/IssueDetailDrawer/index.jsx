@@ -28,6 +28,7 @@ import { SessionsTab } from "./tabs/SessionsTab.jsx";
 
 function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, onReplan, replanBusy, mergeBusy, mergeError, mergeNotice, mergeMode }) {
   const footerStyle = { paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" };
+  const qc = useQueryClient();
   const [executeBusy, setExecuteBusy] = useState(false);
   const [executeError, setExecuteError] = useState(null);
 
@@ -37,12 +38,13 @@ function DrawerFooter({ issue, onStateChange, onRetry, onMerge, onPush, onReplan
     try {
       const res = await api.post(`/issues/${encodeURIComponent(issue.id)}/execute`);
       if (!res.ok) throw new Error(res.error || "Execute failed.");
+      qc.invalidateQueries({ queryKey: ["runtime-state"] });
     } catch (err) {
       setExecuteError(err instanceof Error ? err.message : String(err));
     } finally {
       setExecuteBusy(false);
     }
-  }, [issue.id]);
+  }, [issue.id, qc]);
 
   const isPlanning = issue.state === "Planning";
   const isPlanned = issue.state === "PendingApproval";
@@ -192,8 +194,9 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
     try {
       const res = await api.post(`/issues/${encodeURIComponent(issue.id)}/execute`);
       if (!res.ok) throw new Error(res.error || "Execute failed.");
+      qc.invalidateQueries({ queryKey: ["runtime-state"] });
     } catch { /* footer handles errors for its own execute button */ }
-  }, [issue?.id]);
+  }, [issue?.id, qc]);
 
   const handleDeleteFromDrawer = useCallback(() => {
     if (!issue?.id) return;

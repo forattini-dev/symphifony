@@ -1611,6 +1611,8 @@ export async function runReviewPhase(
     const { workspacePath } = await prepareWorkspace(issue, state, state.config.defaultBranch);
     container.issueRepository.markDirty(issue.id);
     container.eventStore.addEvent(issue.id, "info", `Workspace ready at ${workspacePath}.`);
+    const { startIssueLogBroadcasting: _startReviewLog } = await import("./issue-log-broadcaster.ts");
+    _startReviewLog(issue.id, workspacePath);
 
     const reviewer = getReviewProvider(state, issue, workflowConfig);
 
@@ -1654,8 +1656,10 @@ export async function runReviewPhase(
     await container.persistencePort.persistState(state);
     cleanAgentJobState(fifonyDir, issue.id);
     onTransition?.({ issueId: issue.id, identifier: issue.identifier, operation: _op, from: "running", to: "done", pid: null, reason: "review phase complete", at: now() });
+    import("./issue-log-broadcaster.ts").then(({ stopIssueLogBroadcasting }) => stopIssueLogBroadcasting(issue.id)).catch(() => {});
   }
 }
+
 
 /**
  * Run the execute phase for an issue in Queued/Running state.
@@ -1740,6 +1744,8 @@ export async function runExecutePhase(
       } catch { /* non-critical */ }
 
       container.eventStore.addEvent(current.id, "info", `Workspace ready at ${workspacePath}.`);
+      const { startIssueLogBroadcasting } = await import("./issue-log-broadcaster.ts");
+      startIssueLogBroadcasting(current.id, workspacePath);
       const executeProviders = getExecutionProviders(state, current, workflowConfig);
       const reviewer = getReviewProvider(state, current, workflowConfig);
       await runExecuteOnce(state, current, workspacePath, promptText, promptFile, workflowConfig, startTs, executeProviders, reviewer);
@@ -1772,6 +1778,7 @@ export async function runExecutePhase(
     await container.persistencePort.persistState(state);
     cleanAgentJobState(fifonyDir, issue.id);
     onTransition?.({ issueId: issue.id, identifier: issue.identifier, operation: _op, from: "running", to: "done", pid: null, reason: "execute phase complete", at: now() });
+    import("./issue-log-broadcaster.ts").then(({ stopIssueLogBroadcasting }) => stopIssueLogBroadcasting(issue.id)).catch(() => {});
   }
 }
 

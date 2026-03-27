@@ -4,6 +4,7 @@ import { DashboardProvider, useDashboard } from "../context/DashboardContext";
 import { useSettings, getSettingsList } from "../hooks";
 import { hasCompletedOnboarding } from "../onboarding-state.js";
 import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Header from "../components/Header";
 import Fab from "../components/Fab";
 import MobileDock from "../components/MobileDock";
@@ -60,6 +61,7 @@ function ViewTransition({ children }) {
 
 function RootLayout() {
   const ctx = useDashboard();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const routerState = useRouterState();
   const pathname = routerState.location.pathname;
@@ -117,15 +119,18 @@ function RootLayout() {
     const s = issue.state;
     if (s === "PendingApproval") {
       // Execute
-      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/execute`));
+      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/execute`))
+        .then(() => qc.invalidateQueries({ queryKey: ["runtime-state"] }));
     } else if (s === "PendingDecision") {
       // Approve & Merge (only after review is complete)
-      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/approve-and-merge`));
+      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/approve-and-merge`))
+        .then(() => qc.invalidateQueries({ queryKey: ["runtime-state"] }));
     } else if (s === "Approved" && !issue.mergedAt) {
       // Merge
-      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/merge`));
+      import("../api.js").then(({ api }) => api.post(`/issues/${encodeURIComponent(issue.id)}/merge`))
+        .then(() => qc.invalidateQueries({ queryKey: ["runtime-state"] }));
     }
-  }, [ctx]);
+  }, [ctx, qc]);
 
   const noDrawer = !hasDrawer;
   const issueState = ctx.selectedIssue?.state;
