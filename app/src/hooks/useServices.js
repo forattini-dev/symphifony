@@ -27,6 +27,16 @@ export function dispatchServiceUpdate(update) {
   for (const cb of serviceStateSubs) cb(update);
 }
 
+// ── Service restart pub/sub ───────────────────────────────────────────────────
+
+const serviceRestartSubs = new Map(); // id → Set<() => void>
+
+export function onServiceRestart(id, cb) {
+  if (!serviceRestartSubs.has(id)) serviceRestartSubs.set(id, new Set());
+  serviceRestartSubs.get(id).add(cb);
+  return () => serviceRestartSubs.get(id)?.delete(cb);
+}
+
 /**
  * Fetches all service statuses and polls at `pollInterval` ms.
  * Pass `pollInterval: false` (or 0) to disable polling — use when WS is connected.
@@ -63,6 +73,10 @@ export function useServices({ pollInterval = 3_000 } = {}) {
       setServices((prev) =>
         prev.map((s) => s.id === id ? { ...s, state, running, pid: pid ?? s.pid } : s)
       );
+      // Notify log viewers that this service restarted so they can reset
+      if (state === "starting") {
+        for (const cb of serviceRestartSubs.get(id) ?? []) cb();
+      }
     };
     serviceStateSubs.add(handler);
     return () => serviceStateSubs.delete(handler);
@@ -86,6 +100,17 @@ export function useServiceLog(id, enabled = false) {
   const [log, setLog] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
+
+  const fetchLog = useCallback((encId) => {
+    api.get(`/services/${encId}/log`).then((res) => {
+      setLog(res.logTail ?? "");
+      setConnected(true);
+      setError(null);
+    }).catch((err) => {
+      setConnected(false);
+      setError(err instanceof Error ? err.message : "Failed to load logs.");
+    });
+  }, []);
 
   useEffect(() => {
     if (!enabled || !id) {
@@ -122,14 +147,27 @@ export function useServiceLog(id, enabled = false) {
       setConnected(true);
     });
 
+    // 4. When service restarts, clear log and re-fetch fresh content
+    const unsubRestart = onServiceRestart(id, () => {
+      if (!alive) return;
+      setLog("");
+      setConnected(false);
+      // Small delay to let the new process start writing before fetching
+      setTimeout(() => {
+        if (!alive) return;
+        fetchLog(encId);
+      }, 500);
+    });
+
     return () => {
       alive = false;
       sendWsMessage({ type: "service:log:unsubscribe", id });
       unsub();
+      unsubRestart();
       setConnected(false);
       setError(null);
     };
-  }, [id, enabled]);
+  }, [id, enabled, fetchLog]);
 
   return { log, connected, error };
 }

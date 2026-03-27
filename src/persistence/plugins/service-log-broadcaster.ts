@@ -68,6 +68,8 @@ export function startServiceLogBroadcasting(id: string, fifonyDir: string): void
     entry.watcher = watcher;
     active.set(id, entry);
     logger.debug({ id }, "[ServiceLogBroadcaster] Started");
+    // Flush immediately to catch bytes written before watcher was registered
+    flush();
   } catch (err) {
     logger.debug({ err, id }, "[ServiceLogBroadcaster] Could not watch log file");
   }
