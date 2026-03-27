@@ -353,7 +353,7 @@ export function registerServiceRoutes(
 
   // POST /api/services/config — save the services array
   app.post("/api/services/config", async (c) => {
-    const result = await replaceServiceConfigs(c, {
+    return replaceServiceConfigs(c, {
       replaceAllServices: async (entries) => {
         const { replaceAllServices } = await import("../persistence/store.ts");
         await replaceAllServices(entries);
@@ -361,7 +361,6 @@ export function registerServiceRoutes(
       replacePersistedService: async () => {},
       deletePersistedService: async () => {},
     });
-    return c.json(result.body, result.status ?? 200);
   });
 
   // DELETE /api/services/:id — stop + remove a single entry
@@ -371,7 +370,7 @@ export function registerServiceRoutes(
       const t = stopManagedService(id, STATE_ROOT);
       if (t) broadcastTransition(t);
     } catch { /* ignore if not running */ }
-    const result = await deleteServiceConfig(c, {
+    return deleteServiceConfig(c, {
       deletePersistedService: async (serviceId) => {
         const { deletePersistedService } = await import("../persistence/store.ts");
         await deletePersistedService(serviceId);
@@ -379,12 +378,11 @@ export function registerServiceRoutes(
       replacePersistedService: async () => {},
       replaceAllServices: async () => {},
     });
-    return c.json(result.body, result.status ?? 200);
   });
 
   // PUT /api/services/:id — update a single entry
   app.put("/api/services/:id", async (c) => {
-    const result = await upsertServiceConfig(c, {
+    return upsertServiceConfig(c, {
       replacePersistedService: async (entry) => {
         const { replacePersistedService } = await import("../persistence/store.ts");
         await replacePersistedService(entry);
@@ -392,7 +390,6 @@ export function registerServiceRoutes(
       deletePersistedService: async () => {},
       replaceAllServices: async () => {},
     });
-    return c.json(result.body, result.status ?? 200);
   });
 
   // POST /api/services/:id/detect-healthcheck — AI reads log and detects host/port

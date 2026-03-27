@@ -14,7 +14,12 @@ type ApiContext = {
     param: (name: string) => string | undefined;
     json: () => Promise<unknown>;
   };
+  json: (body: unknown, status?: number) => Response;
 };
+
+function respond(c: unknown, body: unknown, status = 200): Response {
+  return (c as ApiContext).json(body, status);
+}
 
 async function loadServiceApiDeps(): Promise<ServiceApiDeps> {
   const {
@@ -72,22 +77,22 @@ function normalizeServiceEntry(value: unknown): { entry?: ServiceEntry; error?: 
   };
 }
 
-export async function listServiceConfigs(): Promise<{ body: unknown; status?: number }> {
+export async function listServiceConfigs(c: unknown): Promise<Response> {
   const state = getRuntimeState();
-  return { body: { ok: true, services: state.config.services ?? [] } };
+  return respond(c, { ok: true, services: state.config.services ?? [] });
 }
 
 export async function replaceServiceConfigs(
   c: unknown,
   deps?: ServiceApiDeps,
-): Promise<{ body: unknown; status?: number }> {
+): Promise<Response> {
   const state = getRuntimeState();
   const apiDeps = deps ?? await loadServiceApiDeps();
 
   try {
     const body = await (c as ApiContext).req.json() as { services: unknown };
     if (!Array.isArray(body.services)) {
-      return { status: 400, body: { ok: false, error: "Invalid services array" } };
+      return respond(c, { ok: false, error: "Invalid services array" }, 400);
     }
 
     const entries = body.services as ServiceEntry[];
@@ -95,32 +100,32 @@ export async function replaceServiceConfigs(
     for (const entry of entries) {
       const normalized = normalizeServiceEntry(entry);
       if (!normalized.entry) {
-        return { status: 400, body: { ok: false, error: normalized.error ?? "Invalid service entry" } };
+        return respond(c, { ok: false, error: normalized.error ?? "Invalid service entry" }, 400);
       }
       normalizedEntries.push(normalized.entry);
     }
     await apiDeps.replaceAllServices(normalizedEntries);
     state.config.services = normalizedEntries;
-    return { body: { ok: true, services: normalizedEntries } };
+    return respond(c, { ok: true, services: normalizedEntries });
   } catch (error) {
-    return { status: 500, body: { ok: false, error: String(error) } };
+    return respond(c, { ok: false, error: String(error) }, 500);
   }
 }
 
 export async function upsertServiceConfig(
   c: unknown,
   deps?: ServiceApiDeps,
-): Promise<{ body: unknown; status?: number }> {
+): Promise<Response> {
   const state = getRuntimeState();
   const apiDeps = deps ?? await loadServiceApiDeps();
   const id = parseServiceId(c);
-  if (!id) return { status: 400, body: { ok: false, error: "Service id is required." } };
+  if (!id) return respond(c, { ok: false, error: "Service id is required." }, 400);
 
   try {
     const rawEntry = await (c as ApiContext).req.json() as ServiceEntry;
     const normalized = normalizeServiceEntry(rawEntry);
     if (!normalized.entry) {
-      return { status: 400, body: { ok: false, error: normalized.error ?? "Invalid service entry" } };
+      return respond(c, { ok: false, error: normalized.error ?? "Invalid service entry" }, 400);
     }
     const entry = normalized.entry;
 
@@ -130,24 +135,24 @@ export async function upsertServiceConfig(
     if (idx >= 0) existing[idx] = entry;
     else existing.push(entry);
     state.config.services = existing;
-    return { body: { ok: true, service: entry } };
+    return respond(c, { ok: true, service: entry });
   } catch (error) {
-    return { status: 500, body: { ok: false, error: String(error) } };
+    return respond(c, { ok: false, error: String(error) }, 500);
   }
 }
 
 export async function deleteServiceConfig(
   c: unknown,
   deps?: ServiceApiDeps,
-): Promise<{ body: unknown; status?: number }> {
+): Promise<Response> {
   const state = getRuntimeState();
   const apiDeps = deps ?? await loadServiceApiDeps();
   const id = parseServiceId(c);
-  if (!id) return { status: 400, body: { ok: false, error: "Service id is required." } };
+  if (!id) return respond(c, { ok: false, error: "Service id is required." }, 400);
 
   await apiDeps.deletePersistedService(id);
   state.config.services = (state.config.services ?? []).filter((entry) => entry.id !== id);
-  return { body: { ok: true, id } };
+  return respond(c, { ok: true, id });
 }
 
 export default {
@@ -169,7 +174,7 @@ export default {
     auth: false,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     description: "Managed service configuration entries",
-    "GET /": async () => listServiceConfigs(),
+    "GET /": async (c: unknown) => listServiceConfigs(c),
     "POST /config": async (c: unknown) => replaceServiceConfigs(c),
     "PUT /:id": async (c: unknown) => upsertServiceConfig(c),
     "DELETE /:id": async (c: unknown) => deleteServiceConfig(c),

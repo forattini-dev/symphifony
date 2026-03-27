@@ -17,32 +17,37 @@ type ApiContext = {
     param: (name: string) => string | undefined;
     json: () => Promise<unknown>;
   };
+  json: (body: unknown, status?: number) => Response;
 };
+
+function respond(c: unknown, body: unknown, status = 200): Response {
+  return (c as ApiContext).json(body, status);
+}
 
 const VALID_SETTING_SCOPES = new Set<RuntimeSettingScope>(["runtime", "providers", "ui", "system"]);
 const VALID_SETTING_SOURCES = new Set<RuntimeSettingSource>(["user", "detected", "workflow", "system"]);
 
-export async function listSettings(): Promise<{ body: unknown; status?: number }> {
+export async function listSettings(c: unknown): Promise<Response> {
   const settings = await loadRuntimeSettings();
-  return { body: { settings } };
+  return respond(c, { settings });
 }
 
-export async function getSetting(c: unknown): Promise<{ body: unknown; status?: number }> {
+export async function getSetting(c: unknown): Promise<Response> {
   const settingId = (c as ApiContext).req.param("id") || "";
   const settings = await loadRuntimeSettings();
   const setting = settings.find((entry) => entry.id === settingId);
   if (!setting) {
-    return { status: 404, body: { ok: false, error: "Setting not found" } };
+    return respond(c, { ok: false, error: "Setting not found" }, 404);
   }
-  return { body: { ok: true, setting } };
+  return respond(c, { ok: true, setting });
 }
 
-export async function updateSetting(c: unknown): Promise<{ body: unknown; status?: number }> {
+export async function updateSetting(c: unknown): Promise<Response> {
   const context = getApiRuntimeContextOrThrow();
   const { persistState } = await import("../store.ts");
   const settingId = (c as ApiContext).req.param("id") || "";
   if (!settingId) {
-    return { status: 400, body: { ok: false, error: "Setting id is required" } };
+    return respond(c, { ok: false, error: "Setting id is required" }, 400);
   }
 
   const payload = await (c as ApiContext).req.json() as JsonRecord;
@@ -50,11 +55,11 @@ export async function updateSetting(c: unknown): Promise<{ body: unknown; status
   const sourceValue = typeof payload.source === "string" ? payload.source : "user";
 
   if (!VALID_SETTING_SCOPES.has(scopeValue as RuntimeSettingScope)) {
-    return { status: 400, body: { ok: false, error: "Invalid setting scope" } };
+    return respond(c, { ok: false, error: "Invalid setting scope" }, 400);
   }
 
   if (!VALID_SETTING_SOURCES.has(sourceValue as RuntimeSettingSource)) {
-    return { status: 400, body: { ok: false, error: "Invalid setting source" } };
+    return respond(c, { ok: false, error: "Invalid setting source" }, 400);
   }
 
   const setting = await persistSetting(settingId, payload.value, {
@@ -81,7 +86,7 @@ export async function updateSetting(c: unknown): Promise<{ body: unknown; status
     await persistState(context.state);
   }
 
-  return { body: { ok: true, setting } };
+  return respond(c, { ok: true, setting });
 }
 
 export default {
@@ -104,7 +109,7 @@ export default {
     auth: false,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     description: "Runtime settings",
-    "GET /": async () => listSettings(),
+    "GET /": async (c: unknown) => listSettings(c),
     "GET /:id": async (c: unknown) => getSetting(c),
     "POST /:id": async (c: unknown) => updateSetting(c),
   },

@@ -27,6 +27,15 @@ export function registerSettingsRoutes(
   app: RouteRegistrar,
   state: RuntimeState,
 ): void {
+  // POST /api/settings/:id — upsert a runtime setting by ID.
+  // Note: the s3db settings resource handles GET /api/settings (list) and
+  // GET /api/settings/:id (get), but its custom POST /:id route is not reachable
+  // through s3db's routing layer, so we register it here explicitly.
+  app.post("/api/settings/:id", async (c) => {
+    const { updateSetting } = await import("../persistence/resources/settings.resource.js");
+    return updateSetting(c);
+  });
+
   app.post("/api/config/concurrency", async (c) => {
     const payload = await c.req.json() as JsonRecord;
     const value = typeof payload.concurrency === "number" ? payload.concurrency : undefined;
