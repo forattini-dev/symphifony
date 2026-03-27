@@ -46,6 +46,9 @@ let staleInterval: ReturnType<typeof setInterval> | null = null;
 /** Persist debounce state. */
 let persistInterval: ReturnType<typeof setInterval> | null = null;
 
+/** Analytics broadcast interval handle. */
+let analyticsInterval: ReturnType<typeof setInterval> | null = null;
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 
 export async function initQueueWorkers(state: RuntimeState): Promise<void> {
@@ -68,6 +71,17 @@ export async function initQueueWorkers(state: RuntimeState): Promise<void> {
     ).catch(() => {});
   }, 5_000);
 
+  // Wire analytics broadcaster + periodic push to WS room subscribers
+  import("./analytics-broadcaster.ts").then(({ initAnalyticsBroadcaster, pushAllAnalytics }) => {
+    initAnalyticsBroadcaster(state);
+    analyticsInterval = setInterval(() => {
+      if (!active || !runtimeState) return;
+      pushAllAnalytics(runtimeState).catch((err) =>
+        logger.error({ err }, "[Queue] Analytics broadcast failed"),
+      );
+    }, 30_000);
+  }).catch((err) => logger.error({ err }, "[Queue] Failed to init analytics broadcaster"));
+
   logger.info("[Queue] Unified work queue ready");
 }
 
@@ -75,6 +89,7 @@ export async function stopQueueWorkers(): Promise<void> {
   active = false;
   if (staleInterval) { clearInterval(staleInterval); staleInterval = null; }
   if (persistInterval) { clearInterval(persistInterval); persistInterval = null; }
+  if (analyticsInterval) { clearInterval(analyticsInterval); analyticsInterval = null; }
   runtimeState = null;
   queue.length = 0;
   waiters.length = 0;

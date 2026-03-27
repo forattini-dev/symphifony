@@ -27,8 +27,48 @@ export function unsubscribeServiceLogRoom(socketId: string, serviceId: string): 
   serviceLogRooms.get(serviceId)?.delete(socketId);
 }
 
+// ── Analytics rooms ───────────────────────────────────────────────────────────
+// Clients subscribe to analytics topics (e.g. "analytics:tokens").
+// Server pushes computed payloads proactively; no polling needed on the client.
+
+const analyticsRooms = new Map<string, Set<string>>(); // topic → Set<socketId>
+
+// Called when a client subscribes — injected by queue-workers to push current data immediately.
+type AnalyticsPushFn = (socketId: string, topic: string) => void;
+let analyticsOnSubscribeFn: AnalyticsPushFn | null = null;
+
+export function setAnalyticsOnSubscribeFn(fn: AnalyticsPushFn | null): void {
+  analyticsOnSubscribeFn = fn;
+}
+
+export function subscribeAnalyticsRoom(socketId: string, topic: string): void {
+  if (!analyticsRooms.has(topic)) analyticsRooms.set(topic, new Set());
+  analyticsRooms.get(topic)!.add(socketId);
+  analyticsOnSubscribeFn?.(socketId, topic);
+}
+
+export function unsubscribeAnalyticsRoom(socketId: string, topic: string): void {
+  analyticsRooms.get(topic)?.delete(socketId);
+}
+
+export function analyticsRoomHasSubscribers(topic: string): boolean {
+  return (analyticsRooms.get(topic)?.size ?? 0) > 0;
+}
+
+export function sendToAnalyticsRoom(topic: string, data: Record<string, unknown>): void {
+  const room = analyticsRooms.get(topic);
+  if (!room || room.size === 0) return;
+  const msg = JSON.stringify({ type: "analytics:update", topic, data });
+  for (const socketId of [...room]) {
+    const send = wsClients.get(socketId);
+    if (!send) { room.delete(socketId); continue; }
+    try { send(msg); } catch { wsClients.delete(socketId); room.delete(socketId); }
+  }
+}
+
 export function unsubscribeFromAllRooms(socketId: string): void {
   for (const room of serviceLogRooms.values()) room.delete(socketId);
+  for (const room of analyticsRooms.values()) room.delete(socketId);
 }
 
 export function serviceLogRoomSize(serviceId: string): number {
@@ -150,6 +190,12 @@ export function makeWebSocketConfig(state: RuntimeState) {
         } else if (msg.type === "service:log:unsubscribe" && typeof msg.id === "string") {
           unsubscribeServiceLogRoom(socketId, msg.id);
           logger.debug({ socketId, serviceId: msg.id }, "[WebSocket] Unsubscribed from service log room");
+        } else if (msg.type === "analytics:subscribe" && typeof msg.topic === "string") {
+          subscribeAnalyticsRoom(socketId, msg.topic);
+          logger.debug({ socketId, topic: msg.topic }, "[WebSocket] Subscribed to analytics room");
+        } else if (msg.type === "analytics:unsubscribe" && typeof msg.topic === "string") {
+          unsubscribeAnalyticsRoom(socketId, msg.topic);
+          logger.debug({ socketId, topic: msg.topic }, "[WebSocket] Unsubscribed from analytics room");
         }
       } catch {}
     },
