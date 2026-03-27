@@ -185,7 +185,24 @@ function extractJsonFromOutput<T>(raw: string): T | null {
   const candidates = extractJsonObjects(text).reverse();
   for (const candidate of candidates) {
     try {
-      return JSON.parse(candidate) as T;
+      const parsed = JSON.parse(candidate);
+      // Unwrap CLI envelope: Claude/Gemini wrap the actual response in a
+      // `result` or `response` string field (--output-format json envelope).
+      const nested =
+        parsed && typeof parsed === "object"
+          ? (typeof parsed.result === "string" ? parsed.result :
+             typeof parsed.response === "string" ? parsed.response :
+             null)
+          : null;
+      if (nested) {
+        const clean = nested.trim().replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+        for (const inner of extractJsonObjects(clean)) {
+          try { return JSON.parse(inner) as T; } catch {}
+        }
+        // result might be the JSON string itself
+        try { return JSON.parse(nested) as T; } catch {}
+      }
+      return parsed as T;
     } catch {
       // try next
     }
