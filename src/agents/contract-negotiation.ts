@@ -167,17 +167,59 @@ function completeContractNegotiationRun(
   return completedRun;
 }
 
+/** Try to extract the "result" field from a --output-format json CLI envelope.
+ *  Handles trailing garbage (ANSI escapes, fifony suffixes) that break JSON.parse
+ *  on the raw text by isolating the outermost JSON object first. */
+function extractJsonEnvelopeResult(text: string): string | null {
+  // Fast path: try the full text as-is
+  try {
+    const env = JSON.parse(text.trim()) as Record<string, unknown>;
+    if (env && typeof env === "object" && typeof env.result === "string") return env.result;
+  } catch { /* trailing garbage — fall through */ }
+
+  // Isolate the JSON object: find first '{' and scan backward from end for last '}'
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  const end = text.lastIndexOf("}");
+  if (end <= start) return null;
+  try {
+    const env = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    if (env && typeof env === "object" && typeof env.result === "string") return env.result;
+  } catch { /* still not valid JSON */ }
+
+  // Last resort: regex-extract the result field value from the raw JSON text.
+  // This handles severely truncated envelopes where only part of the JSON survived.
+  const m = text.match(/"result"\s*:\s*"([\s\S]+)/);
+  if (m) {
+    // Unescape the JSON string content until an unescaped quote closes it
+    let raw = "";
+    let i = 0;
+    const src = m[1];
+    while (i < src.length) {
+      if (src[i] === "\\" && i + 1 < src.length) {
+        const next = src[i + 1];
+        if (next === "n") { raw += "\n"; i += 2; continue; }
+        if (next === "t") { raw += "\t"; i += 2; continue; }
+        if (next === '"') { raw += '"'; i += 2; continue; }
+        if (next === "\\") { raw += "\\"; i += 2; continue; }
+        raw += next; i += 2; continue;
+      }
+      if (src[i] === '"') break; // unescaped quote = end of string value
+      raw += src[i]; i += 1;
+    }
+    if (raw.length > 100) return raw;
+  }
+
+  return null;
+}
+
 export function extractContractDecision(text: string): ContractNegotiationDecision | null {
   // Collect candidate texts: the raw output AND the unwrapped result from a
   // --output-format json envelope (Claude CLI JSON-encodes the result, so
   // JSON.parse restores the original newlines needed for regex matching).
   const candidates: string[] = [text];
-  try {
-    const envelope = JSON.parse(text.trim()) as Record<string, unknown>;
-    if (envelope && typeof envelope === "object") {
-      if (typeof envelope.result === "string") candidates.push(envelope.result);
-    }
-  } catch { /* not a JSON envelope */ }
+  const envelopeResult = extractJsonEnvelopeResult(text);
+  if (envelopeResult) candidates.push(envelopeResult);
 
   for (const candidate of candidates) {
     const match = candidate.match(/```json contract_decision\n([\s\S]+?)```/);
