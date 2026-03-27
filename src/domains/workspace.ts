@@ -421,7 +421,25 @@ export async function createGitWorktree(issue: IssueEntry, worktreePath: string,
     }
   }
 
-  // If the branch is still locked by a stale worktree entry, prune should have fixed it.
+  // If the branch is still locked by a stale worktree entry after prune + directory cleanup,
+  // scan worktree list and force-remove any entry holding our branch.
+  try {
+    const wtList = execSync("git worktree list --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" });
+    for (const block of wtList.split("\n\n").filter(Boolean)) {
+      if (block.includes(`branch refs/heads/${branchName}`)) {
+        const m = block.match(/^worktree (.+)$/m);
+        if (m) {
+          try {
+            execSync(`git worktree remove --force "${m[1]}"`, { cwd: TARGET_ROOT, stdio: "pipe" });
+          } catch {
+            rmSync(m[1], { recursive: true, force: true });
+            try { execSync("git worktree prune", { cwd: TARGET_ROOT, stdio: "pipe" }); } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+
   // -B creates or resets the branch (handles retry scenarios)
   execSync(`git worktree add "${worktreePath}" -B "${branchName}"`, {
     cwd: TARGET_ROOT,
