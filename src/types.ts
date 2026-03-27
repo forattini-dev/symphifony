@@ -489,8 +489,27 @@ export type ServiceState =
   | "stopped"    // no pid file — clean state
   | "starting"   // spawned, grace period not elapsed yet
   | "running"    // alive + grace period elapsed (or health check passed)
+  | "unhealthy"  // process alive but health check failing (reserved — FSM not yet wired)
   | "stopping"   // SIGTERM sent, awaiting exit
   | "crashed";   // process died unexpectedly
+
+export type ServiceHealthcheck = {
+  type: "http" | "tcp" | "command";
+  /** http: full URL e.g. "http://localhost:3000/health" */
+  endpoint?: string;
+  /** tcp: port to probe */
+  port?: number;
+  /** command: shell command, exit 0 = healthy */
+  command?: string;
+  /** ms between checks (default 5000) */
+  interval?: number;
+  /** ms before timeout (default 3000) */
+  timeout?: number;
+  /** consecutive failures before unhealthy (default 3) */
+  retries?: number;
+  /** ms grace period after process start before checks begin (default 10000) */
+  startPeriod?: number;
+};
 
 export type ServiceEntry = {
   id: string;
@@ -503,8 +522,10 @@ export type ServiceEntry = {
   autoRestart?: boolean;
   /** Max auto-restart attempts before giving up (default 5) */
   maxCrashes?: number;
-  /** Optional port for health-check probing (future use) */
+  /** Optional port hint (informational) */
   port?: number;
+  /** Optional healthcheck config — detected automatically or set manually */
+  healthcheck?: ServiceHealthcheck;
 };
 
 export type ServiceStatus = {

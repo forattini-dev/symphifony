@@ -14,7 +14,7 @@ const ISSUE_TEMPLATES = [
   { id: "chore",    label: "Chore",          icon: Wrench,    activeColor: "border-secondary/50 bg-secondary/8 text-secondary",                   title: "chore: ",     description: "## Task\n\n## Why Now\n\n" },
 ];
 
-export function CreateIssueDrawer({ open, onClose, onSubmit, isLoading, onToast }) {
+export function CreateIssueDrawer({ open, onClose, onSubmit, isLoading, onToast, defaultValues }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState("blank");
@@ -87,13 +87,13 @@ export function CreateIssueDrawer({ open, onClose, onSubmit, isLoading, onToast 
 
   useEffect(() => {
     if (open) {
-      setTitle("");
-      setDescription("");
-      setSelectedTemplate("blank");
+      setTitle(defaultValues?.title ?? "");
+      setDescription(defaultValues?.description ?? "");
+      setSelectedTemplate(defaultValues?.issueType ?? "blank");
       setImages([]);
       setTimeout(() => titleRef.current?.focus(), 100);
     }
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;

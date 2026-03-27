@@ -22,7 +22,7 @@
     "fifony-wrap": "./bin/fifony-wrap.js"
   },
   "scripts": {
-    "prompts:generate": "tsx ./scripts/generate-prompts.ts",
+    "prompts:generate": "node --import tsx ./scripts/generate-prompts.ts",
     "start": "pnpm prompts:generate && node ./bin/fifony.js",
     "dev": "pnpm prompts:generate && node ./bin/fifony.js --port 4000 --dev",
     "dev:api": "pnpm prompts:generate && node ./bin/fifony.js --port 4000",

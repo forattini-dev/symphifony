@@ -40,10 +40,10 @@ async function buildPrompt(field: EnhancementField, title: string, description: 
   };
 
   if (field === "title") {
-    return renderPrompt("issue-enhancer-title", context);
+    return renderPrompt("planning-issue-enhancer-title", context);
   }
 
-  return renderPrompt("issue-enhancer-description", context);
+  return renderPrompt("planning-issue-enhancer-description", context);
 }
 
 export function parseEnhancerOutput(raw: string, expectedField: EnhancementField): string {

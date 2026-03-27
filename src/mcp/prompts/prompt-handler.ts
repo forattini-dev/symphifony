@@ -4,6 +4,12 @@ import { getIssue, getIssues, listEvents, WORKSPACE_ROOT } from "../database.js"
 import { apiGet } from "../api-client.js";
 import { buildIntegrationGuide, buildIssuePrompt } from "../resources/resource-builder.js";
 
+function stringifyValue(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
 export async function getPrompt(name: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   if (name === "fifony-integrate-client") {
     const client = typeof args.client === "string" && args.client.trim() ? args.client.trim() : "mcp-client";
@@ -68,41 +74,35 @@ export async function getPrompt(name: string, args: Record<string, unknown> = {}
     const attempts = issueData.attempts ?? 0;
     const maxAttempts = issueData.maxAttempts ?? 3;
 
-    const diagnosticText = [
-      `# Diagnostic Report for Issue ${issueId}`,
-      ``,
-      `## Issue Details`,
-      `- **Title**: ${issueData.title ?? "Unknown"}`,
-      `- **State**: ${state}`,
-      `- **Attempts**: ${attempts} / ${maxAttempts}`,
-      `- **Last Error**: ${lastError ?? "None"}`,
-      `- **Updated At**: ${issueData.updatedAt ?? "Unknown"}`,
-      ``,
-      `## Plan`,
-      plan ? `- **Summary**: ${plan.summary ?? plan.title ?? "No summary"}` : "No plan generated.",
-      plan?.steps ? `- **Steps**: ${plan.steps.length} step(s)` : "",
-      plan?.estimatedComplexity ? `- **Estimated Complexity**: ${plan.estimatedComplexity}` : "",
-      ``,
-      `## History`,
-      ...(history.length > 0 ? history.slice(-15).map((entry: string) => `- ${entry}`) : ["No history entries."]),
-      ``,
-      `## Recent Events`,
-      ...(events.length > 0 ? (events as any[]).slice(0, 15).map((event: any) => `- [${event.kind ?? "info"}] ${event.at ?? ""}: ${event.message ?? ""}`) : ["No events found."]),
-      ``,
-      `## Diagnostic Questions`,
-      `Based on the information above, please analyze:`,
-      `1. What is the root cause of the issue being in "${state}" state?`,
-      `2. Is the error recoverable? If so, what steps should be taken?`,
-      `3. Does the plan need modification before retrying?`,
-      `4. Are there any dependency or configuration issues that need resolution?`,
-      `5. What is the recommended next action?`,
-    ].filter((line) => line !== undefined).join("\n");
-
     return {
       description: `Diagnostic prompt for blocked/failed issue ${issueId}.`,
       messages: [{
         role: "user",
-        content: { type: "text", text: diagnosticText },
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-diagnose-blocked", {
+            issueId,
+            title: stringifyValue(issueData.title, "Unknown"),
+            state,
+            attempts,
+            maxAttempts,
+            lastError: stringifyValue(lastError, "None"),
+            updatedAt: stringifyValue(issueData.updatedAt, "Unknown"),
+            hasPlan: !!plan,
+            planSummary: stringifyValue(plan?.summary ?? plan?.title, "No summary"),
+            hasPlanSteps: Array.isArray(plan?.steps) && plan.steps.length > 0,
+            planStepsCount: Array.isArray(plan?.steps) ? plan.steps.length : 0,
+            planComplexity: stringifyValue(plan?.estimatedComplexity, ""),
+            history: history.length > 0 ? history.slice(-15).map((entry: unknown) => stringifyValue(entry, "Unknown history entry")) : [],
+            recentEvents: events.length > 0
+              ? (events as any[]).slice(0, 15).map((event: any) => ({
+                kind: stringifyValue(event?.kind, "info"),
+                at: stringifyValue(event?.at, "unknown time"),
+                message: stringifyValue(event?.message, ""),
+              }))
+              : [],
+          }),
+        },
       }],
     };
   }
@@ -129,40 +129,26 @@ export async function getPrompt(name: string, args: Record<string, unknown> = {}
     const totalTokens = typeof overall.totalTokens === "number" ? overall.totalTokens : 0;
     const estimatedCost = (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15;
 
-    const summaryText = [
-      `# Fifony Weekly Progress Summary`,
-      ``,
-      `## Issue Statistics`,
-      `| Status | Count |`,
-      `|--------|-------|`,
-      `| Total Issues | ${totalIssues} |`,
-      `| Completed (Done) | ${completed} |`,
-      `| In Progress | ${inProgress} |`,
-      `| Planned | ${planned} |`,
-      `| Planning | ${planning} |`,
-      `| Blocked/Failed | ${blocked} |`,
-      `| Cancelled | ${cancelled} |`,
-      ``,
-      `## Token Usage`,
-      `- **Total Tokens**: ${totalTokens.toLocaleString()}`,
-      `- **Input Tokens**: ${inputTokens.toLocaleString()}`,
-      `- **Output Tokens**: ${outputTokens.toLocaleString()}`,
-      `- **Estimated Cost**: $${(Math.round(estimatedCost * 100) / 100).toFixed(2)}`,
-      ``,
-      `## Analysis Request`,
-      `Based on these metrics, please provide:`,
-      `1. A brief summary of overall progress this week`,
-      `2. Identification of any bottlenecks (blocked/failed issues)`,
-      `3. Token usage efficiency assessment`,
-      `4. Recommendations for improving throughput`,
-      `5. Priority items for next week`,
-    ].join("\n");
-
     return {
       description: "Weekly progress summary prompt for the Fifony workspace.",
       messages: [{
         role: "user",
-        content: { type: "text", text: summaryText },
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-weekly-summary", {
+            totalIssues,
+            completed,
+            inProgress,
+            planned,
+            planning,
+            blocked,
+            cancelled,
+            totalTokensFormatted: totalTokens.toLocaleString(),
+            inputTokensFormatted: inputTokens.toLocaleString(),
+            outputTokensFormatted: outputTokens.toLocaleString(),
+            estimatedCostFormatted: (Math.round(estimatedCost * 100) / 100).toFixed(2),
+          }),
+        },
       }],
     };
   }
@@ -176,42 +162,29 @@ export async function getPrompt(name: string, args: Record<string, unknown> = {}
     const issueData = issue as any;
     const plan = issueData.plan ?? null;
 
-    const steps = plan?.steps ?? [];
-    const stepsText = steps.length > 0
-      ? steps.map((step: any, index: number) => `${index + 1}. **${step.title ?? step.description ?? "Step"}**\n   ${step.description ?? step.detail ?? ""}`).join("\n")
-      : "No steps defined.";
-
-    const refinementText = [
-      `# Plan Refinement for Issue ${issueId}`,
-      ``,
-      `## Issue`,
-      `- **Title**: ${issueData.title ?? "Unknown"}`,
-      `- **Description**: ${issueData.description ?? "No description"}`,
-      ``,
-      `## Current Plan`,
-      plan ? `- **Summary**: ${plan.summary ?? plan.title ?? "No summary"}` : "No plan exists yet.",
-      plan?.estimatedComplexity ? `- **Complexity**: ${plan.estimatedComplexity}` : "",
-      ``,
-      `### Steps`,
-      stepsText,
-      ``,
-      concern ? `## Specific Concern\n${concern}\n` : "",
-      `## Refinement Guidance`,
-      `Please review the current plan and provide specific, actionable feedback:`,
-      `1. Are the steps correctly ordered and complete?`,
-      `2. Are there missing edge cases or error handling steps?`,
-      `3. Is the complexity estimate accurate?`,
-      `4. Are the file paths and affected areas correct?`,
-      `5. Should any steps be split, merged, or removed?`,
-      ``,
-      `Provide your feedback, and it will be used to refine the plan via \`fifony.refine\`.`,
-    ].filter((line) => line !== undefined).join("\n");
+    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
 
     return {
       description: `Plan refinement prompt for issue ${issueId}.`,
       messages: [{
         role: "user",
-        content: { type: "text", text: refinementText },
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-refine-plan", {
+            issueId,
+            title: stringifyValue(issueData.title, "Unknown"),
+            description: stringifyValue(issueData.description, "No description"),
+            hasPlan: !!plan,
+            planSummary: stringifyValue(plan?.summary ?? plan?.title, "No summary"),
+            planComplexity: stringifyValue(plan?.estimatedComplexity, ""),
+            steps: steps.map((step: any, index: number) => ({
+              index: index + 1,
+              title: stringifyValue(step?.title ?? step?.description, "Step"),
+              description: stringifyValue(step?.description ?? step?.detail, ""),
+            })),
+            concern,
+          }),
+        },
       }],
     };
   }
@@ -240,52 +213,37 @@ export async function getPrompt(name: string, args: Record<string, unknown> = {}
         description: `Code review prompt for issue ${issueId} (no changes).`,
         messages: [{
           role: "user",
-          content: { type: "text", text: `# Code Review for ${issueId}\n\nNo code changes found for this issue. The workspace may not have been created yet or no modifications were made.` },
+          content: {
+            type: "text",
+            text: await renderPrompt("mcp-code-review-empty", { issueId }),
+          },
         }],
       };
     }
-
-    const filesTable = files.map((file: any) => `| ${file.path} | ${file.status} | +${file.additions} | -${file.deletions} |`).join("\n");
-
-    const reviewText = [
-      `# Code Review for Issue ${issueId}`,
-      ``,
-      `## Issue Context`,
-      `- **Title**: ${issueData.title ?? "Unknown"}`,
-      `- **Description**: ${issueData.description ?? "No description"}`,
-      `- **State**: ${issueData.state ?? "Unknown"}`,
-      ``,
-      `## Change Summary`,
-      `- **Files Changed**: ${files.length}`,
-      `- **Total Additions**: +${totalAdditions}`,
-      `- **Total Deletions**: -${totalDeletions}`,
-      ``,
-      `### Files`,
-      `| Path | Status | Additions | Deletions |`,
-      `|------|--------|-----------|-----------|`,
-      filesTable,
-      ``,
-      `## Diff`,
-      "```diff",
-      diff.length > 50000 ? diff.substring(0, 50000) + "\n... (diff truncated at 50KB)" : diff,
-      "```",
-      ``,
-      `## Review Checklist`,
-      `Please review the changes and evaluate:`,
-      `1. **Correctness**: Do the changes correctly implement what the issue describes?`,
-      `2. **Code Quality**: Is the code clean, readable, and follows project conventions?`,
-      `3. **Error Handling**: Are edge cases and errors properly handled?`,
-      `4. **Security**: Are there any security concerns (hardcoded secrets, SQL injection, XSS)?`,
-      `5. **Performance**: Are there any performance concerns or inefficiencies?`,
-      `6. **Tests**: Are changes adequately covered by tests?`,
-      `7. **Breaking Changes**: Do any changes break backward compatibility?`,
-    ].join("\n");
 
     return {
       description: `Code review prompt for issue ${issueId}.`,
       messages: [{
         role: "user",
-        content: { type: "text", text: reviewText },
+        content: {
+          type: "text",
+          text: await renderPrompt("mcp-code-review", {
+            issueId,
+            title: stringifyValue(issueData.title, "Unknown"),
+            description: stringifyValue(issueData.description, "No description"),
+            state: stringifyValue(issueData.state, "Unknown"),
+            filesChanged: files.length,
+            totalAdditions,
+            totalDeletions,
+            files: files.map((file: any) => ({
+              path: stringifyValue(file?.path, "(unknown)"),
+              status: stringifyValue(file?.status, "modified"),
+              additions: typeof file?.additions === "number" ? file.additions : 0,
+              deletions: typeof file?.deletions === "number" ? file.deletions : 0,
+            })),
+            diff: diff.length > 50000 ? `${diff.substring(0, 50000)}\n... (diff truncated at 50KB)` : diff,
+          }),
+        },
       }],
     };
   }

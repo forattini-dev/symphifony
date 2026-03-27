@@ -20,7 +20,7 @@ export async function buildPlanPrompt(title: string, description: string, fast =
   const commands = discoverCommands(TARGET_ROOT);
   const hasCapabilities = skills.length > 0 || agents.length > 0 || commands.length > 0;
 
-  return renderPrompt("issue-planner", {
+  return renderPrompt("planning-issue-planner", {
     title,
     description: description || "(none provided)",
     fast,
@@ -40,7 +40,7 @@ export async function buildRefinePrompt(
   feedback: string,
   images?: string[],
 ): Promise<string> {
-  return renderPrompt("issue-planner-refine", {
+  return renderPrompt("planning-issue-planner-refine", {
     title,
     description: description || "(none provided)",
     currentPlan: JSON.stringify(currentPlan, null, 2),

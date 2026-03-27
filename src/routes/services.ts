@@ -13,6 +13,10 @@ import {
 } from "../domains/services.ts";
 import { broadcastToWebSocketClients } from "./websocket.ts";
 import {
+  startServiceLogBroadcasting,
+  stopServiceLogBroadcasting,
+} from "../persistence/plugins/service-log-broadcaster.ts";
+import {
   replaceServiceConfigs,
   upsertServiceConfig,
   deleteServiceConfig,
@@ -201,6 +205,7 @@ export function registerServiceRoutes(
       const mergedEnv = { ...entry.env, ...globalVars, ...serviceVars };
       const t = startManagedService(entry, TARGET_ROOT, STATE_ROOT, mergedEnv);
       broadcastTransition(t);
+      startServiceLogBroadcasting(entry.id, STATE_ROOT);
       return c.json({ ok: true, pid: t.pid, state: t.to });
     } catch (err) {
       logger.error({ err }, `[Service] Failed to start ${id}`);
@@ -215,6 +220,7 @@ export function registerServiceRoutes(
     if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
     const t = stopManagedService(id, STATE_ROOT);
     if (t) broadcastTransition(t);
+    stopServiceLogBroadcasting(id);
     return c.json({ ok: true, state: t?.to ?? "stopped" });
   });
 
@@ -387,5 +393,62 @@ export function registerServiceRoutes(
       replaceAllServices: async () => {},
     });
     return c.json(result.body, result.status ?? 200);
+  });
+
+  // POST /api/services/:id/detect-healthcheck — AI reads log and detects host/port
+  app.post("/api/services/:id/detect-healthcheck", async (c) => {
+    const id = c.req.param("id");
+    const entry = (state.config.services ?? []).find((e) => e.id === id);
+    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+
+    try {
+      const logTail = readServiceLogTail(id, STATE_ROOT, 16_384);
+      if (!logTail.trim()) {
+        return c.json({ ok: false, error: "Service log is empty — start the service first." }, 400);
+      }
+
+      const { analyzeLogForHealthcheck } = await import("../agents/planning/log-analyzer.ts");
+      const healthcheck = await analyzeLogForHealthcheck(logTail, entry.name, state.config);
+
+      if (!healthcheck) {
+        return c.json({ ok: true, found: false, healthcheck: null });
+      }
+
+      // Save healthcheck config to the service entry
+      entry.healthcheck = healthcheck;
+      const { replacePersistedService } = await import("../persistence/store.ts");
+      await replacePersistedService(entry);
+
+      return c.json({ ok: true, found: true, healthcheck, saved: true });
+    } catch (err) {
+      logger.error({ err, id }, "[Service] detect-healthcheck failed");
+      return c.json({ ok: false, error: String(err) }, 500);
+    }
+  });
+
+  // POST /api/services/:id/fix — AI reads log and suggests an issue to create
+  app.post("/api/services/:id/fix", async (c) => {
+    const id = c.req.param("id");
+    const entry = (state.config.services ?? []).find((e) => e.id === id);
+    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+
+    try {
+      const logTail = readServiceLogTail(id, STATE_ROOT, 8_192);
+      if (!logTail.trim()) {
+        return c.json({ ok: false, error: "Service log is empty — start the service first." }, 400);
+      }
+
+      const { analyzeLogForFix } = await import("../agents/planning/log-analyzer.ts");
+      const suggestion = await analyzeLogForFix(logTail, entry.name, state.config);
+
+      if (!suggestion) {
+        return c.json({ ok: false, error: "Could not identify a problem from the log." }, 422);
+      }
+
+      return c.json({ ok: true, ...suggestion });
+    } catch (err) {
+      logger.error({ err, id }, "[Service] fix analysis failed");
+      return c.json({ ok: false, error: String(err) }, 500);
+    }
   });
 }

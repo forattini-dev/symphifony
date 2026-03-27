@@ -37,6 +37,10 @@ import {
   startManagedAgentWatcher,
 } from "./domains/agents.ts";
 import { broadcastToWebSocketClients } from "./routes/websocket.ts";
+import {
+  startServiceLogBroadcasting,
+  stopServiceLogBroadcasting,
+} from "./persistence/plugins/service-log-broadcaster.ts";
 import { hydrate as hydrateTokenLedger } from "./domains/tokens.ts";
 import { join } from "node:path";
 import type { RuntimeState } from "./types.ts";
@@ -305,6 +309,7 @@ async function main() {
     );
     for (const t of autoStartTransitions) {
       logger.info({ id: t.id, command: t.to }, "[Boot] Service auto-started");
+      startServiceLogBroadcasting(t.id, STATE_ROOT);
     }
   } catch (err) {
     logger.warn({ err }, "[Boot] Service init failed — continuing");
@@ -343,6 +348,12 @@ async function main() {
         running: t.to === "starting" || t.to === "running",
         pid: t.pid ?? null,
       });
+      // Manage log broadcaster lifecycle alongside FSM transitions
+      if (t.to === "starting") {
+        startServiceLogBroadcasting(t.id, STATE_ROOT);
+      } else if (t.to === "stopped" || t.to === "crashed") {
+        stopServiceLogBroadcasting(t.id);
+      }
     },
   );
 

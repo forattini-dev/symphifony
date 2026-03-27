@@ -2,10 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   Server, Play, Square, Terminal, Circle, Loader2,
-  AlertTriangle, ChevronRight, Folder, Hash,
+  AlertTriangle, ChevronRight, Folder, Hash, Scan, Wrench, CheckCircle2,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useDashboard } from "../context/DashboardContext";
+import { CreateIssueDrawer } from "../components/CreateIssueForm.jsx";
 import { useServices, useServiceLog } from "../hooks/useServices.js";
 import { formatDuration } from "../utils.js";
 import {
@@ -174,6 +175,11 @@ function LogViewer({ id, running, state }) {
 
 function ServiceDrawerBody({ service, onClose, onRefresh }) {
   const [busy, setBusy] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectResult, setDetectResult] = useState(null); // null | { found, healthcheck } | "error"
+  const [fixing, setFixing] = useState(false);
+  const [fixDrawer, setFixDrawer] = useState({ open: false, defaultValues: null });
+  const { createIssue, showToast } = useDashboard();
 
   const state = service.state ?? (service.running ? "running" : "stopped");
   const info = stateInfo(state);
@@ -191,6 +197,33 @@ function ServiceDrawerBody({ service, onClose, onRefresh }) {
     try { await api.post(`/services/${service.id}/stop`, {}); await onRefresh(); }
     finally { setBusy(false); }
   }, [service.id, onRefresh]);
+
+  const handleDetect = useCallback(async () => {
+    setDetecting(true);
+    setDetectResult(null);
+    try {
+      const res = await api.post(`/services/${service.id}/detect-healthcheck`, {});
+      setDetectResult(res.found ? { found: true, healthcheck: res.healthcheck } : { found: false });
+      if (res.found) await onRefresh();
+    } catch (err) {
+      setDetectResult("error");
+      showToast(err.message ?? "Detection failed", "error");
+    } finally {
+      setDetecting(false);
+    }
+  }, [service.id, onRefresh, showToast]);
+
+  const handleFix = useCallback(async () => {
+    setFixing(true);
+    try {
+      const res = await api.post(`/services/${service.id}/fix`, {});
+      setFixDrawer({ open: true, defaultValues: { title: res.title, description: res.description, issueType: res.issueType } });
+    } catch (err) {
+      showToast(err.message ?? "Analysis failed", "error");
+    } finally {
+      setFixing(false);
+    }
+  }, [service.id, showToast]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -283,8 +316,53 @@ function ServiceDrawerBody({ service, onClose, onRefresh }) {
         </div>
       </DrawerSection>
 
+      {/* AI actions */}
+      {(state === "running" || state === "crashed") && (
+        <DrawerSection>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              className="btn btn-xs btn-ghost gap-1.5 opacity-60 hover:opacity-100"
+              onClick={handleDetect}
+              disabled={detecting || fixing}
+              title="Detect host/port from log using AI"
+            >
+              {detecting ? <Loader2 className="size-3.5 animate-spin" /> : <Scan className="size-3.5" />}
+              Detect Config
+            </button>
+            <button
+              className="btn btn-xs btn-ghost gap-1.5 opacity-60 hover:opacity-100"
+              onClick={handleFix}
+              disabled={fixing || detecting}
+              title="Analyze log and create a fix issue"
+            >
+              {fixing ? <Loader2 className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />}
+              Fix
+            </button>
+            {detectResult && detectResult !== "error" && (
+              detectResult.found ? (
+                <span className="flex items-center gap-1.5 text-xs text-success">
+                  <CheckCircle2 className="size-3.5" />
+                  {detectResult.healthcheck?.endpoint ?? `port ${detectResult.healthcheck?.port}`}
+                </span>
+              ) : (
+                <span className="text-xs opacity-40">Could not detect config</span>
+              )
+            )}
+          </div>
+        </DrawerSection>
+      )}
+
       {/* Log viewer */}
       <LogViewer id={service.id} running={service.running} state={state} />
+
+      {/* Fix: Create issue drawer */}
+      <CreateIssueDrawer
+        open={fixDrawer.open}
+        onClose={() => setFixDrawer({ open: false, defaultValues: null })}
+        onSubmit={async (data) => { await createIssue(data); setFixDrawer({ open: false, defaultValues: null }); }}
+        defaultValues={fixDrawer.defaultValues}
+        onToast={showToast}
+      />
     </div>
   );
 }

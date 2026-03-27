@@ -76,7 +76,17 @@ function loadPromptRecords(excludedStubNames: Set<string>): PromptRecord[] {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function buildOutput(records: PromptRecord[]): string {
+function buildCatalogExport(name: string, typeName: string, entries: CatalogEntry[]): string {
+  return [
+    `export const ${name} = `,
+    `${JSON.stringify(entries, null, 2)} as const;`,
+    "",
+    `export type ${typeName} = (typeof ${name})[number];`,
+    "",
+  ].join("\n");
+}
+
+function buildOutput(records: PromptRecord[], agentCatalog: CatalogEntry[], skillCatalog: CatalogEntry[]): string {
   const entries = records
     .map((record) => {
       const relPath = relative(ROOT, record.sourcePath).replace(/\\/g, "/");
@@ -93,43 +103,64 @@ function buildOutput(records: PromptRecord[]): string {
     "",
     "export type PromptTemplateName = keyof typeof PROMPT_TEMPLATES;",
     "",
+    buildCatalogExport("AGENT_CATALOG", "AgentCatalogBundleEntry", agentCatalog),
+    buildCatalogExport("SKILL_CATALOG", "SkillCatalogBundleEntry", skillCatalog),
   ].join("\n");
 }
 
-function generateCatalogFixtures(): Set<string> {
+function buildCatalogEntries(manifestFilename: string): { entries: CatalogEntry[]; stubNames: Set<string> } {
+  const entries = JSON.parse(readFileSync(join(PROMPTS_DIR, manifestFilename), "utf8")) as CatalogEntry[];
   const stubNames = new Set<string>();
+  const resolvedEntries = entries.map((entry) => {
+    if (typeof entry.stub !== "string" || !entry.stub.trim()) {
+      return entry;
+    }
+
+    const stub = entry.stub.trim();
+    stubNames.add(stub);
+    const sourcePath = join(PROMPTS_DIR, stub);
+    const content = loadTemplate(sourcePath);
+    const { stub: _stub, ...rest } = entry;
+    return { ...rest, content };
+  });
+
+  return { entries: resolvedEntries, stubNames };
+}
+
+function generateCatalogArtifacts(): {
+  agentCatalog: CatalogEntry[];
+  skillCatalog: CatalogEntry[];
+  stubNames: Set<string>;
+} {
+  const stubNames = new Set<string>();
+  let agentCatalog: CatalogEntry[] = [];
+  let skillCatalog: CatalogEntry[] = [];
 
   for (const manifest of CATALOG_MANIFESTS) {
-    const manifestPath = join(PROMPTS_DIR, manifest.manifestFilename);
-    const entries = JSON.parse(readFileSync(manifestPath, "utf8")) as CatalogEntry[];
-    const fixtureEntries = entries.map((entry) => {
-      if (typeof entry.stub !== "string" || !entry.stub.trim()) {
-        return entry;
-      }
-
-      const stub = entry.stub.trim();
-      stubNames.add(stub);
-      const sourcePath = join(PROMPTS_DIR, stub);
-      const content = loadTemplate(sourcePath);
-      const { stub: _stub, ...rest } = entry;
-      return { ...rest, content };
-    });
+    const { entries, stubNames: manifestStubNames } = buildCatalogEntries(manifest.manifestFilename);
+    for (const name of manifestStubNames) stubNames.add(name);
 
     writeFileSync(
       join(FIXTURES_DIR, manifest.fixtureFilename),
-      `${JSON.stringify(fixtureEntries, null, 2)}\n`,
+      `${JSON.stringify(entries, null, 2)}\n`,
       "utf8",
     );
+
+    if (manifest.fixtureFilename === "agent-catalog.json") {
+      agentCatalog = entries;
+    } else if (manifest.fixtureFilename === "skill-catalog.json") {
+      skillCatalog = entries;
+    }
   }
 
-  return stubNames;
+  return { agentCatalog, skillCatalog, stubNames };
 }
 
 function main(): void {
-  const catalogStubNames = generateCatalogFixtures();
-  const records = loadPromptRecords(catalogStubNames);
+  const { agentCatalog, skillCatalog, stubNames } = generateCatalogArtifacts();
+  const records = loadPromptRecords(stubNames);
   mkdirSync(OUTPUT_DIR, { recursive: true });
-  writeFileSync(OUTPUT_FILE, buildOutput(records), "utf8");
+  writeFileSync(OUTPUT_FILE, buildOutput(records, agentCatalog, skillCatalog), "utf8");
 }
 
 main();
