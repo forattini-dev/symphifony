@@ -104,8 +104,25 @@ export async function mergeWorkspaceCommand(
   const autoResolve = state.config.autoResolveConflicts ?? false;
 
   // Standard git merge --no-ff (don't abort on conflict when auto-resolve is on)
-  const mergeResult = mergeWorkspace(issue, /* abortOnConflict */ !autoResolve, autoCommit);
-  result = mergeResult;
+  try {
+    result = mergeWorkspace(issue, /* abortOnConflict */ !autoResolve, autoCommit);
+  } catch (mergeErr) {
+    const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+    // When autoCommitBeforeMerge=false blocks the merge, transition to Blocked
+    if (msg.includes("uncommitted changes") && !autoCommit) {
+      issue.lastError = msg;
+      issue.lastFailedPhase = "merge";
+      deps.issueRepository.markDirty(issue.id);
+      deps.eventStore.addEvent(issue.id, "error", `Merge blocked: ${msg}`);
+      await transitionIssueCommand(
+        { issue, target: "Blocked", note: "Merge blocked by uncommitted changes in target repo. Enable 'Auto-commit before merge' or commit manually." },
+        deps,
+      );
+      await deps.persistencePort.persistState(state);
+      return { copied: [], deleted: [], skipped: [], conflicts: [] };
+    }
+    throw mergeErr;
+  }
 
   // ── Layer 2: Agent-based conflict resolution ──────────────────────────
   if (result.conflicts.length > 0 && autoResolve) {
@@ -199,7 +216,20 @@ export async function mergeWorkspaceCommand(
   };
 
   if (result.conflicts.length > 0) {
-    deps.eventStore.addEvent(issue.id, "error", `Merge aborted — ${result.conflicts.length} conflict(s) remain: ${result.conflicts.join(", ")}`);
+    const conflictMsg = `Merge has ${result.conflicts.length} conflict(s): ${result.conflicts.join(", ")}`;
+    deps.eventStore.addEvent(issue.id, "error", conflictMsg);
+
+    // When autoResolveConflicts=false, move to Blocked so the user knows intervention is needed
+    if (!autoResolve) {
+      issue.lastError = conflictMsg;
+      issue.lastFailedPhase = "merge";
+      deps.issueRepository.markDirty(issue.id);
+      await transitionIssueCommand(
+        { issue, target: "Blocked", note: "Merge blocked by conflicts. Enable 'Auto-resolve conflicts' or resolve manually." },
+        deps,
+      );
+    }
+
     await deps.persistencePort.persistState(state);
     return result;
   }

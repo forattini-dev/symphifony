@@ -740,7 +740,7 @@ describe("mergeWorkspace guards", () => {
 
     try {
       assert.throws(
-        () => mergeWorkspace(issue),
+        () => mergeWorkspace(issue, true, false),
         /uncommitted changes/,
       );
     } finally {

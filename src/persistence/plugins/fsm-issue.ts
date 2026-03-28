@@ -178,7 +178,7 @@ export const issueStateMachineConfig = {
           entry: "onEnterBlocked",
         },
         Approved: {
-          on: { MERGE: "Merged", REOPEN: "Planning" },
+          on: { MERGE: "Merged", BLOCK: "Blocked", REOPEN: "Planning" },
           entry: "onEnterApproved",
         },
         Merged: {
