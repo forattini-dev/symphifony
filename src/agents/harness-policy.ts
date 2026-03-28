@@ -391,7 +391,21 @@ export function recommendCheckpointPolicyForIssue(
   const profile = resolveEffectiveReviewProfile(issue);
   const complexity = issue.plan?.estimatedComplexity ?? "medium";
   const lowScope = complexity === "trivial" || complexity === "low";
-  const highCheckpointRisk = HIGH_CHECKPOINT_PROFILES.has(profile.primary) && !lowScope;
+
+  // Trivial/low tasks never get checkpoint review — the overhead isn't justified.
+  if (lowScope) {
+    if (currentCheckpointPolicy !== "final_only") {
+      return {
+        checkpointPolicy: "final_only",
+        profile,
+        basis: "heuristic",
+        rationale: `Disabled checkpoint review because ${complexity} complexity does not warrant an intermediate review pass.`,
+      };
+    }
+    return null;
+  }
+
+  const highCheckpointRisk = HIGH_CHECKPOINT_PROFILES.has(profile.primary);
   const stats = computeCheckpointPolicyStats(issues, profile.primary);
   const finalOnly = stats.final_only;
   const checkpointed = stats.checkpointed;
@@ -448,15 +462,6 @@ export function recommendCheckpointPolicyForIssue(
         rationale: `Disabled checkpoint review for ${profile.primary}: checkpointed runs almost never catch issues before final review (${Math.round(checkpointCatchRate * 100)}%), while final-only contractual runs stay within 5pp on final gate and first-pass outcomes.`,
       };
     }
-  }
-
-  if (currentCheckpointPolicy === "checkpointed" && lowScope) {
-    return {
-      checkpointPolicy: "final_only",
-      profile,
-      basis: "heuristic",
-      rationale: `Disabled checkpoint review because ${complexity} contractual work should keep the contract gate but avoid an intermediate review pass.`,
-    };
   }
 
   return null;

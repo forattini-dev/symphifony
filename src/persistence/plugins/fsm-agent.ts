@@ -716,16 +716,23 @@ async function finalizeReviewSuccess(
   await sendIssueToManualDecisionCommand(issue, completionNote, container);
   if (!autoReviewApproval) return;
 
-  const validation = await runValidationGate(issue, state.config);
-  if (validation) {
-    issue.validationResult = validation;
-    markIssueDirty(issue.id);
-    if (!validation.passed) {
-      addEvent(state, issue.id, "error", `Validation gate failed for ${issue.identifier}: ${validation.command}`);
-      logger.warn({ issueId: issue.id, command: validation.command }, "[AgentFSM] Validation gate failed after successful review path");
-      return;
+  // Skip post-approval validation if the pre-review gate already passed — the review
+  // phase doesn't modify code, so re-running the same testCommand is pure waste.
+  const preReviewAlreadyPassed = issue.preReviewValidation?.passed === true;
+  if (preReviewAlreadyPassed) {
+    addEvent(state, issue.id, "info", `Post-approval validation skipped for ${issue.identifier}: pre-review gate already passed.`);
+  } else {
+    const validation = await runValidationGate(issue, state.config);
+    if (validation) {
+      issue.validationResult = validation;
+      markIssueDirty(issue.id);
+      if (!validation.passed) {
+        addEvent(state, issue.id, "error", `Validation gate failed for ${issue.identifier}: ${validation.command}`);
+        logger.warn({ issueId: issue.id, command: validation.command }, "[AgentFSM] Validation gate failed after successful review path");
+        return;
+      }
+      addEvent(state, issue.id, "info", `Validation gate passed for ${issue.identifier}.`);
     }
-    addEvent(state, issue.id, "info", `Validation gate passed for ${issue.identifier}.`);
   }
 
   await approveIssueAfterReviewCommand(issue, completionNote, container);
