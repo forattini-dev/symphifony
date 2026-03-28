@@ -747,7 +747,7 @@ function autoCommitTargetIfDirty(): void {
 
 /** Merge a worktree branch into TARGET_ROOT using git merge --no-ff.
  *  When abortOnConflict is false, conflict markers are left in place for agent resolution. */
-function mergeWorktree(issue: IssueEntry, abortOnConflict = true): MergeResult {
+function mergeWorktree(issue: IssueEntry, abortOnConflict = true, autoCommit = true): MergeResult {
   const result: MergeResult = { copied: [], deleted: [], skipped: [], conflicts: [] };
   ensureWorktreeCommitted(issue);
 
@@ -756,7 +756,14 @@ function mergeWorktree(issue: IssueEntry, abortOnConflict = true): MergeResult {
     throw new Error(`Cannot merge ${issue.identifier}: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
   }
 
-  autoCommitTargetIfDirty();
+  const targetStatus = execSync("git status --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (targetStatus) {
+    if (autoCommit) {
+      autoCommitTargetIfDirty();
+    } else {
+      throw new Error(`Cannot merge ${issue.identifier}: target repository has uncommitted changes. Enable 'Auto-commit before merge' in Settings or commit manually.`);
+    }
+  }
 
   // Collect changed files before merging (for the result summary)
   try {
@@ -812,10 +819,10 @@ export function shouldSkipMergePath(relativePath: string): boolean {
 }
 
 /** Merge a worktree branch into TARGET_ROOT. */
-export function mergeWorkspace(issue: IssueEntry, abortOnConflict = true): MergeResult {
+export function mergeWorkspace(issue: IssueEntry, abortOnConflict = true, autoCommit = true): MergeResult {
   ensureGitRepoReadyForWorktrees(TARGET_ROOT, "merge issues");
   assertIssueHasGitWorktree(issue, "merge");
-  return mergeWorktree(issue, abortOnConflict);
+  return mergeWorktree(issue, abortOnConflict, autoCommit);
 }
 
 // ── Dry merge (pre-merge conflict detection) ────────────────────────────────
@@ -828,7 +835,7 @@ export type DryMergeResult = {
 };
 
 /** Run a no-commit merge to detect conflicts without modifying the working tree. */
-export function dryMerge(issue: IssueEntry): DryMergeResult {
+export function dryMerge(issue: IssueEntry, autoCommit = true): DryMergeResult {
   ensureGitRepoReadyForWorktrees(TARGET_ROOT, "preview merges");
   assertIssueHasGitWorktree(issue, "preview merge");
 
@@ -839,7 +846,14 @@ export function dryMerge(issue: IssueEntry): DryMergeResult {
     throw new Error(`Cannot preview merge: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
   }
 
-  autoCommitTargetIfDirty();
+  const targetStatus = execSync("git status --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
+  if (targetStatus) {
+    if (autoCommit) {
+      autoCommitTargetIfDirty();
+    } else {
+      throw new Error(`Cannot preview merge: target repository has uncommitted changes. Enable 'Auto-commit before merge' in Settings or commit manually.`);
+    }
+  }
 
   let conflictFiles: string[] = [];
   let willConflict = false;

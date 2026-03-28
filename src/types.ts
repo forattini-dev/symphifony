@@ -572,7 +572,10 @@ export type ServiceGraphEdge = {
   requestCount: number;
   errorCount: number;
   avgLatencyMs: number;
+  p50LatencyMs: number;
+  p90LatencyMs: number;
   p95LatencyMs: number;
+  p99LatencyMs: number;
   lastSeenAt: string;
   topPaths: { path: string; count: number }[];
 };
@@ -642,6 +645,10 @@ export type RuntimeConfig = {
   meshProxyPort?: number;
   /** Max traffic entries kept in the in-memory ring buffer. Default: 1000 */
   meshBufferSize?: number;
+  /** Auto-commit dirty TARGET_ROOT before merge/preview so merges aren't blocked. Default: true */
+  autoCommitBeforeMerge?: boolean;
+  /** When merge has conflicts, re-execute agent to resolve them automatically. Default: false */
+  autoResolveConflicts?: boolean;
 };
 
 export type ProjectNameSource = "saved" | "detected" | "missing";

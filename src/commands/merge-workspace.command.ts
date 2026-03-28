@@ -100,12 +100,15 @@ export async function mergeWorkspaceCommand(
 
   let result: MergeWorkspaceResult;
 
-  // Standard git merge --no-ff (don't abort on conflict — agent may resolve)
-  const mergeResult = mergeWorkspace(issue, /* abortOnConflict */ false);
+  const autoCommit = state.config.autoCommitBeforeMerge ?? true;
+  const autoResolve = state.config.autoResolveConflicts ?? false;
+
+  // Standard git merge --no-ff (don't abort on conflict when auto-resolve is on)
+  const mergeResult = mergeWorkspace(issue, /* abortOnConflict */ !autoResolve, autoCommit);
   result = mergeResult;
 
   // ── Layer 2: Agent-based conflict resolution ──────────────────────────
-  if (result.conflicts.length > 0) {
+  if (result.conflicts.length > 0 && autoResolve) {
     deps.eventStore.addEvent(issue.id, "info", `Merge conflicts in ${result.conflicts.length} file(s): ${result.conflicts.join(", ")}. Attempting agent-based resolution...`);
     logger.info({ issueId: issue.id, conflicts: result.conflicts }, "[Merge] Conflicts detected — spawning agent to resolve");
 

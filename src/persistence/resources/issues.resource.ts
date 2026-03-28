@@ -392,7 +392,8 @@ async function mergeIssuePreview(c: unknown) {
 
   try {
     const { dryMerge } = await import("../../domains/workspace.ts");
-    const result = dryMerge(issue);
+    const autoCommit = context.state.config.autoCommitBeforeMerge ?? true;
+    const result = dryMerge(issue, autoCommit);
     return { body: { ok: true, ...result } };
   } catch (error) {
     logger.error(`Failed to preview merge for ${issueId}: ${String(error)}`);

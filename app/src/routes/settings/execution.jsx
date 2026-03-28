@@ -26,6 +26,8 @@ function ExecutionSettings() {
   const [testCommand, setTestCommand] = useState("");
   const [autoReviewApproval, setAutoReviewApproval] = useState(true);
   const [maxTurns, setMaxTurns] = useState(4);
+  const [autoCommitBeforeMerge, setAutoCommitBeforeMerge] = useState(true);
+  const [autoResolveConflicts, setAutoResolveConflicts] = useState(false);
 
   // Saved indicators
   const [sandboxSaved, setSandboxSaved] = useState(false);
@@ -33,6 +35,8 @@ function ExecutionSettings() {
   const [testSaved, setTestSaved] = useState(false);
   const [approveSaved, setApproveSaved] = useState(false);
   const [turnsSaved, setTurnsSaved] = useState(false);
+  const [autoCommitSaved, setAutoCommitSaved] = useState(false);
+  const [autoResolveSaved, setAutoResolveSaved] = useState(false);
 
   // ── Debounce timers ────────────────────────────────────────────────────────
   const sandboxTimer = useRef(null);
@@ -40,6 +44,8 @@ function ExecutionSettings() {
   const testTimer = useRef(null);
   const approveTimer = useRef(null);
   const turnsTimer = useRef(null);
+  const autoCommitTimer = useRef(null);
+  const autoResolveTimer = useRef(null);
 
   // Current value refs (avoid stale closures in timers)
   const sandboxRef = useRef({ docker: false, image: "fifony-agent:latest" });
@@ -47,6 +53,8 @@ function ExecutionSettings() {
   const testRef = useRef("");
   const approveRef = useRef(true);
   const turnsRef = useRef(4);
+  const autoCommitRef = useRef(true);
+  const autoResolveRef = useRef(false);
 
   // ── Hydration ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -61,13 +69,19 @@ function ExecutionSettings() {
     setDockerImage(image);
     setConcurrency(conc);
     setTestCommand(test);
+    const commitMerge = getSettingValue(settings, "runtime.autoCommitBeforeMerge", true);
+    const resolveConf = getSettingValue(settings, "runtime.autoResolveConflicts", false);
     setAutoReviewApproval(approve);
     setMaxTurns(turns);
+    setAutoCommitBeforeMerge(commitMerge);
+    setAutoResolveConflicts(resolveConf);
     sandboxRef.current = { docker, image };
     concurrencyRef.current = conc;
     testRef.current = test;
     approveRef.current = approve;
     turnsRef.current = turns;
+    autoCommitRef.current = commitMerge;
+    autoResolveRef.current = resolveConf;
     setHydrated(true);
   }, [settings, hydrated]);
 
@@ -162,9 +176,33 @@ function ExecutionSettings() {
     }, 600);
   }, [saveSetting]);
 
+  const handleAutoCommitChange = useCallback((val) => {
+    setAutoCommitBeforeMerge(val);
+    autoCommitRef.current = val;
+    if (autoCommitTimer.current) clearTimeout(autoCommitTimer.current);
+    autoCommitTimer.current = setTimeout(async () => {
+      try {
+        await saveSetting("runtime.autoCommitBeforeMerge", autoCommitRef.current);
+        flash(setAutoCommitSaved);
+      } catch {}
+    }, 600);
+  }, [saveSetting]);
+
+  const handleAutoResolveChange = useCallback((val) => {
+    setAutoResolveConflicts(val);
+    autoResolveRef.current = val;
+    if (autoResolveTimer.current) clearTimeout(autoResolveTimer.current);
+    autoResolveTimer.current = setTimeout(async () => {
+      try {
+        await saveSetting("runtime.autoResolveConflicts", autoResolveRef.current);
+        flash(setAutoResolveSaved);
+      } catch {}
+    }, 600);
+  }, [saveSetting]);
+
   // ── Cleanup ────────────────────────────────────────────────────────────────
   useEffect(() => () => {
-    [sandboxTimer, concurrencyTimer, testTimer, approveTimer, turnsTimer].forEach((t) => {
+    [sandboxTimer, concurrencyTimer, testTimer, approveTimer, turnsTimer, autoCommitTimer, autoResolveTimer].forEach((t) => {
       if (t.current) clearTimeout(t.current);
     });
   }, []);
@@ -315,6 +353,48 @@ function ExecutionSettings() {
             onChange={(e) => handleAutoApproveChange(e.target.checked)}
           />
           <span className="label-text text-sm">{autoReviewApproval ? "Enabled" : "Disabled"}</span>
+        </label>
+      </SettingsSection>
+
+      {/* Auto-commit before merge */}
+      <SettingsSection
+        icon={GitMerge}
+        title={<span className="flex items-center gap-2">Auto-commit before merge <SavedBadge show={autoCommitSaved} /></span>}
+        description={
+          autoCommitBeforeMerge
+            ? "Uncommitted changes in the project are automatically committed before merge so the process isn't blocked."
+            : "Merge will fail if the project has uncommitted changes. Issues will move to Blocked until you commit manually."
+        }
+      >
+        <label className="label cursor-pointer justify-start gap-3 p-0">
+          <input
+            type="checkbox"
+            className="toggle toggle-sm toggle-primary"
+            checked={autoCommitBeforeMerge}
+            onChange={(e) => handleAutoCommitChange(e.target.checked)}
+          />
+          <span className="label-text text-sm">{autoCommitBeforeMerge ? "Enabled" : "Disabled"}</span>
+        </label>
+      </SettingsSection>
+
+      {/* Auto-resolve merge conflicts */}
+      <SettingsSection
+        icon={GitMerge}
+        title={<span className="flex items-center gap-2">Auto-resolve merge conflicts <SavedBadge show={autoResolveSaved} /></span>}
+        description={
+          autoResolveConflicts
+            ? "When a merge has conflicts, an agent is spawned to resolve them automatically."
+            : "Merge conflicts will block the issue. You must resolve conflicts manually."
+        }
+      >
+        <label className="label cursor-pointer justify-start gap-3 p-0">
+          <input
+            type="checkbox"
+            className="toggle toggle-sm toggle-primary"
+            checked={autoResolveConflicts}
+            onChange={(e) => handleAutoResolveChange(e.target.checked)}
+          />
+          <span className="label-text text-sm">{autoResolveConflicts ? "Enabled" : "Disabled"}</span>
         </label>
       </SettingsSection>
 
