@@ -559,10 +559,10 @@ function ServiceCard({ service, selected, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(service.id)}
-      className={`group relative text-left rounded border border-base-200/40 bg-base-100 transition-all duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30
-        ${selected ? "ring-1 ring-primary/40 bg-base-200/40" : "hover:bg-base-200/30"}${state === "crashed" ? " border-error/20" : ""}`}
+      className={`group relative text-left rounded-md border border-base-content/[0.08] bg-base-200/40 transition-all duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30
+        ${selected ? "ring-1 ring-primary/30 bg-base-200/70" : "hover:bg-base-200/60"}${state === "crashed" ? " border-error/20" : ""}`}
     >
-      <div className="px-3 py-2.5">
+      <div className="px-3.5 py-3">
         {/* Row 1: dot + name + action */}
         <div className="flex items-center gap-2">
           <Circle className={`size-1.5 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
@@ -627,8 +627,8 @@ function ServiceCard({ service, selected, onSelect }) {
 
 function SkeletonCard() {
   return (
-    <div className="border-l-2 border-base-300 rounded-sm bg-base-100 animate-pulse">
-      <div className="px-3 py-2.5">
+    <div className="rounded-md bg-base-200/50 animate-pulse">
+      <div className="px-3.5 py-3">
         <div className="flex items-center gap-2 mb-1.5">
           <div className="h-3.5 w-24 rounded bg-base-300 flex-1 max-w-[8rem]" />
           <div className="h-4 w-12 rounded-full bg-base-300 shrink-0" />
