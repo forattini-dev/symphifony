@@ -385,6 +385,52 @@ function ReviewApprovalCard({ autoReviewApproval, setAutoReviewApproval }) {
   );
 }
 
+function MergeOptionsCard({ autoCommitBeforeMerge, setAutoCommitBeforeMerge, autoResolveConflicts, setAutoResolveConflicts }) {
+  return (
+    <div className="bg-base-200 rounded-2xl p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <GitMerge className="size-4 text-primary" />
+        <div className="text-sm font-semibold">Merge behavior</div>
+      </div>
+      <p className="text-xs text-base-content/50 -mt-2">
+        Control how fifony handles merge blockers automatically.
+      </p>
+      <label className="label cursor-pointer justify-start gap-3">
+        <input
+          type="checkbox"
+          className="toggle toggle-sm toggle-primary"
+          checked={autoCommitBeforeMerge}
+          onChange={(e) => setAutoCommitBeforeMerge(e.target.checked)}
+        />
+        <div>
+          <span className="label-text text-sm">Auto-commit before merge</span>
+          <p className="text-xs text-base-content/50 mt-0.5">
+            {autoCommitBeforeMerge
+              ? "Uncommitted changes are committed automatically so merges aren't blocked."
+              : "Merge will fail if there are uncommitted changes — issues move to Blocked."}
+          </p>
+        </div>
+      </label>
+      <label className="label cursor-pointer justify-start gap-3">
+        <input
+          type="checkbox"
+          className="toggle toggle-sm toggle-primary"
+          checked={autoResolveConflicts}
+          onChange={(e) => setAutoResolveConflicts(e.target.checked)}
+        />
+        <div>
+          <span className="label-text text-sm">Auto-resolve merge conflicts</span>
+          <p className="text-xs text-base-content/50 mt-0.5">
+            {autoResolveConflicts
+              ? "An agent is spawned to resolve conflicts automatically when a merge collides."
+              : "Merge conflicts block the issue — you must resolve them manually."}
+          </p>
+        </div>
+      </label>
+    </div>
+  );
+}
+
 function SetupStep({
   projectName, setProjectName,
   detectedProjectName, projectSource, workspacePath,
@@ -392,6 +438,8 @@ function SetupStep({
   mergeMode, setMergeMode, prBaseBranch, setPrBaseBranch,
   autoReviewApproval, setAutoReviewApproval,
   testCommand, setTestCommand,
+  autoCommitBeforeMerge, setAutoCommitBeforeMerge,
+  autoResolveConflicts, setAutoResolveConflicts,
 }) {
   const normalizedProjectName = normalizeProjectName(projectName);
   const queueTitle = buildQueueTitle(normalizedProjectName || detectedProjectName);
@@ -470,6 +518,7 @@ function SetupStep({
       <BranchCard currentBranch={currentBranch} onGitStatusChange={onGitStatusChange} onBranchCreated={onBranchCreated} />
       <MergeModeCard mergeMode={mergeMode} setMergeMode={setMergeMode} prBaseBranch={prBaseBranch} setPrBaseBranch={setPrBaseBranch} currentBranch={currentBranch} />
       <ReviewApprovalCard autoReviewApproval={autoReviewApproval} setAutoReviewApproval={setAutoReviewApproval} />
+      <MergeOptionsCard autoCommitBeforeMerge={autoCommitBeforeMerge} setAutoCommitBeforeMerge={setAutoCommitBeforeMerge} autoResolveConflicts={autoResolveConflicts} setAutoResolveConflicts={setAutoResolveConflicts} />
       <TestCommandCard testCommand={testCommand} setTestCommand={setTestCommand} />
     </div>
   );

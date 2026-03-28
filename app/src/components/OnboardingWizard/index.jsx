@@ -56,6 +56,8 @@ export default function OnboardingWizard({ onComplete }) {
   const [prBaseBranch, setPrBaseBranch] = useState("");
   const [testCommand, setTestCommand] = useState("");
   const [autoReviewApproval, setAutoReviewApproval] = useState(true);
+  const [autoCommitBeforeMerge, setAutoCommitBeforeMerge] = useState(true);
+  const [autoResolveConflicts, setAutoResolveConflicts] = useState(false);
 
   const STEP_COUNT = getStepCount();
   const STEP_LABELS = getStepLabels();
@@ -126,6 +128,10 @@ export default function OnboardingWizard({ onComplete }) {
     if (typeof savedAutoReviewApproval === "boolean") {
       setAutoReviewApproval(savedAutoReviewApproval);
     }
+    const savedAutoCommit = getSettingValue(settings, "runtime.autoCommitBeforeMerge", true);
+    if (typeof savedAutoCommit === "boolean") setAutoCommitBeforeMerge(savedAutoCommit);
+    const savedAutoResolve = getSettingValue(settings, "runtime.autoResolveConflicts", false);
+    if (typeof savedAutoResolve === "boolean") setAutoResolveConflicts(savedAutoResolve);
 
     const savedMergeMode = getSettingValue(settings, "runtime.mergeMode", "local");
     if (savedMergeMode === "local" || savedMergeMode === "push-pr") setMergeMode(savedMergeMode);
@@ -223,6 +229,8 @@ export default function OnboardingWizard({ onComplete }) {
         saveSetting("runtime.prBaseBranch", prBaseBranch.trim(), "runtime").catch(() => {});
       }
       saveSetting("runtime.autoReviewApproval", autoReviewApproval, "runtime").catch(() => {});
+      saveSetting("runtime.autoCommitBeforeMerge", autoCommitBeforeMerge, "runtime").catch(() => {});
+      saveSetting("runtime.autoResolveConflicts", autoResolveConflicts, "runtime").catch(() => {});
       if (testCommand.trim()) {
         saveSetting("runtime.testCommand", testCommand.trim(), "runtime").catch(() => {});
       }
@@ -240,7 +248,7 @@ export default function OnboardingWizard({ onComplete }) {
       saveSetting("ui.theme", selectedTheme, "ui").catch(() => {});
       api.post("/config/concurrency", { concurrency }).catch(() => {});
     }
-  }, [pipeline, efforts, models, concurrency, selectedTheme, normalizedProjectName, mergeMode, prBaseBranch, testCommand, autoReviewApproval]);
+  }, [pipeline, efforts, models, concurrency, selectedTheme, normalizedProjectName, mergeMode, prBaseBranch, testCommand, autoReviewApproval, autoCommitBeforeMerge, autoResolveConflicts]);
 
   const goNext = useCallback(() => {
     if (step < STEP_COUNT - 1) {
@@ -283,6 +291,8 @@ export default function OnboardingWizard({ onComplete }) {
       saves.push(api.post("/config/concurrency", { concurrency }));
       saves.push(saveSetting("runtime.mergeMode", mergeMode, "runtime"));
       saves.push(saveSetting("runtime.autoReviewApproval", autoReviewApproval, "runtime"));
+      saves.push(saveSetting("runtime.autoCommitBeforeMerge", autoCommitBeforeMerge, "runtime"));
+      saves.push(saveSetting("runtime.autoResolveConflicts", autoResolveConflicts, "runtime"));
       if (mergeMode === "push-pr" && prBaseBranch.trim()) {
         saves.push(saveSetting("runtime.prBaseBranch", prBaseBranch.trim(), "runtime"));
       }
@@ -343,7 +353,7 @@ export default function OnboardingWizard({ onComplete }) {
       qc.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
       onComplete?.();
     }
-  }, [normalizedProjectName, pipeline, efforts, models, concurrency, selectedTheme, selectedAgents, selectedSkills, mergeMode, prBaseBranch, testCommand, autoReviewApproval, qc, onComplete]);
+  }, [normalizedProjectName, pipeline, efforts, models, concurrency, selectedTheme, selectedAgents, selectedSkills, mergeMode, prBaseBranch, testCommand, autoReviewApproval, autoCommitBeforeMerge, autoResolveConflicts, qc, onComplete]);
 
   // Can proceed from step
   const canProceed =
@@ -416,6 +426,10 @@ export default function OnboardingWizard({ onComplete }) {
               setAutoReviewApproval={setAutoReviewApproval}
               testCommand={testCommand}
               setTestCommand={setTestCommand}
+              autoCommitBeforeMerge={autoCommitBeforeMerge}
+              setAutoCommitBeforeMerge={setAutoCommitBeforeMerge}
+              autoResolveConflicts={autoResolveConflicts}
+              setAutoResolveConflicts={setAutoResolveConflicts}
             />
           )}
           {stepName === "Pipeline" && (
