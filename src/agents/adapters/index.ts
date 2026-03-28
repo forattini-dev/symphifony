@@ -100,6 +100,13 @@ export async function compileReview(
 
   const hasFrontendChanges = !!playwrightMcpConfigPath;
 
+  // Light review: skip adversarial persona, grading_report, and heavy structured
+  // output for trivial/low complexity solo issues. Just a pass/fail check.
+  const complexity = issue.plan?.estimatedComplexity;
+  const harnessMode = issue.plan?.harnessMode ?? "standard";
+  const lightReview = (complexity === "trivial" || complexity === "low")
+    && (harnessMode === "solo" || harnessMode === "standard");
+
   const prompt = await renderPrompt("compile-review", {
     issueIdentifier: issue.identifier,
     title: issue.title,
@@ -121,6 +128,7 @@ export async function compileReview(
     hasFrontendChanges,
     images: issue.images?.length ? issue.images : undefined,
     preReviewValidation: issue.preReviewValidation ?? null,
+    lightReview,
   });
 
   const adapter = ADAPTERS[reviewer.provider];

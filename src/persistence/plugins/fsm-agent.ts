@@ -608,11 +608,22 @@ export function resolveHarnessMode(issue: IssueEntry): HarnessMode {
   return issue.plan?.harnessMode ?? "standard";
 }
 
+/** Complexity-based reduction for maxTurns within each mode. */
+const COMPLEXITY_TURN_FACTOR: Record<string, number> = {
+  trivial: 0.3,  // solo 10 → 3, standard 20 → 6
+  low: 0.5,      // solo 10 → 5, standard 20 → 10
+  medium: 1.0,
+  high: 1.0,
+};
+
 /** Resolve the effective maxTurns for an issue — user config overrides mode defaults. */
 export function resolveMaxTurns(issue: IssueEntry, config: RuntimeState["config"]): number {
   if (config.maxTurns) return config.maxTurns;
   const mode = resolveHarnessMode(issue);
-  return DEFAULT_MAX_TURNS_BY_MODE[mode] ?? DEFAULT_MAX_TURNS;
+  const base = DEFAULT_MAX_TURNS_BY_MODE[mode] ?? DEFAULT_MAX_TURNS;
+  const complexity = issue.plan?.estimatedComplexity;
+  const factor = (complexity && COMPLEXITY_TURN_FACTOR[complexity]) ?? 1.0;
+  return Math.max(3, Math.round(base * factor));
 }
 
 export function requiresCheckpointReview(issue: IssueEntry): boolean {
