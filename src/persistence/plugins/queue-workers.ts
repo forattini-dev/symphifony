@@ -49,6 +49,9 @@ let persistInterval: ReturnType<typeof setInterval> | null = null;
 /** Analytics broadcast interval handle. */
 let analyticsInterval: ReturnType<typeof setInterval> | null = null;
 
+/** Blocked retry check interval handle. */
+let blockedRetryInterval: ReturnType<typeof setInterval> | null = null;
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 
 export async function initQueueWorkers(state: RuntimeState): Promise<void> {
@@ -82,6 +85,14 @@ export async function initQueueWorkers(state: RuntimeState): Promise<void> {
     }, 30_000);
   }).catch((err) => logger.error({ err }, "[Queue] Failed to init analytics broadcaster"));
 
+  // Periodic auto-retry: unblock issues whose nextRetryAt has arrived
+  blockedRetryInterval = setInterval(() => {
+    if (!active || !runtimeState) return;
+    autoRetryBlockedIssues(runtimeState).catch((err) =>
+      logger.error({ err }, "[Queue] Blocked retry check failed"),
+    );
+  }, 10_000); // every 10s
+
   logger.info("[Queue] Unified work queue ready");
 }
 
@@ -90,6 +101,7 @@ export async function stopQueueWorkers(): Promise<void> {
   if (staleInterval) { clearInterval(staleInterval); staleInterval = null; }
   if (persistInterval) { clearInterval(persistInterval); persistInterval = null; }
   if (analyticsInterval) { clearInterval(analyticsInterval); analyticsInterval = null; }
+  if (blockedRetryInterval) { clearInterval(blockedRetryInterval); blockedRetryInterval = null; }
   runtimeState = null;
   queue.length = 0;
   waiters.length = 0;
@@ -180,6 +192,27 @@ async function checkStaleIssues(): Promise<void> {
   if (!runtimeState) return;
   const { ensureNotStale } = await import("./scheduler.ts");
   await ensureNotStale(runtimeState, runtimeState.config.staleInProgressTimeoutMs);
+}
+
+// ── Auto-retry Blocked issues whose nextRetryAt has arrived ──────────────
+
+async function autoRetryBlockedIssues(state: RuntimeState): Promise<void> {
+  const now = Date.now();
+  for (const issue of state.issues) {
+    if (issue.state !== "Blocked") continue;
+    if (!issue.nextRetryAt) continue;
+    if (issue.attempts >= issue.maxAttempts) continue; // budget exhausted — needs human
+    const retryAt = new Date(issue.nextRetryAt).getTime();
+    if (isNaN(retryAt) || retryAt > now) continue;
+    try {
+      const { transitionIssue } = await import("../../domains/issues.ts");
+      issue.nextRetryAt = undefined;
+      await transitionIssue(issue, "UNBLOCK", { note: `Auto-retry: nextRetryAt reached.` });
+      logger.info({ issueId: issue.id, identifier: issue.identifier }, "[Queue] Auto-retried blocked issue");
+    } catch (err) {
+      logger.warn({ err: String(err), issueId: issue.id }, "[Queue] Failed to auto-retry blocked issue");
+    }
+  }
 }
 
 // ── Drain loop ────────────────────────────────────────────────────────────

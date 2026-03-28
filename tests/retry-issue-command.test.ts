@@ -70,7 +70,7 @@ describe("retry commands", () => {
     await retryExecutionCommand({ issue }, deps);
 
     assert.equal(issue.state, "Queued");
-    assert.equal(issue.attempts, 1);
+    assert.equal(issue.attempts, 0); // UNBLOCK no longer increments attempts
     assert.equal(events.length, 1);
     assert.match(events[0].message, /Execution retry requested/i);
   });
@@ -139,7 +139,7 @@ describe("retry commands", () => {
     await retryIssueCommand({ issue }, deps);
 
     assert.equal(issue.state, "Queued");
-    assert.equal(issue.attempts, 2);
+    assert.equal(issue.attempts, 1); // UNBLOCK no longer double-counts attempts
     assert.equal(events.length, 1);
     assert.match(events[0].message, /Execution retry requested/i);
   });

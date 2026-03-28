@@ -33,6 +33,7 @@ export async function replanIssueCommand(
   issue.planVersion = (issue.planVersion ?? 0) + 1;
   issue.executeAttempt = 0;
   issue.reviewAttempt = 0;
+  issue.attempts = 0; // fresh budget for the new plan
 
   // Transition to Planning — FSM onEnterPlanning action handles enqueue
   await transitionIssueCommand(

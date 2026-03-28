@@ -1023,9 +1023,13 @@ async function runScopedReviewEvaluation(
     issue.commandOutputTail = reviewResult.output;
 
     const rawGradingReport = extractGradingReport(reviewResult.output);
+    // In contractual mode, a missing grading report when the reviewer FAILED (not succeeded)
+    // indicates a reviewer crash — not a structured code quality FAIL. Don't synthesize a
+    // 100% FAIL report that wastes the review budget on infrastructure problems.
+    const isReviewerCrash = !rawGradingReport && !reviewResult.success && resolveHarnessMode(issue) === "contractual";
     const gradingReport = rawGradingReport
       ? applyHarnessReviewPolicy(issue, rawGradingReport, scope)
-      : resolveHarnessMode(issue) === "contractual"
+      : (resolveHarnessMode(issue) === "contractual" && !isReviewerCrash)
         ? applyHarnessReviewPolicy(issue, {
           scope,
           overallVerdict: "FAIL",
@@ -1034,6 +1038,10 @@ async function runScopedReviewEvaluation(
           criteria: [],
         }, scope)
         : null;
+
+    if (isReviewerCrash) {
+      addEvent(state, issue.id, "error", `Reviewer crashed or produced no grading report for ${issue.identifier}. Treating as infrastructure failure, not code quality FAIL.`);
+    }
 
     if (gradingReport) {
       gradingReport.scope = scope;

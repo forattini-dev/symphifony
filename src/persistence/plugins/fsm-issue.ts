@@ -262,8 +262,9 @@ export const issueStateMachineConfig = {
           issue.lastFailedPhase = "review";
           issue.attempts = (issue.attempts ?? 0) + 1;
         } else if (event === "UNBLOCK") {
-          // Retry from Blocked — increment attempt budget
-          issue.attempts = (issue.attempts ?? 0) + 1;
+          // Retry from Blocked — do NOT increment attempts here.
+          // The failure path already incremented it when transitioning to Blocked.
+          // Double-counting drains the budget twice per failure+retry cycle.
         }
 
         // Archive previous attempt summary before clearing lastError
@@ -347,7 +348,11 @@ export const issueStateMachineConfig = {
       const note = typeof context.note === "string" ? context.note : "Blocked";
       if (issue) {
         issue.lastError = note;
-        // nextRetryAt is set by the caller before transition (they know the delay)
+        // If caller didn't set nextRetryAt and budget isn't exhausted, set a 30s fallback
+        // so the auto-retry check in queue-workers can pick it up.
+        if (!issue.nextRetryAt && issue.attempts < issue.maxAttempts) {
+          issue.nextRetryAt = new Date(Date.now() + 30_000).toISOString();
+        }
         emitFsmEvent(issue.id, "error", `${issue.identifier} blocked: ${note}`);
       }
     },
