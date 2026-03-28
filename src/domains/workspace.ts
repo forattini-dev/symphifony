@@ -732,27 +732,16 @@ function ensureWorktreeCommitted(issue: IssueEntry): void {
 
 export { ensureWorktreeCommitted };
 
-/** Auto-stash dirty TARGET_ROOT state before merge operations.
- *  Returns true if a stash was created (caller must pop after). */
-function autoStashTargetIfDirty(): boolean {
+/** Auto-commit dirty TARGET_ROOT state before merge operations so the merge isn't blocked. */
+function autoCommitTargetIfDirty(): void {
   const status = execSync("git status --porcelain", { cwd: TARGET_ROOT, encoding: "utf8" }).trim();
-  if (!status) return false;
+  if (!status) return;
   try {
-    execSync("git stash push -m \"fifony: auto-stash before merge\"", { cwd: TARGET_ROOT, stdio: "pipe" });
-    logger.info("[Workspace] Auto-stashed dirty TARGET_ROOT before merge");
-    return true;
+    execSync("git add -A", { cwd: TARGET_ROOT, stdio: "pipe" });
+    execSync('git commit -m "chore: auto-commit uncommitted changes before fifony merge"', { cwd: TARGET_ROOT, stdio: "pipe" });
+    logger.info("[Workspace] Auto-committed dirty TARGET_ROOT before merge");
   } catch (err) {
-    logger.warn({ err: String(err) }, "[Workspace] Failed to auto-stash TARGET_ROOT");
-    return false;
-  }
-}
-
-function autoStashPop(): void {
-  try {
-    execSync("git stash pop", { cwd: TARGET_ROOT, stdio: "pipe" });
-    logger.info("[Workspace] Restored auto-stashed changes after merge");
-  } catch (err) {
-    logger.warn({ err: String(err) }, "[Workspace] Failed to pop stash — changes preserved in stash list");
+    logger.warn({ err: String(err) }, "[Workspace] Failed to auto-commit TARGET_ROOT");
   }
 }
 
@@ -767,7 +756,7 @@ function mergeWorktree(issue: IssueEntry, abortOnConflict = true): MergeResult {
     throw new Error(`Cannot merge ${issue.identifier}: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
   }
 
-  const stashed = autoStashTargetIfDirty();
+  autoCommitTargetIfDirty();
 
   // Collect changed files before merging (for the result summary)
   try {
@@ -805,7 +794,6 @@ function mergeWorktree(issue: IssueEntry, abortOnConflict = true): MergeResult {
     }
   }
 
-  if (stashed) autoStashPop();
   return result;
 }
 
@@ -851,7 +839,7 @@ export function dryMerge(issue: IssueEntry): DryMergeResult {
     throw new Error(`Cannot preview merge: current branch is ${currentBranch}, expected ${issue.baseBranch}.`);
   }
 
-  const stashed = autoStashTargetIfDirty();
+  autoCommitTargetIfDirty();
 
   let conflictFiles: string[] = [];
   let willConflict = false;
@@ -896,7 +884,6 @@ export function dryMerge(issue: IssueEntry): DryMergeResult {
     changedFiles = diffOut.trim().split("\n").filter(Boolean).length;
   } catch {}
 
-  if (stashed) autoStashPop();
   return { willConflict, conflictFiles, canMerge: !willConflict, changedFiles };
 }
 
