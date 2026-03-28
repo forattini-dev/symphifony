@@ -336,14 +336,17 @@ function MergeModeCard({ mergeMode, setMergeMode, prBaseBranch, setPrBaseBranch,
 }
 
 function TestCommandCard({ testCommand, setTestCommand }) {
+  const hasCommand = Boolean(testCommand?.trim());
+
   return (
     <div className="bg-base-200 rounded-2xl p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <FlaskConical className="size-4 text-primary" />
-        <div className="text-sm font-semibold">Test command</div>
+        <div className="text-sm font-semibold">Validation gate</div>
       </div>
       <p className="text-xs text-base-content/50 -mt-2">
-        Validation gate: this command runs before merge/done. Leave empty to skip.
+        This command runs <strong>after every execution</strong>, before the AI review starts.
+        If it fails, the issue is retried automatically — bad code never reaches the review phase.
       </p>
       <input
         type="text"
@@ -352,6 +355,34 @@ function TestCommandCard({ testCommand, setTestCommand }) {
         value={testCommand}
         onChange={(e) => setTestCommand(e.target.value)}
       />
+      <p className="text-xs text-base-content/40">
+        For monorepos (pnpm/yarn/npm workspaces), Spark automatically scopes tests to
+        affected packages only — no need for <code className="opacity-60">turbo</code> or full-suite runs.
+      </p>
+
+      {!hasCommand && (
+        <div className="alert alert-warning py-3 text-sm">
+          <AlertTriangle className="size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">No safety net configured</p>
+            <p className="opacity-80 mt-0.5">
+              Without a test command, Spark cannot validate that agent changes actually work.
+              Issues will skip the validation gate entirely — if you enable automatic merge,
+              broken code could be merged into your branch without any checks.
+            </p>
+            <p className="opacity-60 mt-1.5 text-xs">
+              You can always add a test command later in Settings &rarr; Workflow.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {hasCommand && (
+        <div className="alert alert-success py-2.5 text-sm">
+          <ShieldCheck className="size-4 shrink-0" />
+          <span>Validation gate active — every execution will be tested before review.</span>
+        </div>
+      )}
     </div>
   );
 }
