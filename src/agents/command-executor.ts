@@ -187,7 +187,8 @@ export async function runCommandWithTimeout(
 
     const daemonArgs = JSON.stringify({
       command: effectiveCommand,
-      workspacePath: issue.worktreePath ?? workspacePath,
+      workspacePath,
+      codePath: issue.worktreePath ?? workspacePath,
       issueId: issue.id,
       startedAt: new Date(started).toISOString(),
       commandSlice: command.slice(0, 200),

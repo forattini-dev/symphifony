@@ -33,6 +33,8 @@ import type { Socket } from "node:net";
 interface DaemonOptions {
   command: string;
   workspacePath: string;
+  /** Git worktree path — used as CWD for the CLI. Falls back to workspacePath if absent. */
+  codePath?: string;
   issueId: string;
   startedAt: string;
   commandSlice: string;
@@ -65,7 +67,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { command, workspacePath, issueId, startedAt, commandSlice } = opts;
+  const { command, workspacePath, codePath, issueId, startedAt, commandSlice } = opts;
+  const effectiveCwd = codePath ?? workspacePath;
 
   const liveLogFile = join(workspacePath, "live-output.log");
   const socketPath = join(workspacePath, "agent.sock");
@@ -134,7 +137,7 @@ async function main(): Promise<void> {
     name: "xterm-256color",
     cols: 220,
     rows: 50,
-    cwd: workspacePath,
+    cwd: effectiveCwd,
     env: process.env as Record<string, string>,
   });
 
