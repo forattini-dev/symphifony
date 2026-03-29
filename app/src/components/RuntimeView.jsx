@@ -104,7 +104,7 @@ function SlotLiveInfo({ issueId, issueState }) {
 function AgentSlot({ index, issue, total, workflow }) {
   if (!issue) {
     return (
-      <div className="slot-idle rounded-box p-6 flex items-center justify-center opacity-30 transition-opacity duration-300 hover:opacity-40 border-2 border-dashed border-base-300">
+      <div className="slot-idle rounded-box p-4 flex items-center justify-center opacity-30 transition-opacity duration-300 hover:opacity-40 border-2 border-dashed border-base-300 min-w-0">
         <div className="flex items-center gap-2 text-sm">
           <Circle className="size-5 animate-pulse-soft" />
           Slot {index + 1} -- idle
@@ -133,7 +133,7 @@ function AgentSlot({ index, issue, total, workflow }) {
   const displayEffort = issue.effort?.[phaseKey] || issue.effort?.default || stageConfig?.effort;
 
   return (
-    <div className={`border-2 rounded-box p-5 space-y-2 animate-fade-in-scale overflow-hidden min-w-0 ${borderClass} ${isRunning ? "slot-active" : ""}`}>
+    <div className={`border-2 rounded-box p-4 space-y-2 animate-fade-in-scale overflow-hidden min-w-0 w-full ${borderClass} ${isRunning ? "slot-active" : ""}`}>
       <div className="flex items-center justify-between min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           {isPlanning
@@ -313,7 +313,7 @@ export function RuntimeView({ state, providers, parallelism, onRefresh, issues: 
           </h3>
           <span className="text-xs opacity-50">{running.length}/{concurrency} slots</span>
         </div>
-        <div className="grid gap-3 min-w-0" style={{ gridTemplateColumns: `repeat(${Math.min(concurrency, 3)}, 1fr)` }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 min-w-0">
           {slots.map((issue, i) => (
             <AgentSlot key={i} index={i} issue={issue} total={concurrency} workflow={workflow} />
           ))}
