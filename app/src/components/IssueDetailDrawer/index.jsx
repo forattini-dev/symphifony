@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, AlertTriangle, Loader, RotateCcw, PlayCircle, GitMerge,
-  GitPullRequest, Trash2,
+  GitPullRequest, Trash2, MessageSquare,
 } from "lucide-react";
+import { ChatDrawer } from "../ChatDrawer.jsx";
 import { DrawerBackdrop } from "../DrawerPrimitives.jsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
@@ -171,6 +172,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
   const [mergeNotice, setMergeNotice] = useState(null);
   const [replanBusy, setReplanBusy] = useState(false);
   const [replanError, setReplanError] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const tabsContainerRef = useRef(null);
   const { data: workflowConfig } = useWorkflowConfig();
 
@@ -327,6 +329,15 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
             <div className="flex items-center gap-0.5 shrink-0">
               <button
                 type="button"
+                className="btn btn-sm btn-ghost btn-circle opacity-40 hover:opacity-80"
+                onClick={() => setChatOpen(true)}
+                aria-label="Chat about issue"
+                title="Chat about this issue"
+              >
+                <MessageSquare className="size-3.5" />
+              </button>
+              <button
+                type="button"
                 className="btn btn-sm btn-ghost btn-circle text-error/40 hover:text-error hover:bg-error/10"
                 onClick={handleDeleteFromDrawer}
                 disabled={issue.state === "Running" || issue.state === "Reviewing"}
@@ -437,6 +448,13 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
           mergeMode={mergeMode}
         />
       </div>
+
+      {/* Chat drawer — layered on top of the issue detail drawer */}
+      <ChatDrawer
+        issue={displayIssue}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
     </div>
   );
 }
