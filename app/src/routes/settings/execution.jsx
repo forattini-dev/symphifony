@@ -268,26 +268,26 @@ function ExecutionSettings() {
               }}
             />
             <div className="space-y-1">
-              <p className="text-xs font-medium">Script (host)</p>
+              <p className="text-xs font-medium">Host</p>
               <p className="text-xs opacity-50 leading-relaxed">
-                Runs directly on your system with the same user and permissions.
-                Full filesystem and network access. No setup required.
+                Runs directly on your machine. Full filesystem and network access.
+                Fast, zero overhead. No isolation.
               </p>
             </div>
           </label>
 
-          <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${sandboxExecution ? "border-info/40 bg-info/5" : "border-base-content/10 bg-base-100/50 opacity-60"}`}>
+          <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${sandboxExecution ? "border-success/40 bg-success/5" : "border-base-content/10 bg-base-100/50 opacity-60"}`}>
             <input
               type="radio"
-              className="radio radio-sm radio-info mt-0.5"
+              className="radio radio-sm radio-success mt-0.5"
               checked={sandboxExecution}
               onChange={() => handleSandboxChange(true)}
             />
             <div className="space-y-1">
-              <p className="text-xs font-medium flex items-center gap-1"><ShieldCheck className="size-3" /> Sandbox</p>
+              <p className="text-xs font-medium flex items-center gap-1"><ShieldCheck className="size-3 text-success" /> Sandbox <span className="badge badge-xs badge-success ml-1">recommended</span></p>
               <p className="text-xs opacity-50 leading-relaxed">
-                Isolates agent execution in a lightweight sandbox. Only the issue worktree is writable.
-                Auto-configures on first use. No Docker required.
+                Lightweight process isolation. Only the issue worktree is writable.
+                Namespace + seccomp + Landlock. Auto-downloads on first use.
               </p>
             </div>
           </label>
@@ -300,13 +300,20 @@ function ExecutionSettings() {
               onChange={() => handleDockerChange(true)}
             />
             <div className="space-y-1">
-              <p className="text-xs font-medium">Docker container</p>
+              <p className="text-xs font-medium">Docker</p>
               <p className="text-xs opacity-50 leading-relaxed">
-                Each execution runs in an isolated container. The agent only sees the issue workspace
-                and the project <code className="font-mono">.git</code> — nothing else on the host filesystem.
+                Full container isolation. Separate kernel namespace.
+                Requires Docker daemon running and a pre-built image.
               </p>
             </div>
           </label>
+        </div>
+
+        {/* Tip: explain how each mode handles permissions */}
+        <div className="text-[11px] leading-relaxed opacity-40 mt-3 space-y-1">
+          <p><strong>Host</strong> — agent CLI runs with full system permissions. Changes are limited to the git worktree by convention, not enforcement.</p>
+          <p><strong>Sandbox</strong> — the worktree is the only writable mount. The agent cannot read ~/.ssh, ~/.aws, or anything outside the project. Network access is preserved.</p>
+          <p><strong>Docker</strong> — strongest isolation. Each run gets a fresh container. Slower startup (~2-5s) and requires a configured Docker image.</p>
         </div>
 
         {dockerExecution && (
