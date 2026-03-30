@@ -330,7 +330,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
               <button
                 type="button"
                 className="btn btn-sm btn-ghost btn-circle opacity-40 hover:opacity-80"
-                onClick={() => navigate({ to: `/chat/${issue.id}` })}
+                onClick={() => { onClose?.(); navigate({ to: `/chat/${issue.id}` }); }}
                 aria-label="Chat about issue"
                 title="Chat about this issue"
               >
