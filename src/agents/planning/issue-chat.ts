@@ -95,14 +95,14 @@ async function runOneShot(
 function buildChatPrompt(payload: {
   title: string;
   description: string;
-  plan?: { summary?: string; steps?: Array<{ title: string }> } | null;
+  plan?: { summary?: string; steps?: Array<{ action?: string; title?: string }> } | null;
   message: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): string {
   const { title, description, plan, message, history } = payload;
 
   const planSection = plan
-    ? `Plan summary: ${plan.summary ?? "(none)"}\nSteps: ${plan.steps?.map((s) => s.title).join(", ") ?? "(none)"}`
+    ? `Plan summary: ${plan.summary ?? "(none)"}\nSteps: ${plan.steps?.map((s) => s.action || s.title || "").filter(Boolean).join(", ") ?? "(none)"}`
     : "No plan yet.";
 
   const historySection = history?.length
@@ -211,7 +211,7 @@ export async function chatWithIssue(
     issueId: string;
     title: string;
     description: string;
-    plan?: { summary?: string; steps?: Array<{ title: string }> } | null;
+    plan?: { summary?: string; steps?: Array<{ action?: string; title?: string }> } | null;
     message: string;
     history?: Array<{ role: "user" | "assistant"; content: string }>;
   },

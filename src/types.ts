@@ -60,7 +60,7 @@ export type IssueEntry = {
   workspacePreparedAt?: string;
   lastError?: string;
   /** Which phase produced the lastError — used by onEnterQueued to tag AttemptSummary */
-  lastFailedPhase?: "plan" | "execute" | "review" | "crash";
+  lastFailedPhase?: "plan" | "execute" | "review" | "merge" | "crash";
   durationMs?: number;
   commandExitCode?: number | null;
   commandOutputTail?: string;
