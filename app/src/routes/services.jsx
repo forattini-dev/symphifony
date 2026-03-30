@@ -121,25 +121,27 @@ function stateInfo(state) {
 // ── Log viewer ─────────────────────────────────────────────────────────────────
 
 const REFRESH_PRESETS = [
-  { label: "WS",  value: 0 },       // WebSocket push — no polling
-  { label: "5s",  value: 5_000 },
-  { label: "10s", value: 10_000 },
-  { label: "30s", value: 30_000 },
-  { label: "1m",  value: 60_000 },
-  { label: "5m",  value: 300_000 },
+  { label: "Auto", value: 0 },      // WS push + auto fallback poll if stale
+  { label: "5s",   value: 5_000 },
+  { label: "10s",  value: 10_000 },
+  { label: "30s",  value: 30_000 },
+  { label: "1m",   value: 60_000 },
 ];
 
 function LogViewer({ id, running, state }) {
   const [log, setLog] = useState("");
   const [logSize, setLogSize] = useState(0);
-  const [status, setStatus] = useState("idle"); // idle | loading | live | error
+  const [status, setStatus] = useState("idle"); // idle | loading | live | stale | error
   const [error, setError] = useState(null);
-  const [pollInterval, setPollInterval] = useState(0); // 0 = WS-only, no HTTP poll
+  const [pollInterval, setPollInterval] = useState(0); // 0 = auto (WS + fallback), >0 = forced poll
   const logRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const html = useMemo(() => (log ? ansiToHtml(log) : ""), [log]);
   const hasLog = Boolean(log && log.trim());
   const lastSizeRef = useRef(0);
+  const lastChunkAtRef = useRef(0); // timestamp of last WS chunk
+  const wsChunkCountRef = useRef(0);
+  const [lastChunkAgo, setLastChunkAgo] = useState(null); // seconds since last chunk
 
   // Initial full fetch
   const fetchFull = useCallback(async () => {
@@ -151,7 +153,7 @@ function LogViewer({ id, running, state }) {
       setLog(res.logTail ?? "");
       lastSizeRef.current = res.logSize ?? 0;
       setLogSize(res.logSize ?? 0);
-      setStatus("live");
+      setStatus(res.logTail ? "live" : "idle");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load logs.");
       setStatus("error");
@@ -167,6 +169,8 @@ function LogViewer({ id, running, state }) {
         setLog((prev) => prev + res.text);
         lastSizeRef.current = res.logSize ?? lastSizeRef.current;
         setLogSize(res.logSize ?? lastSizeRef.current);
+        lastChunkAtRef.current = Date.now();
+        setStatus("live");
       } else if ((res.logSize ?? lastSizeRef.current) < lastSizeRef.current) {
         fetchFull(); // Log truncated — service restarted
       }
@@ -181,6 +185,9 @@ function LogViewer({ id, running, state }) {
     lastSizeRef.current = 0;
     setLogSize(0);
     setStatus("idle");
+    wsChunkCountRef.current = 0;
+    lastChunkAtRef.current = 0;
+    setLastChunkAgo(null);
     if (!id) return;
 
     fetchFull();
@@ -189,6 +196,8 @@ function LogViewer({ id, running, state }) {
     const unsub = onServiceLog(id, (chunk) => {
       setLog((prev) => prev + chunk);
       lastSizeRef.current += new TextEncoder().encode(chunk).length;
+      lastChunkAtRef.current = Date.now();
+      wsChunkCountRef.current++;
       setStatus("live");
     });
 
@@ -198,7 +207,25 @@ function LogViewer({ id, running, state }) {
     };
   }, [id, fetchFull]);
 
-  // Polling at selected interval (fallback / user preference)
+  // Auto-fallback: if service is running and no WS chunks for 10s, start polling
+  useEffect(() => {
+    if (!running || !id || pollInterval > 0) return;
+    const checker = setInterval(() => {
+      const elapsed = lastChunkAtRef.current ? (Date.now() - lastChunkAtRef.current) / 1000 : null;
+      setLastChunkAgo(elapsed);
+
+      // If running and no WS chunk in 10s, fetch incrementally as fallback
+      if (!lastChunkAtRef.current || Date.now() - lastChunkAtRef.current > 10_000) {
+        fetchIncremental();
+        if (lastChunkAtRef.current && Date.now() - lastChunkAtRef.current > 15_000) {
+          setStatus("stale");
+        }
+      }
+    }, 5_000);
+    return () => clearInterval(checker);
+  }, [running, id, pollInterval, fetchIncremental]);
+
+  // Explicit polling when user selects an interval
   useEffect(() => {
     if (!pollInterval || !id) return;
     const timer = setInterval(fetchIncremental, pollInterval);
@@ -218,14 +245,20 @@ function LogViewer({ id, running, state }) {
     setAutoScroll(scrollTop + clientHeight >= scrollHeight - 40);
   }, []);
 
+  const agoText = lastChunkAgo != null && lastChunkAgo > 5
+    ? `${Math.round(lastChunkAgo)}s ago`
+    : null;
+
   const statusBadge = status === "loading"
     ? <span className="flex items-center gap-1.5 text-xs opacity-40"><Loader2 className="size-2.5 animate-spin" />loading</span>
     : status === "error"
       ? <span className="text-xs text-error/70">error</span>
     : hasLog && state === "crashed"
       ? <span className="flex items-center gap-1.5 text-xs text-error/70"><Circle className="size-2 fill-current" />crash log</span>
+    : status === "stale"
+      ? <span className="flex items-center gap-1.5 text-xs text-warning/70"><Circle className="size-2 fill-warning animate-pulse" />stale{agoText ? ` · ${agoText}` : ""}</span>
     : status === "live"
-      ? <span className="flex items-center gap-1.5 text-xs text-success"><Circle className="size-2 fill-success" />{pollInterval === 0 ? "ws" : "live"}</span>
+      ? <span className="flex items-center gap-1.5 text-xs text-success"><Circle className="size-2 fill-success" />{pollInterval > 0 ? `poll ${pollInterval / 1000}s` : "ws"}{agoText ? ` · ${agoText}` : ""}</span>
     : hasLog
       ? <span className="text-xs opacity-45">saved log</span>
     : <span className="text-xs opacity-25">no output</span>;
