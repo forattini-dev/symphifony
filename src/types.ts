@@ -645,6 +645,8 @@ export type RuntimeConfig = {
   meshProxyPort?: number;
   /** Max traffic entries kept in the in-memory ring buffer. Default: 1000 */
   meshBufferSize?: number;
+  /** When true, plans with trivial/low complexity auto-approve and skip PendingApproval. Default: true */
+  autoApproveTrivialPlans?: boolean;
   /** Auto-commit dirty TARGET_ROOT before merge/preview so merges aren't blocked. Default: true */
   autoCommitBeforeMerge?: boolean;
   /** When merge has conflicts, re-execute agent to resolve them automatically. Default: false */

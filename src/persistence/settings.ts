@@ -54,6 +54,7 @@ export const SETTING_ID_SERVICE_ENV = "runtime.serviceEnv";
 export const SETTING_ID_MESH_ENABLED = "runtime.meshEnabled";
 export const SETTING_ID_MESH_PROXY_PORT = "runtime.meshProxyPort";
 export const SETTING_ID_MESH_BUFFER_SIZE = "runtime.meshBufferSize";
+export const SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS = "runtime.autoApproveTrivialPlans";
 export const SETTING_ID_AUTO_COMMIT_BEFORE_MERGE = "runtime.autoCommitBeforeMerge";
 export const SETTING_ID_AUTO_RESOLVE_CONFLICTS = "runtime.autoResolveConflicts";
 
@@ -91,6 +92,7 @@ export const RUNTIME_CONFIG_SETTING_IDS = new Set<string>([
   SETTING_ID_MESH_ENABLED,
   SETTING_ID_MESH_PROXY_PORT,
   SETTING_ID_MESH_BUFFER_SIZE,
+  SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS,
   SETTING_ID_AUTO_COMMIT_BEFORE_MERGE,
   SETTING_ID_AUTO_RESOLVE_CONFLICTS,
 ]);
@@ -187,6 +189,7 @@ function buildRuntimeConfigSettings(
     { id: SETTING_ID_MESH_ENABLED, scope: "runtime", value: config.meshEnabled ?? false, source, updatedAt },
     { id: SETTING_ID_MESH_PROXY_PORT, scope: "runtime", value: config.meshProxyPort ?? 0, source, updatedAt },
     { id: SETTING_ID_MESH_BUFFER_SIZE, scope: "runtime", value: config.meshBufferSize ?? 1000, source, updatedAt },
+    { id: SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS, scope: "runtime", value: config.autoApproveTrivialPlans ?? true, source, updatedAt },
     { id: SETTING_ID_AUTO_COMMIT_BEFORE_MERGE, scope: "runtime", value: config.autoCommitBeforeMerge ?? true, source, updatedAt },
     { id: SETTING_ID_AUTO_RESOLVE_CONFLICTS, scope: "runtime", value: config.autoResolveConflicts ?? false, source, updatedAt },
   ];
@@ -373,6 +376,10 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
         if (!Number.isNaN(parsed) && parsed >= 100 && parsed <= 10000) {
           nextConfig.meshBufferSize = parsed;
         }
+        break;
+      }
+      case SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS: {
+        nextConfig.autoApproveTrivialPlans = toBooleanValue(setting.value, true);
         break;
       }
       case SETTING_ID_AUTO_COMMIT_BEFORE_MERGE: {

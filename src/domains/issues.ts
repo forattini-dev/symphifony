@@ -352,3 +352,20 @@ export function getNextRetryAt(issue: IssueEntry, baseMs: number): string {
   const nextDelay = withRetryBackoff(nextAttempt, baseMs);
   return new Date(Date.now() + nextDelay).toISOString();
 }
+
+// ── Fast mode heuristic ──────────────────────────────────────────────────────
+
+const FAST_MODE_ISSUE_TYPES = new Set(["bug", "chore", "docs"]);
+const FAST_MODE_DESCRIPTION_MAX_LENGTH = 150;
+
+/**
+ * Determine whether the planner should use fast mode for an issue.
+ * Fast mode produces a minimal plan (2-4 steps, skips optional fields).
+ *
+ * Heuristic: issue type is bug/chore/docs, OR description is very short.
+ */
+export function shouldUseFastMode(issue: Pick<IssueEntry, "issueType" | "description">): boolean {
+  if (issue.issueType && FAST_MODE_ISSUE_TYPES.has(issue.issueType)) return true;
+  if ((issue.description ?? "").length < FAST_MODE_DESCRIPTION_MAX_LENGTH) return true;
+  return false;
+}

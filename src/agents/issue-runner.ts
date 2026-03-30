@@ -16,7 +16,7 @@ import { now, idToSafePath } from "../concerns/helpers.ts";
 import { logger } from "../concerns/logger.ts";
 import { markIssueDirty } from "../persistence/dirty-tracker.ts";
 import { getEffectiveAgentProviders } from "./providers.ts";
-import { addEvent, computeMetrics, getNextRetryAt } from "../domains/issues.ts";
+import { addEvent, computeMetrics, getNextRetryAt, shouldUseFastMode } from "../domains/issues.ts";
 import { compileReview, buildExecutionAudit, persistExecutionAudit } from "./adapters/index.ts";
 import { generatePlan } from "./planning/issue-planner.ts";
 import { addTokenUsage } from "./directive-parser.ts";
@@ -49,7 +49,8 @@ export async function runPlanningJob(
   const workspaceDir = join(WORKSPACE_ROOT, safeId);
   mkdirSync(workspaceDir, { recursive: true });
 
-  addEvent(state, issue.id, "info", `Plan generation started for ${issue.identifier} (v${(issue.planVersion ?? 0) + 1}).`);
+  const fast = shouldUseFastMode(issue);
+  addEvent(state, issue.id, "info", `${fast ? "Fast plan" : "Plan"} generation started for ${issue.identifier} (v${(issue.planVersion ?? 0) + 1}).`);
 
   try {
     const { plan, usage, prompt } = await generatePlan(
@@ -57,7 +58,7 @@ export async function runPlanningJob(
       issue.description,
       state.config,
       null,
-      { persistSession: false },
+      { fast, persistSession: false },
     );
 
     issue.plan = plan;

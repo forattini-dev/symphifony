@@ -25,6 +25,7 @@ function ExecutionSettings() {
   const [concurrency, setConcurrency] = useState("3");
   const [testCommand, setTestCommand] = useState("");
   const [autoReviewApproval, setAutoReviewApproval] = useState(true);
+  const [autoApproveTrivialPlans, setAutoApproveTrivialPlans] = useState(true);
   const [maxTurns, setMaxTurns] = useState(4);
   const [autoCommitBeforeMerge, setAutoCommitBeforeMerge] = useState(true);
   const [autoResolveConflicts, setAutoResolveConflicts] = useState(false);
@@ -34,6 +35,7 @@ function ExecutionSettings() {
   const [concurrencySaved, setConcurrencySaved] = useState(false);
   const [testSaved, setTestSaved] = useState(false);
   const [approveSaved, setApproveSaved] = useState(false);
+  const [trivialPlansSaved, setTrivialPlansSaved] = useState(false);
   const [turnsSaved, setTurnsSaved] = useState(false);
   const [autoCommitSaved, setAutoCommitSaved] = useState(false);
   const [autoResolveSaved, setAutoResolveSaved] = useState(false);
@@ -43,6 +45,7 @@ function ExecutionSettings() {
   const concurrencyTimer = useRef(null);
   const testTimer = useRef(null);
   const approveTimer = useRef(null);
+  const trivialPlansTimer = useRef(null);
   const turnsTimer = useRef(null);
   const autoCommitTimer = useRef(null);
   const autoResolveTimer = useRef(null);
@@ -52,6 +55,7 @@ function ExecutionSettings() {
   const concurrencyRef = useRef("3");
   const testRef = useRef("");
   const approveRef = useRef(true);
+  const trivialPlansRef = useRef(true);
   const turnsRef = useRef(4);
   const autoCommitRef = useRef(true);
   const autoResolveRef = useRef(false);
@@ -64,6 +68,7 @@ function ExecutionSettings() {
     const conc = String(getSettingValue(settings, "runtime.workerConcurrency", 3));
     const test = getSettingValue(settings, "runtime.testCommand", "") || "";
     const approve = getSettingValue(settings, "runtime.autoReviewApproval", true);
+    const trivialPlans = getSettingValue(settings, "runtime.autoApproveTrivialPlans", true);
     const turns = getSettingValue(settings, "runtime.maxTurns", 4);
     setDockerExecution(docker);
     setDockerImage(image);
@@ -72,6 +77,7 @@ function ExecutionSettings() {
     const commitMerge = getSettingValue(settings, "runtime.autoCommitBeforeMerge", true);
     const resolveConf = getSettingValue(settings, "runtime.autoResolveConflicts", false);
     setAutoReviewApproval(approve);
+    setAutoApproveTrivialPlans(trivialPlans);
     setMaxTurns(turns);
     setAutoCommitBeforeMerge(commitMerge);
     setAutoResolveConflicts(resolveConf);
@@ -79,6 +85,7 @@ function ExecutionSettings() {
     concurrencyRef.current = conc;
     testRef.current = test;
     approveRef.current = approve;
+    trivialPlansRef.current = trivialPlans;
     turnsRef.current = turns;
     autoCommitRef.current = commitMerge;
     autoResolveRef.current = resolveConf;
@@ -162,6 +169,18 @@ function ExecutionSettings() {
     }, 600);
   }, [saveSetting]);
 
+  const handleTrivialPlansChange = useCallback((val) => {
+    setAutoApproveTrivialPlans(val);
+    trivialPlansRef.current = val;
+    if (trivialPlansTimer.current) clearTimeout(trivialPlansTimer.current);
+    trivialPlansTimer.current = setTimeout(async () => {
+      try {
+        await saveSetting("runtime.autoApproveTrivialPlans", trivialPlansRef.current);
+        flash(setTrivialPlansSaved);
+      } catch {}
+    }, 600);
+  }, [saveSetting]);
+
   const handleMaxTurnsChange = useCallback((val) => {
     setMaxTurns(val);
     turnsRef.current = val;
@@ -202,7 +221,7 @@ function ExecutionSettings() {
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
   useEffect(() => () => {
-    [sandboxTimer, concurrencyTimer, testTimer, approveTimer, turnsTimer, autoCommitTimer, autoResolveTimer].forEach((t) => {
+    [sandboxTimer, concurrencyTimer, testTimer, approveTimer, trivialPlansTimer, turnsTimer, autoCommitTimer, autoResolveTimer].forEach((t) => {
       if (t.current) clearTimeout(t.current);
     });
   }, []);
@@ -353,6 +372,27 @@ function ExecutionSettings() {
             onChange={(e) => handleAutoApproveChange(e.target.checked)}
           />
           <span className="label-text text-sm">{autoReviewApproval ? "Enabled" : "Disabled"}</span>
+        </label>
+      </SettingsSection>
+
+      {/* Auto-approve trivial/low plans */}
+      <SettingsSection
+        icon={GitMerge}
+        title={<span className="flex items-center gap-2">Auto-approve trivial/low plans <SavedBadge show={trivialPlansSaved} /></span>}
+        description={
+          autoApproveTrivialPlans
+            ? "Plans with trivial or low complexity skip manual approval and go straight to execution."
+            : "All plans require manual approval before execution, regardless of complexity."
+        }
+      >
+        <label className="label cursor-pointer justify-start gap-3 p-0">
+          <input
+            type="checkbox"
+            className="toggle toggle-sm toggle-primary"
+            checked={autoApproveTrivialPlans}
+            onChange={(e) => handleTrivialPlansChange(e.target.checked)}
+          />
+          <span className="label-text text-sm">{autoApproveTrivialPlans ? "Enabled" : "Disabled"}</span>
         </label>
       </SettingsSection>
 

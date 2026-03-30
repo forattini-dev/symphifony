@@ -131,7 +131,7 @@ export const EXECUTING_STATES = new Set<IssueState>(["Running", "Reviewing"]);
 export const PERSIST_EVENTS_MAX = 500;
 
 /** Default max automated review→requeue cycles before escalating to human */
-export const DEFAULT_MAX_REVIEW_AUTO_RETRIES = 2;
+export const DEFAULT_MAX_REVIEW_AUTO_RETRIES = 1;
 
 /** Default max turns per execution phase (fallback when no per-mode default applies) */
 export const DEFAULT_MAX_TURNS = 20;

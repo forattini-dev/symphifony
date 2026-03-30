@@ -32,7 +32,7 @@ import {
   recommendCheckpointPolicyForIssue,
   recommendHarnessModeForIssue,
 } from "../../agents/harness-policy.ts";
-import { addEvent, computeMetrics, getNextRetryAt } from "../../domains/issues.ts";
+import { addEvent, computeMetrics, getNextRetryAt, shouldUseFastMode } from "../../domains/issues.ts";
 import { compileReview, buildExecutionAudit, persistExecutionAudit } from "../../agents/adapters/index.ts";
 import { generatePlan } from "../../agents/planning/issue-planner.ts";
 import { addTokenUsage, extractJsonEnvelopeResult } from "../../agents/directive-parser.ts";
@@ -422,12 +422,16 @@ export async function runPlanPhase(
     if (failureContext) {
       addEvent(state, issue.id, "info", `Injecting replan failure context into plan prompt (v${issue.planVersion ?? 1}).`);
     }
+    const fast = shouldUseFastMode(issue);
+    if (fast) {
+      addEvent(state, issue.id, "info", `Fast mode activated for ${issue.identifier} (type: ${issue.issueType ?? "unset"}, desc length: ${(issue.description ?? "").length}).`);
+    }
     const { plan, usage, prompt } = await generatePlan(
       issue.title,
       issue.description,
       state.config,
       null,
-      { persistSession: false, failureContext },
+      { fast, persistSession: false, failureContext },
     );
 
     const plannedIssue: IssueEntry = {
@@ -563,6 +567,21 @@ export async function runPlanPhase(
         await transitionIssue(issue, "PLANNED", { issue });
         // executeTransition already calls triggerImmediatePersist() after the transition,
         // so the frontend sees PendingApproval without waiting for the 5s persist interval.
+
+        // Auto-approve trivial/low plans — skip PendingApproval and go straight to Queued.
+        if (state.config.autoApproveTrivialPlans !== false) {
+          const complexity = issue.plan?.estimatedComplexity;
+          if (complexity === "trivial" || complexity === "low") {
+            try {
+              await transitionIssueCommand(
+                { issue, target: "Queued", note: `Auto-approved ${complexity} plan for ${issue.identifier}.` },
+              );
+              addEvent(state, issue.id, "info", `Auto-approved ${complexity} plan for ${issue.identifier}.`);
+            } catch (autoErr) {
+              logger.warn({ err: autoErr, issueId: issue.id }, "[AgentFSM] Auto-approve failed, staying in PendingApproval");
+            }
+          }
+        }
       } catch (transErr) {
         logger.warn({ err: transErr, issueId: issue.id }, "[AgentFSM] PLANNED transition failed after plan generation");
       }
@@ -1310,6 +1329,19 @@ async function runReviewOnce(
       issue,
       container,
       `Solo harness completed for ${issue.identifier}; awaiting approval semantics.`,
+    );
+    return;
+  }
+
+  // Skip review for trivial issues on standard mode — validation gate is sufficient
+  const complexity = issue.plan?.estimatedComplexity;
+  if (harnessMode === "standard" && complexity === "trivial") {
+    addEvent(state, issue.id, "info", `Trivial complexity for ${issue.identifier} — skipping review, validation gate is sufficient.`);
+    await finalizeReviewSuccess(
+      state,
+      issue,
+      container,
+      `Trivial issue ${issue.identifier} auto-approved; validation gate passed.`,
     );
     return;
   }
