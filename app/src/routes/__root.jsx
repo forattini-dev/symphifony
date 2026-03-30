@@ -146,6 +146,7 @@ function RootLayout() {
   useHotkeys("r", () => ctx.refresh(), { enabled: noDrawer, description: "Refresh", metadata: { group: "global" } }, [ctx, noDrawer]);
 
   // ── Navigation ──────────────────────────────────────────────────────
+  useHotkeys("c", () => navigate({ to: "/chat" }), { enabled: noDrawer && pathname !== "/chat", description: "Chat", metadata: { group: "navigation" } }, [navigate, noDrawer, pathname]);
   useHotkeys("n", () => ctx.setIsCreateOpen(true), { enabled: noDrawer, description: "New issue", metadata: { group: "navigation" } }, [ctx, noDrawer]);
   useHotkeys("k", () => navigate({ to: "/kanban" }), { enabled: noDrawer && pathname !== "/kanban", description: "Go to Kanban", metadata: { group: "navigation" } }, [navigate, noDrawer, pathname]);
   useHotkeys("i", () => navigate({ to: "/issues" }), { enabled: noDrawer && pathname !== "/issues", description: "Go to Issues", metadata: { group: "navigation" } }, [navigate, noDrawer, pathname]);

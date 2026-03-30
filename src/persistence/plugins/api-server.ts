@@ -40,6 +40,7 @@ import { registerServiceRoutes } from "../../routes/services.js";
 import { registerTrafficRoutes } from "../../routes/traffic.js";
 import { registerVariableRoutes } from "../../routes/variables.js";
 import { registerDevProfileRoutes } from "../../routes/dev-profile.js";
+import { registerChatRoutes } from "../../routes/chat.js";
 
 // ── Route collector ──────────────────────────────────────────────────────────
 // Accumulates routes before ApiPlugin construction (ApiPlugin only accepts routes
@@ -178,6 +179,7 @@ export async function startApiServer(
   registerTrafficRoutes(collector, state);
   registerVariableRoutes(collector, state);
   registerDevProfileRoutes(collector);
+  registerChatRoutes(collector, state);
 
   const apiPlugin = new ApiPlugin({
     port,

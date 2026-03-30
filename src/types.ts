@@ -1342,3 +1342,32 @@ export type DetectedProvider = {
   path: string;
   capabilities?: ProviderCapabilities;
 };
+
+// ── Fullscreen Chat ─────────────────────────────────────────────────
+
+export type ChatActionType =
+  | "create-issue" | "retry-issue" | "replan-issue" | "approve-issue" | "merge-issue"
+  | "start-service" | "stop-service" | "restart-service"
+  | "read-file" | "read-service-log" | "list-issues" | "list-services";
+
+export type ChatAction = {
+  type: ChatActionType;
+  payload: Record<string, unknown>;
+};
+
+export type ChatTurn = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  actions?: ChatAction[];
+  timestamp: string;
+};
+
+export type ChatSessionMeta = {
+  id: string;
+  name: string;
+  status: "active" | "archived";
+  provider: string;
+  turns: ChatTurn[];
+  createdAt: string;
+  updatedAt: string;
+};

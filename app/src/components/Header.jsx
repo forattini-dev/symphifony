@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, useLayoutEffect, useCallback } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Kanban, ListTodo, Bot, TrendingUp, Sliders, Server } from "lucide-react";
+import { Kanban, ListTodo, Bot, TrendingUp, Sliders, Server, MessageSquare } from "lucide-react";
 import { buildQueueTitle } from "../project-meta.js";
 
 const NAV_ITEMS = [
+  { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/kanban", label: "Kanban", icon: Kanban },
   { to: "/issues", label: "Issues", icon: ListTodo },
   { to: "/agents", label: "Agents", icon: Bot },

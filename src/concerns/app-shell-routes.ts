@@ -17,6 +17,7 @@ export const APP_SHELL_ROUTES = [
   "/settings/services",
   "/settings/appearance",
   "/settings/providers",
+  "/chat",
 ] as const;
 
 export type AppShellRoute = (typeof APP_SHELL_ROUTES)[number];
