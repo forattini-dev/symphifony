@@ -63,19 +63,8 @@ export function useChat() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const sendMessageMut = useMutation({
-    mutationFn: ({ sessionId, message }) =>
-      api.post("/chat", { sessionId: sessionId || undefined, message }),
-    onSuccess: (res) => {
-      // If a new session was created, switch to it
-      if (res.sessionId && res.sessionId !== currentSessionId) {
-        setCurrentSessionId(res.sessionId);
-      }
-      // Invalidate queries to pick up the new message
-      qc.invalidateQueries({ queryKey: SESSIONS_KEY });
-      if (res.sessionId) {
-        qc.invalidateQueries({ queryKey: sessionKey(res.sessionId) });
-      }
-    },
+    mutationFn: ({ sessionId, message, history }) =>
+      api.post("/chat", { sessionId: sessionId || undefined, message, history }),
   });
 
   const executeActionMut = useMutation({
@@ -123,8 +112,12 @@ export function useChat() {
         ...prev,
         { role: "user", content: trimmed, timestamp: new Date().toISOString() },
       ]);
+      // Build history from current optimistic messages
+      const history = optimisticMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, content: m.content }));
       sendMessageMut.mutate(
-        { sessionId: currentSessionId, message: trimmed },
+        { sessionId: currentSessionId, message: trimmed, history },
         {
           onSuccess: (res) => {
             // Add AI response to optimistic messages
@@ -138,7 +131,7 @@ export function useChat() {
         },
       );
     },
-    [currentSessionId, sendMessageMut],
+    [currentSessionId, sendMessageMut, optimisticMessages],
   );
 
   const executeAction = useCallback(
