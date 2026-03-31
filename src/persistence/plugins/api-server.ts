@@ -32,6 +32,7 @@ import { registerStateRoutes } from "../../routes/state.js";
 import { registerPlanRoutes } from "../../routes/plan.js";
 import { registerSettingsRoutes } from "../../routes/settings.js";
 import { registerAnalyticsRoutes } from "../../routes/analytics.js";
+import { registerTranscriptRoutes } from "../../routes/transcripts.js";
 import { registerScanningRoutes } from "../../routes/scanning.js";
 import { registerCatalogRoutes } from "../../routes/catalog.js";
 import { registerReferenceRepositoryRoutes } from "../../routes/reference-repositories.js";
@@ -163,6 +164,7 @@ export async function startApiServer(
   registerPlanRoutes(collector, state);
   registerSettingsRoutes(collector, state);
   registerAnalyticsRoutes(collector);
+  registerTranscriptRoutes(collector);
   registerScanningRoutes(collector, state);
   registerCatalogRoutes(collector);
   registerReferenceRepositoryRoutes(collector);

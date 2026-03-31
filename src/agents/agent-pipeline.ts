@@ -33,6 +33,9 @@ import { runDeterministicNode } from "./deterministic-node-runner.ts";
 import { record as recordTokens } from "../domains/tokens.ts";
 import { buildContextMarkdown, buildTraceFromContext } from "./context-engine.ts";
 import { markIssueDirty } from "../persistence/dirty-tracker.ts";
+import { recordTranscriptTurn } from "./transcript.ts";
+import { broadcastIssueProgress, type IssueProgress } from "../routes/websocket.ts";
+import { runPreExecutionHooks, runPostExecutionHooks } from "./execution-hooks.ts";
 import {
   attachNodeArtifacts,
   BLUEPRINT_EXECUTION_NODE_IDS,
@@ -174,7 +177,30 @@ export async function runAgentSession(
     await runHook(state.config.beforeRunHook, workspacePath, issue, "before_run", turnEnv);
   }
 
+  // Pre-execution hooks (user-configurable, can block)
+  const preHookPhase = provider.role === "planner" ? "plan" as const : provider.role === "reviewer" ? "review" as const : "execute" as const;
+  const preBlock = runPreExecutionHooks(state.config.preExecutionHooks, issue, workspacePath, preHookPhase, turnEnv);
+  if (preBlock) {
+    const label = preBlock.hook.label || preBlock.hook.command.slice(0, 60);
+    addEvent(state, issue.id, "error", `Pre-execution hook "${label}" blocked turn ${turnIndex}: exit code ${preBlock.exitCode}`);
+    session.status = "blocked";
+    await persistAgentSessionState(sessionKey, issue, provider, cycle, session);
+    return { success: false, blocked: true, continueRequested: false, code: preBlock.exitCode, output: preBlock.output, turns: session.turns.length };
+  }
+
   addEvent(state, issue.id, "runner", `Turn ${turnIndex}/${maxTurns} started for ${issue.identifier}.`);
+
+  const sessionStartTs = Date.now();
+  broadcastIssueProgress({
+    issueId: issue.id,
+    identifier: issue.identifier,
+    phase: "turn_started",
+    turn: turnIndex,
+    maxTurns,
+    role: provider.role,
+    provider: provider.provider,
+    elapsedMs: 0,
+  });
 
   const turnResult = await runCommandWithTimeout(provider.command, workspacePath, issue, state.config, turnPromptFile, turnEnv, outputFilePath);
 
@@ -186,6 +212,9 @@ export async function runAgentSession(
       FIFONY_PRESERVE_RESULT_FILE: "1",
     });
   }
+
+  // Post-execution hooks (user-configurable, non-blocking)
+  runPostExecutionHooks(state.config.postExecutionHooks, issue, workspacePath, preHookPhase, turnResult, turnEnv);
 
   const outputPreview = turnResult.output.length < 500 ? turnResult.output.trim() : undefined;
   logger.info({ issueId: issue.id, identifier: issue.identifier, turn: turnIndex, exitCode: turnResult.code, success: turnResult.success, outputBytes: turnResult.output.length, ...(outputPreview ? { outputPreview } : {}) }, "[Agent] Agent command finished");
@@ -199,6 +228,27 @@ export async function runAgentSession(
   }
   addTokenUsage(issue, directive.tokenUsage, provider.role);
   if (directive.tokenUsage) recordTokens(issue, directive.tokenUsage, provider.role);
+
+  // Broadcast turn completion with token data
+  broadcastIssueProgress({
+    issueId: issue.id,
+    identifier: issue.identifier,
+    phase: "turn_completed",
+    turn: turnIndex,
+    maxTurns,
+    role: provider.role,
+    provider: provider.provider,
+    elapsedMs: Date.now() - sessionStartTs,
+    tokens: directive.tokenUsage
+      ? { input: directive.tokenUsage.inputTokens, output: directive.tokenUsage.outputTokens, total: directive.tokenUsage.totalTokens }
+      : undefined,
+    cumulativeTokens: issue.tokenUsage
+      ? { input: issue.tokenUsage.inputTokens, output: issue.tokenUsage.outputTokens, total: issue.tokenUsage.totalTokens }
+      : undefined,
+    toolsUsed: directive.toolsUsed,
+    directiveStatus: directive.status,
+    directiveSummary: directive.summary,
+  });
 
   if (directive.tokenUsage) {
     const tu = directive.tokenUsage;
@@ -282,7 +332,7 @@ export async function runAgentSession(
   if (directive.agentsUsed?.length) issue.agentsUsed = [...new Set([...(issue.agentsUsed ?? []), ...directive.agentsUsed])];
   if (directive.commandsRun?.length) issue.commandsRun = [...new Set([...(issue.commandsRun ?? []), ...directive.commandsRun])];
 
-  session.turns.push({
+  const turnEntry = {
     turn: turnIndex,
     role: provider.role,
     model: directive.tokenUsage?.model || provider.model || provider.provider,
@@ -303,7 +353,9 @@ export async function runAgentSession(
     commandsRun: directive.commandsRun,
     contextPack: contextResult.pack,
     traceSteps: buildTraceFromContext(contextResult.pack, directive),
-  });
+  };
+  session.turns.push(turnEntry);
+  recordTranscriptTurn(issue, turnEntry, provider.provider);
 
   session.lastCode = lastCode;
   session.lastOutput = lastOutput;

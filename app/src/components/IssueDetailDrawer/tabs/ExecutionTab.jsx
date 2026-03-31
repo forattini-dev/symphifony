@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, Terminal, SlidersHorizontal, Zap, Send, ChevronDown } from "lucide-react";
+import { AlertTriangle, Terminal, SlidersHorizontal, Zap, Send, ChevronDown, Activity } from "lucide-react";
 import { api } from "../../../api.js";
 import { formatDate, formatDuration } from "../../../utils.js";
-import { Section, Field, CopyButton, ConfigStrip, TokenPhaseBreakdown } from "../shared.jsx";
+import { Section, Field, CopyButton, ConfigStrip, TokenPhaseBreakdown, resolveStageDisplay } from "../shared.jsx";
+import { useDashboard } from "../../../context/DashboardContext.jsx";
 
 // ── LiveMonitor ───────────────────────────────────────────────────────────────
 
@@ -54,6 +55,52 @@ function LiveMonitor({ issueId, running, startedAt, onOutput, onLive }) {
         {live.daemonSocketReady && <span className="text-success">daemon ●</span>}
         {live.agentAlive === false && live.agentPid && <span className="text-error">process dead</span>}
       </div>
+    </div>
+  );
+}
+
+// ── ProgressStrip (real-time WS progress) ────────────────────────────────────
+
+function ProgressStrip({ issueId }) {
+  const { issueProgress } = useDashboard();
+  const progress = issueProgress[issueId];
+  if (!progress) return null;
+
+  const fmtTokens = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  const elapsed = progress.elapsedMs > 0
+    ? `${Math.floor(progress.elapsedMs / 60000)}m ${Math.floor((progress.elapsedMs % 60000) / 1000)}s`
+    : null;
+
+  return (
+    <div className="rounded-box border border-info/30 bg-info/5 px-3 py-2">
+      <div className="flex items-center gap-2 text-xs">
+        <Activity className="size-3 text-info" />
+        <span className="font-medium text-info">
+          Turn {progress.turn}/{progress.maxTurns}
+        </span>
+        <span className="opacity-50">({progress.role})</span>
+        {progress.tokens && (
+          <span className="opacity-60">
+            {fmtTokens(progress.tokens.total)} tokens
+          </span>
+        )}
+        {progress.cumulativeTokens && progress.cumulativeTokens.total > (progress.tokens?.total || 0) && (
+          <span className="opacity-40">
+            | {fmtTokens(progress.cumulativeTokens.total)} total
+          </span>
+        )}
+        {elapsed && <span className="opacity-40 ml-auto">{elapsed}</span>}
+      </div>
+      {progress.toolsUsed?.length > 0 && (
+        <div className="flex gap-1 mt-1 flex-wrap">
+          {progress.toolsUsed.slice(-5).map((t, i) => (
+            <span key={i} className="badge badge-xs badge-ghost opacity-60">{t}</span>
+          ))}
+        </div>
+      )}
+      {progress.directiveSummary && (
+        <div className="text-xs opacity-50 mt-1 truncate">{progress.directiveSummary}</div>
+      )}
     </div>
   );
 }
@@ -183,6 +230,8 @@ function AgentCommandBar({ issueId, daemonReady }) {
 
 export function ExecutionTab({ issue, workflowConfig }) {
   const isRunning = issue.state === "Running" || issue.state === "Reviewing";
+  const PAST_EXECUTION = new Set(["Reviewing", "PendingDecision", "Approved", "Merged", "Blocked"]);
+  const executionRan = isRunning || PAST_EXECUTION.has(issue.state) || issue.durationMs > 0 || issue.commandExitCode != null;
   const executeConfig = workflowConfig?.workflow?.execute;
   const [liveOutput, setLiveOutput] = useState("");
   const [liveData, setLiveData] = useState(null);
@@ -202,6 +251,9 @@ export function ExecutionTab({ issue, workflowConfig }) {
 
   return (
     <div className="space-y-5">
+      {/* Real-time progress strip (WS-pushed) */}
+      {isRunning && <ProgressStrip issueId={issue.id} />}
+
       {/* Live monitor */}
       <LiveMonitor
         issueId={issue.id}
@@ -219,11 +271,23 @@ export function ExecutionTab({ issue, workflowConfig }) {
         />
       )}
 
-      {executeConfig && (
-        <Section title="Execution Config" icon={SlidersHorizontal}>
-          <ConfigStrip config={executeConfig} />
-        </Section>
-      )}
+      {(() => {
+        const stage = resolveStageDisplay({
+          phaseTokens: issue.tokensByPhase?.executor,
+          tokensByModel: issue.tokensByModel,
+          workflowConfig,
+          stageName: "execute",
+          phaseRan: executionRan,
+        });
+        return stage ? (
+          <Section
+            title={stage.variant === "historical" ? "Ran with" : "Execution Config"}
+            icon={SlidersHorizontal}
+          >
+            <ConfigStrip config={stage.config} variant={stage.variant} />
+          </Section>
+        ) : null;
+      })()}
 
       <Section title="Run Info" icon={Terminal}>
         <div className="space-y-0.5">

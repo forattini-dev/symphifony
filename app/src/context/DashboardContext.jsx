@@ -66,6 +66,7 @@ export function DashboardProvider({ children }) {
   const [selectedIssueId, setSelectedIssueId] = useState(null);
   const [isEventsOpen, setIsEventsOpen] = useState(false);
   const [eventSnapshot, setEventSnapshot] = useState([]);
+  const [issueProgress, setIssueProgress] = useState({}); // { [issueId]: IssueProgress }
   const pwa = usePwa();
 
   const qc = useQueryClient();
@@ -84,6 +85,12 @@ export function DashboardProvider({ children }) {
     }
     if (msg?.type === "mesh:entry" && msg.entry) {
       dispatchMeshEntry(msg.entry);
+      return;
+    }
+
+    // Real-time execution progress — token counts, turn info, elapsed time
+    if (msg?.type === "issue:progress" && msg.issueId) {
+      setIssueProgress((prev) => ({ ...prev, [msg.issueId]: msg }));
       return;
     }
 
@@ -335,10 +342,12 @@ export function DashboardProvider({ children }) {
     toast, toastExiting, showToast,
     // Confetti
     confetti, showConfetti, clearConfetti,
+    // Execution progress (real-time)
+    issueProgress,
   }), [
     theme, status, wsStatus, liveMode, data, issues, filtered, metrics, eventsData,
     providers, parallelism, issueOptions, runtime,
-    projectMeta,
+    projectMeta, issueProgress,
     query, stateFilter, completionFilter,
     isEventsOpen, eventKind, eventIssueId,
     isCreateOpen, selectedIssue, concurrency, toast, toastExiting, confetti, pwa, notifications,

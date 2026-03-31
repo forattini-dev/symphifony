@@ -154,6 +154,30 @@ export function sendToAllClients(data: string): void {
   }
 }
 
+/** Real-time execution progress push — tokens, turn count, phase, elapsed time.
+ *  Inspired by Claude Code's ProgressTracker per agent. */
+export type IssueProgress = {
+  issueId: string;
+  identifier: string;
+  phase: "turn_started" | "turn_completed";
+  turn: number;
+  maxTurns: number;
+  role: string;
+  provider: string;
+  elapsedMs: number;
+  tokens?: { input: number; output: number; total: number };
+  cumulativeTokens?: { input: number; output: number; total: number };
+  toolsUsed?: string[];
+  directiveStatus?: string;
+  directiveSummary?: string;
+};
+
+export function broadcastIssueProgress(progress: IssueProgress): void {
+  if (wsClients.size === 0) return;
+  const data = JSON.stringify({ type: "issue:progress", ...progress });
+  sendToAllClients(data);
+}
+
 /** Direct WS push when an issue transitions state.
  *  Bypasses the persist→broadcast→delta chain for instant frontend updates. */
 export function broadcastIssueTransition(issue: { id: string; state: string; [k: string]: unknown }): void {

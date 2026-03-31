@@ -6,6 +6,49 @@ import { renderPrompt } from "./prompting.ts";
 import { buildRecurringFailureContext } from "./review-failure-history.ts";
 
 /** Build retry context from previous failed attempts for injection into prompts. */
+/** Render a single attempt summary in full detail. */
+function renderAttemptFull(s: NonNullable<IssueEntry["previousAttemptSummaries"]>[number], index: number): string {
+  const lines: string[] = [];
+  const phaseLabel = s.phase === "review" ? "review" : s.phase === "crash" ? "crash" : s.phase === "plan" ? "plan" : "execution";
+  lines.push(`### Attempt ${index + 1} — ${phaseLabel} failure (plan v${s.planVersion}, exec #${s.executeAttempt})`);
+
+  if (s.phase === "review") {
+    lines.push("*The reviewer identified issues with the previous implementation. Focus on addressing the reviewer's feedback — do not redo work that was already approved.*");
+  } else if (s.phase === "crash") {
+    lines.push("*The agent process crashed or timed out. Simplify the approach — break the work into smaller steps.*");
+  }
+
+  if (s.insight) {
+    lines.push(`**Failure type:** ${s.insight.errorType}`);
+    lines.push(`**Root cause:** ${s.insight.rootCause}`);
+    if (s.insight.failedCommand) lines.push(`**Failed command:** \`${s.insight.failedCommand}\``);
+    if (s.insight.filesInvolved.length > 0) {
+      lines.push(`**Files involved:** ${s.insight.filesInvolved.map(f => `\`${f}\``).join(", ")}`);
+    }
+    lines.push(`**What to do differently:** ${s.insight.suggestion}`);
+  } else {
+    lines.push(`**Error:** ${s.error}`);
+  }
+
+  if (s.outputTail) {
+    lines.push(`\n<details><summary>Output tail</summary>\n\n\`\`\`\n${s.outputTail}\n\`\`\`\n</details>`);
+  }
+  if (s.outputFile) {
+    lines.push(`*Full output saved in: outputs/${s.outputFile}*`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Render an attempt as a compressed one-liner (for older attempts when there are 3+). */
+function renderAttemptCompressed(s: NonNullable<IssueEntry["previousAttemptSummaries"]>[number], index: number): string {
+  const phaseLabel = s.phase === "review" ? "review" : s.phase === "crash" ? "crash" : s.phase === "plan" ? "plan" : "exec";
+  const errorType = s.insight?.errorType ?? "unknown";
+  const rootCause = s.insight?.rootCause ?? s.error?.slice(0, 120) ?? "no details";
+  const suggestion = s.insight?.suggestion ?? "";
+  return `- **Attempt ${index + 1}** (${phaseLabel}, v${s.planVersion}a${s.executeAttempt}): ${errorType} — ${rootCause}${suggestion ? ` → ${suggestion}` : ""}`;
+}
+
 export function buildRetryContext(issue: IssueEntry): string {
   const summaries = issue.previousAttemptSummaries;
   const recurringFailureContext = buildRecurringFailureContext(issue);
@@ -18,38 +61,59 @@ export function buildRetryContext(issue: IssueEntry): string {
     lines.push("The following previous attempts FAILED. Do NOT repeat the same approach. Try a fundamentally different strategy.\n");
   }
 
-  for (let i = 0; i < (summaries?.length ?? 0); i++) {
-    const s = summaries![i];
-    const phaseLabel = s.phase === "review" ? "review" : s.phase === "crash" ? "crash" : s.phase === "plan" ? "plan" : "execution";
-    lines.push(`### Attempt ${i + 1} — ${phaseLabel} failure (plan v${s.planVersion}, exec #${s.executeAttempt})`);
+  if (summaries && summaries.length >= 5) {
+    // Smart context selection for 5+ attempts: cluster by error type, deduplicate,
+    // show pattern summary + latest 2 in full. Prevents context saturation.
+    // Inspired by Claude Code's memory relevance selection via side-query.
+    const olderAttempts = summaries.slice(0, -2);
+    const recentAttempts = summaries.slice(-2);
 
-    // Phase-specific preamble
-    if (s.phase === "review") {
-      lines.push("*The reviewer identified issues with the previous implementation. Focus on addressing the reviewer's feedback — do not redo work that was already approved.*");
-    } else if (s.phase === "crash") {
-      lines.push("*The agent process crashed or timed out. Simplify the approach — break the work into smaller steps.*");
+    // Cluster older attempts by error type
+    const clusters = new Map<string, typeof olderAttempts>();
+    for (const s of olderAttempts) {
+      const key = s.insight?.errorType ?? "unknown";
+      if (!clusters.has(key)) clusters.set(key, []);
+      clusters.get(key)!.push(s);
     }
 
-    // Use structured insights when available (richer than raw error text)
-    if (s.insight) {
-      lines.push(`**Failure type:** ${s.insight.errorType}`);
-      lines.push(`**Root cause:** ${s.insight.rootCause}`);
-      if (s.insight.failedCommand) lines.push(`**Failed command:** \`${s.insight.failedCommand}\``);
-      if (s.insight.filesInvolved.length > 0) {
-        lines.push(`**Files involved:** ${s.insight.filesInvolved.map(f => `\`${f}\``).join(", ")}`);
+    lines.push(`### Failure Pattern Summary (${olderAttempts.length} earlier attempts)\n`);
+    lines.push("These error types have been encountered — avoid all of them:\n");
+    for (const [errorType, attempts] of clusters) {
+      const representative = attempts[attempts.length - 1]; // latest in cluster
+      const suggestion = representative.insight?.suggestion ?? "";
+      lines.push(`- **${errorType}** (${attempts.length}×): ${representative.insight?.rootCause ?? representative.error?.slice(0, 120) ?? "unknown"}${suggestion ? ` → *${suggestion}*` : ""}`);
+      // If cluster has diverse files, list them for avoidance
+      const allFiles = [...new Set(attempts.flatMap((a) => a.insight?.filesInvolved ?? []))];
+      if (allFiles.length > 0) {
+        lines.push(`  Files involved: ${allFiles.slice(0, 5).map(f => `\`${f}\``).join(", ")}${allFiles.length > 5 ? ` (+${allFiles.length - 5} more)` : ""}`);
       }
-      lines.push(`**What to do differently:** ${s.insight.suggestion}`);
-    } else {
-      lines.push(`**Error:** ${s.error}`);
-    }
-
-    if (s.outputTail) {
-      lines.push(`\n<details><summary>Output tail</summary>\n\n\`\`\`\n${s.outputTail}\n\`\`\`\n</details>`);
-    }
-    if (s.outputFile) {
-      lines.push(`*Full output saved in: outputs/${s.outputFile}*`);
     }
     lines.push("");
+
+    lines.push("### Recent Attempts (detailed)\n");
+    for (let i = 0; i < recentAttempts.length; i++) {
+      lines.push(renderAttemptFull(recentAttempts[i], olderAttempts.length + i));
+    }
+  } else if (summaries && summaries.length >= 3) {
+    // Context compression: compress older attempts, keep latest 2 in full detail
+    const olderAttempts = summaries.slice(0, -2);
+    const recentAttempts = summaries.slice(-2);
+
+    lines.push(`### Earlier Attempts (compressed, ${olderAttempts.length} total)\n`);
+    for (let i = 0; i < olderAttempts.length; i++) {
+      lines.push(renderAttemptCompressed(olderAttempts[i], i));
+    }
+    lines.push("");
+
+    lines.push("### Recent Attempts (detailed)\n");
+    for (let i = 0; i < recentAttempts.length; i++) {
+      lines.push(renderAttemptFull(recentAttempts[i], olderAttempts.length + i));
+    }
+  } else {
+    // Few attempts — render all in full detail
+    for (let i = 0; i < (summaries?.length ?? 0); i++) {
+      lines.push(renderAttemptFull(summaries![i], i));
+    }
   }
 
   // Append grading failures from last review cycle if available

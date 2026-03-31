@@ -511,6 +511,21 @@ export type ServiceHealthcheck = {
   startPeriod?: number;
 };
 
+/** User-configurable shell hook for pre/post execution.
+ *  Inspired by Claude Code's PreToolUse/PostToolUse hook system. */
+export type ExecutionHook = {
+  /** Shell command to execute. Runs in the workspace directory. */
+  command: string;
+  /** Human-readable label for logs/UI. */
+  label?: string;
+  /** Only run when issue matches this phase. Omit to match all. */
+  phase?: "plan" | "execute" | "review";
+  /** Timeout in milliseconds (default: 30000). */
+  timeoutMs?: number;
+  /** If true, hook failure is non-blocking (logged but execution continues). */
+  allowFailure?: boolean;
+};
+
 export type ServiceEntry = {
   id: string;
   name: string;
@@ -623,6 +638,10 @@ export type RuntimeConfig = {
   beforeRunHook: string;
   afterRunHook: string;
   beforeRemoveHook: string;
+  /** Array of shell commands to run before each agent turn. Exit code != 0 blocks execution. */
+  preExecutionHooks?: ExecutionHook[];
+  /** Array of shell commands to run after each agent turn. Receives turn result as env vars. */
+  postExecutionHooks?: ExecutionHook[];
   services?: ServiceEntry[];
   serviceEnv?: Record<string, string>;
   /** Maximum automated review→requeue cycles before escalating to human. Default: 2 */
