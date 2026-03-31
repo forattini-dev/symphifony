@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, AlertTriangle, Loader, RotateCcw, PlayCircle, GitMerge,
-  GitPullRequest, Trash2, MessageSquare,
+  GitPullRequest, Trash2, MessageSquare, GitBranch,
 } from "lucide-react";
+import { StateMachineGraph } from "../StateMachineGraph.jsx";
 import { useNavigate } from "@tanstack/react-router";
 import { DrawerBackdrop } from "../DrawerPrimitives.jsx";
 import { useQueryClient } from "@tanstack/react-query";
@@ -173,6 +174,7 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
   const [replanBusy, setReplanBusy] = useState(false);
   const [replanError, setReplanError] = useState(null);
   const navigate = useNavigate();
+  const [graphOpen, setGraphOpen] = useState(false);
   const tabsContainerRef = useRef(null);
   const { data: workflowConfig } = useWorkflowConfig();
 
@@ -338,6 +340,15 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
               </button>
               <button
                 type="button"
+                className="btn btn-sm btn-ghost btn-circle opacity-40 hover:opacity-80"
+                onClick={() => setGraphOpen(true)}
+                aria-label="View state machine"
+                title="View state machine graph"
+              >
+                <GitBranch className="size-3.5" />
+              </button>
+              <button
+                type="button"
                 className="btn btn-sm btn-ghost btn-circle text-error/40 hover:text-error hover:bg-error/10"
                 onClick={handleDeleteFromDrawer}
                 disabled={issue.state === "Running" || issue.state === "Reviewing"}
@@ -449,6 +460,11 @@ export function IssueDetailDrawer({ issue, onClose, onStateChange, onRetry, onCa
         />
       </div>
 
+      <StateMachineGraph
+        open={graphOpen}
+        onClose={() => setGraphOpen(false)}
+        issueState={issue.state}
+      />
     </div>
   );
 }
