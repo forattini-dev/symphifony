@@ -9,6 +9,8 @@ import {
   makeServicesUnsubscribe,
   makeMeshSubscribe,
   makeMeshUnsubscribe,
+  makeReverseProxySubscribe,
+  makeReverseProxyUnsubscribe,
   makeServiceLogSubscribe,
   makeServiceLogUnsubscribe,
   parseIncomingMessage,
@@ -52,6 +54,7 @@ const issueLogSubscribers = new Set();
 const analyticsSubscribers = new Map();
 let meshSubscribers = 0;
 let servicesSubscribers = 0;
+let reverseProxySubscribers = 0;
 
 const telemetry = {
   startedAt: Date.now(),
@@ -226,6 +229,7 @@ function resubscribeAll() {
   }
   if (servicesSubscribers > 0) sendIfConnected(makeServicesSubscribe());
   if (meshSubscribers > 0) sendIfConnected(makeMeshSubscribe());
+  if (reverseProxySubscribers > 0) sendIfConnected(makeReverseProxySubscribe());
 }
 
 function connect() {
@@ -413,6 +417,16 @@ export function unsubscribeServices() {
   if (servicesSubscribers === 0) safeSendPayload(makeServicesUnsubscribe());
 }
 
+export function subscribeReverseProxy() {
+  reverseProxySubscribers += 1;
+  if (reverseProxySubscribers === 1) safeSendPayload(makeReverseProxySubscribe());
+}
+
+export function unsubscribeReverseProxy() {
+  reverseProxySubscribers = Math.max(reverseProxySubscribers - 1, 0);
+  if (reverseProxySubscribers === 0) safeSendPayload(makeReverseProxyUnsubscribe());
+}
+
 export function subscribeAnalyticsTopic(topic) {
   if (!topic || typeof topic !== "string") return;
   const next = (analyticsSubscribers.get(topic) ?? 0) + 1;
@@ -434,6 +448,7 @@ export function clearRuntimeSocketState() {
   analyticsSubscribers.clear();
   meshSubscribers = 0;
   servicesSubscribers = 0;
+  reverseProxySubscribers = 0;
   pendingPings.clear();
   messageCounts.clear();
   outboundMessageCounts.clear();

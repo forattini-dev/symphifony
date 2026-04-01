@@ -22,6 +22,8 @@ import {
   unsubscribeServices,
   subscribeServiceLog,
   unsubscribeServiceLog,
+  subscribeReverseProxy,
+  unsubscribeReverseProxy,
 } from "./ws/runtimeSocket.js";
 
 // ── Delta-merge helpers ─────────────────────────────────────────────────────
@@ -147,6 +149,8 @@ export {
   unsubscribeServices,
   subscribeAnalyticsTopic,
   unsubscribeAnalyticsTopic,
+  subscribeReverseProxy,
+  unsubscribeReverseProxy,
 };
 
 /** Fetch runtime state with polling. showAll=true bypasses the recent-only filter. */

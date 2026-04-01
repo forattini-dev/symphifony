@@ -513,6 +513,15 @@ async function runMcpServer(result: CommandParseResult): Promise<void> {
   });
 }
 
+async function runReverseProxyRuntime(result: CommandParseResult): Promise<void> {
+  const runtimeConfig = getStringOption(result, "runtimeConfig");
+  if (!runtimeConfig) {
+    throw new Error("Missing --runtime-config for reverse-proxy-runtime.");
+  }
+  const { runReverseProxyRuntimeProcess } = await import("./persistence/plugins/reverse-proxy-server.ts");
+  await runReverseProxyRuntimeProcess(resolve(runtimeConfig));
+}
+
 function printDevProfileStatus(profile: ReturnType<typeof getDevProfileStatus>): void {
   console.log("Fifony Dev Profile");
   printKeyValue("Profile", profile.profileName);
@@ -603,6 +612,16 @@ const cli = createCLI({
       description: "Run a Fifony MCP server over stdio with resources, tools, and prompts backed by the local durable store.",
       options: commonOptions,
       handler: (result) => runMcpServer(result),
+    },
+    "reverse-proxy-runtime": {
+      description: "Run the detached HTTPS reverse proxy runtime sidecar.",
+      options: {
+        runtimeConfig: {
+          type: "string",
+          description: "Path to the generated reverse proxy runtime config JSON.",
+        },
+      },
+      handler: (result) => runReverseProxyRuntime(result),
     },
     dev: {
       description: "Manage and run the isolated Fifony development profile.",

@@ -23,7 +23,17 @@ type WsClientMessageType =
   | "issue:log:subscribe"
   | "issue:log:unsubscribe"
   | "mesh:subscribe"
-  | "mesh:unsubscribe";
+  | "mesh:unsubscribe"
+  | "proxy:reverse:subscribe"
+  | "proxy:reverse:unsubscribe";
+
+type ReverseProxySnapshotPayload = {
+  stats: unknown;
+  snapshot: unknown;
+  running: boolean;
+};
+
+type ReverseProxySnapshotProvider = (() => ReverseProxySnapshotPayload | null) | null;
 
 type MeshSnapshotPayload = {
   graph: unknown;
@@ -34,6 +44,7 @@ type MeshSnapshotPayload = {
 
 type ServicesSnapshotPayload = {
   services: unknown;
+  runtimeServices?: unknown;
 };
 
 type MeshSnapshotProvider = (() => MeshSnapshotPayload | null) | null;
@@ -41,7 +52,9 @@ type ServicesSnapshotProvider = (() => ServicesSnapshotPayload | null) | null;
 
 let meshSnapshotProvider: MeshSnapshotProvider = null;
 let servicesSnapshotProvider: ServicesSnapshotProvider = null;
+let reverseProxySnapshotProvider: ReverseProxySnapshotProvider = null;
 let meshSnapshotSeq = 0;
+let reverseProxySnapshotSeq = 0;
 
 const wsClientHandlers = new Map<WsClientMessageType, WsClientCommandHandler>();
 const wsClientTypeGuards: Record<WsClientMessageType, (msg: WsClientMessage) => boolean> = {
@@ -56,6 +69,8 @@ const wsClientTypeGuards: Record<WsClientMessageType, (msg: WsClientMessage) => 
   "issue:log:unsubscribe": (msg) => typeof msg?.id === "string",
   "mesh:subscribe": () => true,
   "mesh:unsubscribe": () => true,
+  "proxy:reverse:subscribe": () => true,
+  "proxy:reverse:unsubscribe": () => true,
 };
 
 const wsTelemetry = {
@@ -320,12 +335,51 @@ export function meshRoomHasSubscribers(): boolean {
   return meshRoom.size > 0;
 }
 
+// ── Reverse proxy room ────────────────────────────────────────────────────────
+// Clients subscribe to pushed stats + graph snapshots from the HTTPS reverse proxy.
+
+const reverseProxyRoom = new Set<string>(); // socketIds
+
+export function setReverseProxySnapshotProvider(fn: ReverseProxySnapshotProvider): void {
+  reverseProxySnapshotProvider = fn;
+}
+
+export function subscribeReverseProxyRoom(socketId: string): void {
+  reverseProxyRoom.add(socketId);
+}
+
+export function unsubscribeReverseProxyRoom(socketId: string): void {
+  reverseProxyRoom.delete(socketId);
+}
+
+export function reverseProxyRoomHasSubscribers(): boolean {
+  return reverseProxyRoom.size > 0;
+}
+
+export function sendToReverseProxyRoom(data: Record<string, unknown>): void {
+  if (reverseProxyRoom.size === 0) return;
+  sendToSocketList(reverseProxyRoom, JSON.stringify(data));
+}
+
+export function notifyReverseProxySnapshot(): void {
+  const payload = reverseProxySnapshotProvider?.();
+  if (!payload || reverseProxyRoom.size === 0) return;
+  reverseProxySnapshotSeq += 1;
+  sendToReverseProxyRoom({
+    type: "proxy:reverse:snapshot",
+    ...payload,
+    seq: reverseProxySnapshotSeq,
+    timestamp: now(),
+  });
+}
+
 export function unsubscribeFromAllRooms(socketId: string): void {
   for (const room of serviceLogRooms.values()) room.delete(socketId);
   for (const room of analyticsRooms.values()) room.delete(socketId);
   for (const room of issueLogRooms.values()) room.delete(socketId);
   servicesRoom.delete(socketId);
   meshRoom.delete(socketId);
+  reverseProxyRoom.delete(socketId);
 }
 
 export function serviceLogRoomSize(serviceId: string): number {
@@ -450,6 +504,25 @@ function registerWsCommandHandlers() {
   wsClientHandlers.set("mesh:unsubscribe", (socketId) => {
     unsubscribeMeshRoom(socketId);
     logger.debug({ socketId }, "[WebSocket] Unsubscribed from mesh traffic room");
+  });
+
+  wsClientHandlers.set("proxy:reverse:subscribe", (socketId) => {
+    subscribeReverseProxyRoom(socketId);
+    const snapshot = reverseProxySnapshotProvider?.();
+    if (snapshot) {
+      reverseProxySnapshotSeq += 1;
+      sendToSocket(socketId, {
+        type: "proxy:reverse:snapshot",
+        ...snapshot,
+        seq: reverseProxySnapshotSeq,
+        timestamp: now(),
+      });
+    }
+    logger.debug({ socketId }, "[WebSocket] Subscribed to reverse proxy room");
+  });
+  wsClientHandlers.set("proxy:reverse:unsubscribe", (socketId) => {
+    unsubscribeReverseProxyRoom(socketId);
+    logger.debug({ socketId }, "[WebSocket] Unsubscribed from reverse proxy room");
   });
 }
 

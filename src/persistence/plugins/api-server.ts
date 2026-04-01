@@ -25,7 +25,6 @@ import {
 } from "../store.ts";
 import type { RouteHandler, RouteRegistrar } from "../../routes/http.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
-import { startReverseProxy, stopReverseProxy } from "./reverse-proxy-server.ts";
 import { makeWebSocketConfig } from "../../routes/websocket.ts";
 export { broadcastToWebSocketClients } from "../../routes/websocket.ts";
 
@@ -192,22 +191,7 @@ export async function startApiServer(
     tls: false,
     versionPrefix: false,
     metrics: { enabled: false, logLevel: false },
-    setup: async ({ addManagedServer }: { addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void }) => {
-      if (state.config.reverseProxyEnabled) {
-        try {
-          await startReverseProxy({
-            port: state.config.reverseProxyPort ?? 4433,
-            dashPort: port,
-            routes: state.config.proxyRoutes ?? [],
-            services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
-            localDomain: normalizeLocalDomain(state.config.localDomain),
-          });
-          addManagedServer({ stop: () => stopReverseProxy() }, "reverse-proxy");
-        } catch (err) {
-          logger.warn({ err }, "[Proxy] Failed to start HTTPS reverse proxy — continuing without it");
-        }
-      }
-    },
+    setup: async ({ addManagedServer: _addManagedServer }: { addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void }) => {},
     // HTTP + WebSocket on the same port via listeners
     listeners: [{
       bind: { host: "0.0.0.0", port },

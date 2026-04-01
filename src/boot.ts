@@ -43,7 +43,11 @@ import {
   stopTrafficProxy,
   setServicesAccessor,
 } from "./persistence/plugins/traffic-proxy-server.ts";
-import { stopReverseProxy } from "./persistence/plugins/reverse-proxy-server.ts";
+import {
+  getReverseProxyRuntimeSnapshotStatus,
+  startReverseProxyRuntime,
+  stopReverseProxyRuntime,
+} from "./persistence/plugins/reverse-proxy-server.ts";
 import {
   sendToMeshRoom,
   notifyMeshSnapshot,
@@ -359,6 +363,23 @@ async function main() {
     for (const status of listServiceStatuses(services, STATE_ROOT)) {
       if (status.running) startServiceLogBroadcasting(status.id, STATE_ROOT);
     }
+    if (apiState.config.reverseProxyEnabled) {
+      await startReverseProxyRuntime({
+        port: apiState.config.reverseProxyPort ?? 4433,
+        dashPort: Number(apiState.config.dashboardPort ?? 4000),
+        routes: apiState.config.proxyRoutes ?? [],
+        services: (apiState.config.services ?? []).map((service) => ({ id: service.id, port: service.port })),
+        localDomain: apiState.config.localDomain,
+      });
+    }
+    const reverseProxyRuntime = getReverseProxyRuntimeSnapshotStatus({
+      enabled: apiState.config.reverseProxyEnabled ?? false,
+      localDomain: apiState.config.localDomain,
+      configuredPort: apiState.config.reverseProxyPort ?? 4433,
+    });
+    if (reverseProxyRuntime.running) {
+      startServiceLogBroadcasting(reverseProxyRuntime.id, STATE_ROOT);
+    }
   } catch (err) {
     logger.warn({ err }, "[Boot] Service init failed — continuing");
   }
@@ -444,7 +465,7 @@ async function main() {
       bootMeshSnapshotTimer = null;
     }
     stopTrafficProxy().catch(() => {});
-    stopReverseProxy().catch(() => {});
+    stopReverseProxyRuntime().catch(() => {});
   });
   process.once("SIGTERM", () => {
     if (bootMeshSnapshotTimer) {
@@ -452,7 +473,7 @@ async function main() {
       bootMeshSnapshotTimer = null;
     }
     stopTrafficProxy().catch(() => {});
-    stopReverseProxy().catch(() => {});
+    stopReverseProxyRuntime().catch(() => {});
   });
 
   installGracefulShutdown(state);

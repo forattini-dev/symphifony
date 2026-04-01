@@ -63,6 +63,7 @@ export function onServiceRestart(id, cb) {
  */
 export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
   const [services, setServices] = useState([]);
+  const [runtimeServices, setRuntimeServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const lastSnapshotSeq = useRef(0);
   const gotSnapshot = useRef(false);
@@ -71,6 +72,7 @@ export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
     try {
       const res = await api.get("/services");
       if (res?.services) setServices(res.services);
+      setRuntimeServices(Array.isArray(res?.runtimeServices) ? res.runtimeServices : []);
     } catch {
       /* non-critical */
     } finally {
@@ -103,13 +105,14 @@ export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
   }, [fetchAll, liveMode, pollInterval]);
 
   useEffect(() => {
-    const handler = ({ services: snapshotServices, seq } = {}) => {
+    const handler = ({ services: snapshotServices, runtimeServices: snapshotRuntimeServices, seq } = {}) => {
       if (!Array.isArray(snapshotServices)) return;
       if (typeof seq === "number" && seq <= lastSnapshotSeq.current) return;
       if (typeof seq === "number") {
         lastSnapshotSeq.current = seq;
       }
       setServices(snapshotServices);
+      setRuntimeServices(Array.isArray(snapshotRuntimeServices) ? snapshotRuntimeServices : []);
       setLoading(false);
       gotSnapshot.current = true;
     };
@@ -124,6 +127,9 @@ export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
       setServices((prev) =>
         prev.map((s) => s.id === id ? { ...s, state, running, pid: pid ?? s.pid } : s)
       );
+      setRuntimeServices((prev) =>
+        prev.map((s) => s.id === id ? { ...s, state, running, pid: pid ?? s.pid } : s)
+      );
       // Notify log viewers that this service restarted so they can reset
       if (state === "starting") {
         for (const cb of serviceRestartSubs.get(id) ?? []) cb();
@@ -133,7 +139,7 @@ export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
     return () => serviceStateSubs.delete(handler);
   }, []);
 
-  return { services, loading, refresh: fetchAll };
+  return { services, runtimeServices, loading, refresh: fetchAll };
 }
 
 /**

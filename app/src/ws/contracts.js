@@ -14,6 +14,7 @@ export const WS_MESSAGE_TYPES = Object.freeze({
   MESH_ENTRY: "mesh:entry",
   MESH_SNAPSHOT: "mesh:snapshot",
   SERVICES_SNAPSHOT: "services:snapshot",
+  REVERSE_PROXY_SNAPSHOT: "proxy:reverse:snapshot",
   AGENT_FSM: "agent-fsm",
   VARIABLES: "variables",
   BOOT_SCAN_SKIPPED: "boot:scan:skipped",
@@ -34,6 +35,8 @@ export const WS_COMMAND_TYPES = Object.freeze({
   ANALYTICS_UNSUBSCRIBE: "analytics:unsubscribe",
   MESH_SUBSCRIBE: "mesh:subscribe",
   MESH_UNSUBSCRIBE: "mesh:unsubscribe",
+  REVERSE_PROXY_SUBSCRIBE: "proxy:reverse:subscribe",
+  REVERSE_PROXY_UNSUBSCRIBE: "proxy:reverse:unsubscribe",
 });
 
 export const ANALYTICS_TOPICS = Object.freeze([
@@ -91,6 +94,14 @@ export function makeMeshSubscribe() {
 
 export function makeMeshUnsubscribe() {
   return makeWsCommand(WS_COMMAND_TYPES.MESH_UNSUBSCRIBE);
+}
+
+export function makeReverseProxySubscribe() {
+  return makeWsCommand(WS_COMMAND_TYPES.REVERSE_PROXY_SUBSCRIBE);
+}
+
+export function makeReverseProxyUnsubscribe() {
+  return makeWsCommand(WS_COMMAND_TYPES.REVERSE_PROXY_UNSUBSCRIBE);
 }
 
 export function makeServiceLogSubscribe(serviceId) {

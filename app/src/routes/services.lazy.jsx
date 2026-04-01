@@ -926,6 +926,62 @@ function ServiceCard({ service, selected, onSelect, onRefresh }) {
   );
 }
 
+function RuntimeServiceCard({ service, onRefresh }) {
+  const [busy, setBusy] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const state = service.state ?? (service.running ? "running" : "stopped");
+  const info = stateInfo(state);
+  const canStart = state === "stopped" || state === "crashed";
+  const canStop = state === "running" || state === "starting";
+
+  const handleAction = useCallback(async (action) => {
+    setBusy(true);
+    try {
+      await api.post(`/services/${service.id}/${action}`, {});
+      setTimeout(() => onRefresh?.(), 300);
+    } finally {
+      setBusy(false);
+    }
+  }, [service.id, onRefresh]);
+
+  return (
+    <div className="rounded-md border border-base-content/[0.08] bg-base-200/30 overflow-hidden">
+      <div className="px-3.5 py-3">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className={`size-3.5 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium text-sm truncate">{service.name}</span>
+              <span className="badge badge-xs badge-outline opacity-60">runtime</span>
+              {service.port && <span className="text-[10px] font-mono opacity-35">:{service.port}</span>}
+            </div>
+            <div className="font-mono text-[11px] opacity-35 truncate mt-1">{service.command}</div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => setShowLog((v) => !v)} title="Logs">
+              <Terminal className="size-3.5" />
+            </button>
+            <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => handleAction("restart")} disabled={busy} title="Restart">
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+            </button>
+            {canStop && (
+              <button className="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100" onClick={() => handleAction("stop")} disabled={busy} title="Stop">
+                {busy ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+              </button>
+            )}
+            {canStart && (
+              <button className="btn btn-xs btn-ghost text-success opacity-50 hover:opacity-100" onClick={() => handleAction("start")} disabled={busy} title="Start">
+                {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      {showLog && <div className="h-72 border-t border-base-content/[0.06]"><LogViewer id={service.id} running={service.running} state={state} /></div>}
+    </div>
+  );
+}
+
 // ── SkeletonCard ────────────────────────────────────────────────────────────────
 
 function SkeletonCard() {
@@ -1314,7 +1370,7 @@ function ReverseProxyPanel({ stats, graph, port }) {
 
 function ServicesPage() {
   const { liveMode } = useDashboard();
-  const { services, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 15_000 });
+  const { services, runtimeServices, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 15_000 });
   const { graph, nativeGraph, traffic, status: meshStatus, clearMesh, toggleMesh } = useMesh({ liveMode });
   const { stats: reverseStats, graph: reverseGraph, status: reverseStatus } = useReverseProxy();
   const [selectedId, setSelectedId] = useState(null);
@@ -1432,7 +1488,7 @@ function ServicesPage() {
           )}
 
           {/* Empty */}
-          {!loading && services.length === 0 && (
+          {!loading && services.length === 0 && runtimeServices.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-3 px-6 py-16">
               <Server className="size-8 opacity-10" />
               <div className="text-center">
@@ -1440,6 +1496,25 @@ function ServicesPage() {
                 <p className="text-xs opacity-35 mt-1">Add services in Settings to manage them here.</p>
               </div>
             </div>
+          )}
+
+          {!loading && runtimeServices.length > 0 && (
+            <section className="mb-5">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-semibold opacity-30 uppercase tracking-widest">Runtime</span>
+                <div className="flex-1 h-px bg-base-content/5" />
+                <span className="text-[10px] opacity-20 tabular-nums">{runtimeServices.length}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {runtimeServices.map((service) => (
+                  <RuntimeServiceCard
+                    key={service.id}
+                    service={service}
+                    onRefresh={servicesRefresh}
+                  />
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Online */}

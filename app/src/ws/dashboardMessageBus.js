@@ -5,6 +5,7 @@ import {
 } from "../hooks/useServices.js";
 import { dispatchIssueLog } from "../hooks/useIssueLog.js";
 import { dispatchMeshEntry, dispatchMeshSnapshot } from "../hooks/useMesh.js";
+import { dispatchReverseProxySnapshot } from "../hooks/useReverseProxy.js";
 import { WS_MESSAGE_TYPES } from "./contracts.js";
 
 const SNAPSHOT_TYPES = new Set([WS_MESSAGE_TYPES.CONNECTED, WS_MESSAGE_TYPES.STATE_UPDATE, WS_MESSAGE_TYPES.STATE_DELTA]);
@@ -66,6 +67,11 @@ export function registerDashboardMessageHandlers(messageBus, options) {
         traffic: payload.traffic,
         status: payload.status,
       });
+    }),
+  );
+  unsubscribers.push(
+    messageBus.on(WS_MESSAGE_TYPES.REVERSE_PROXY_SNAPSHOT, (payload) => {
+      dispatchReverseProxySnapshot(payload);
     }),
   );
   unsubscribers.push(

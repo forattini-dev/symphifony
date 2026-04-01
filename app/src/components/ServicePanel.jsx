@@ -187,7 +187,7 @@ function ServiceCard({ service, onRefresh }) {
 
 export default function ServicePanel() {
   const { liveMode } = useDashboard();
-  const { services, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 30_000 });
+  const { services, runtimeServices, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 30_000 });
   const refreshServices = useCallback(() => {
     if (liveMode) return Promise.resolve();
     return refresh();
@@ -207,11 +207,11 @@ export default function ServicePanel() {
     await refreshServices();
   }, [services, refreshServices]);
 
-  if (loading && services.length === 0) {
+  if (loading && services.length === 0 && runtimeServices.length === 0) {
     return null;
   }
 
-  if (services.length === 0) {
+  if (services.length === 0 && runtimeServices.length === 0) {
     return null;
   }
 
@@ -220,6 +220,20 @@ export default function ServicePanel() {
 
   return (
     <div className="mb-4">
+      {runtimeServices.length > 0 && (
+        <div className="mb-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Server className="size-3.5 opacity-40" />
+            <span className="text-xs font-semibold uppercase tracking-widest opacity-50">Runtime</span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {runtimeServices.map((service) => (
+              <ServiceCard key={service.id} service={service} onRefresh={refreshServices} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Server className="size-3.5 opacity-40" />

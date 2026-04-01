@@ -11,6 +11,14 @@ import {
   getManagedServiceLogPath,
 } from "../domains/services.ts";
 import {
+  getReverseProxyRuntimeLogPath,
+  getReverseProxyRuntimeSnapshotStatus,
+  getReverseProxyRuntimeState,
+  restartReverseProxyRuntime,
+  startReverseProxyRuntime,
+  stopReverseProxyRuntime,
+} from "../persistence/plugins/reverse-proxy-server.ts";
+import {
   replaceServiceConfigs,
   upsertServiceConfig,
   deleteServiceConfig,
@@ -18,6 +26,7 @@ import {
 import {
   notifyServicesSnapshot,
   setServicesSnapshotProvider,
+  broadcastToWebSocketClients,
 } from "./websocket.ts";
 import {
   closeSync,
@@ -29,6 +38,7 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { ServiceStatus } from "../types.ts";
 
 // ── Detection helpers ─────────────────────────────────────────────────────────
 
@@ -150,15 +160,44 @@ export function registerServiceRoutes(
   app: RouteRegistrar,
   state: RuntimeState,
 ): void {
+  const listRuntimeServices = (): ServiceStatus[] => {
+    const reverseProxy = getReverseProxyRuntimeSnapshotStatus({
+      enabled: state.config.reverseProxyEnabled ?? false,
+      localDomain: state.config.localDomain,
+      configuredPort: state.config.reverseProxyPort ?? 4433,
+    }) as ServiceStatus;
+
+    if (
+      state.config.reverseProxyEnabled ||
+      reverseProxy.running ||
+      reverseProxy.logSize > 0
+    ) {
+      return [reverseProxy];
+    }
+
+    return [];
+  };
+
+  const findManagedService = (id: string) => (state.config.services ?? []).find((e) => e.id === id);
+  const isReverseProxyRuntimeService = (id: string) => id === "reverse-proxy";
+  const getReverseProxyRuntimeOptions = () => ({
+    port: state.config.reverseProxyPort ?? 4433,
+    dashPort: Number(state.config.dashboardPort ?? 4000),
+    routes: state.config.proxyRoutes ?? [],
+    services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
+    localDomain: state.config.localDomain,
+  });
+
   setServicesSnapshotProvider(() => ({
     services: listServiceStatuses(state.config.services ?? [], STATE_ROOT),
+    runtimeServices: listRuntimeServices(),
   }));
 
   // GET /api/services — list all entries with status
   app.get("/api/services", (c) => {
     const entries = state.config.services ?? [];
     const services = listServiceStatuses(entries, STATE_ROOT);
-    return c.json({ ok: true, services });
+    return c.json({ ok: true, services, runtimeServices: listRuntimeServices() });
   });
 
   // GET /api/services/detect — scan project for runnable commands
@@ -175,21 +214,51 @@ export function registerServiceRoutes(
   // GET /api/services/:id/status
   app.get("/api/services/:id/status", (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
-    return c.json({ ok: true, ...getServiceRuntimeStatus(entry, STATE_ROOT) });
+    const entry = findManagedService(id);
+    if (entry) {
+      return c.json({ ok: true, ...getServiceRuntimeStatus(entry, STATE_ROOT) });
+    }
+    if (isReverseProxyRuntimeService(id)) {
+      const runtime = await getReverseProxyRuntimeState();
+      return c.json({
+        ok: true,
+        ...getReverseProxyRuntimeSnapshotStatus({
+          enabled: state.config.reverseProxyEnabled ?? false,
+          localDomain: state.config.localDomain,
+          configuredPort: state.config.reverseProxyPort ?? 4433,
+        }),
+        running: runtime.running,
+        pid: runtime.pid,
+        startedAt: runtime.startedAt,
+        port: runtime.proxyPort ?? state.config.reverseProxyPort ?? 4433,
+      });
+    }
+    return c.json({ ok: false, error: "Service not found." }, 404);
   });
 
   // POST /api/services/:id/start
   app.post("/api/services/:id/start", async (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+    const entry = findManagedService(id);
+    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
-      await startManagedService(id);
-      // Log broadcasting is started by the onTransition callback
-      const status = getServiceRuntimeStatus(entry, STATE_ROOT);
-      return c.json({ ok: true, pid: status.pid, state: status.state });
+      if (entry) {
+        await startManagedService(id);
+        const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+        return c.json({ ok: true, pid: status.pid, state: status.state });
+      }
+
+      const port = await startReverseProxyRuntime(getReverseProxyRuntimeOptions());
+      const runtime = await getReverseProxyRuntimeState();
+      broadcastToWebSocketClients({
+        type: "service",
+        id,
+        state: runtime.running ? "running" : "stopped",
+        running: runtime.running,
+        pid: runtime.pid,
+      });
+      notifyServicesSnapshot();
+      return c.json({ ok: true, pid: runtime.pid, state: "running", port });
     } catch (err) {
       logger.error({ err }, `[Service] Failed to start ${id}`);
       return c.json({ ok: false, error: String(err) }, 500);
@@ -199,15 +268,27 @@ export function registerServiceRoutes(
   // POST /api/services/:id/restart — stop + start via state machine
   app.post("/api/services/:id/restart", async (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+    const entry = findManagedService(id);
+    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
-      // Stop first (ignore errors if already stopped)
-      try { await stopManagedService(id); } catch { /* may already be stopped */ }
-      // Start via state machine
-      await startManagedService(id);
-      const status = getServiceRuntimeStatus(entry, STATE_ROOT);
-      return c.json({ ok: true, pid: status.pid, state: status.state });
+      if (entry) {
+        try { await stopManagedService(id); } catch {}
+        await startManagedService(id);
+        const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+        return c.json({ ok: true, pid: status.pid, state: status.state });
+      }
+
+      const port = await restartReverseProxyRuntime(getReverseProxyRuntimeOptions());
+      const runtime = await getReverseProxyRuntimeState();
+      broadcastToWebSocketClients({
+        type: "service",
+        id,
+        state: runtime.running ? "running" : "stopped",
+        running: runtime.running,
+        pid: runtime.pid,
+      });
+      notifyServicesSnapshot();
+      return c.json({ ok: true, pid: runtime.pid, state: "running", port });
     } catch (err) {
       logger.error({ err }, `[Service] Failed to restart ${id}`);
       return c.json({ ok: false, error: String(err) }, 500);
@@ -217,20 +298,34 @@ export function registerServiceRoutes(
   // POST /api/services/:id/stop
   app.post("/api/services/:id/stop", async (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+    const entry = findManagedService(id);
+    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
-      await stopManagedService(id);
+      if (entry) {
+        await stopManagedService(id);
+      } else {
+        await stopReverseProxyRuntime();
+        broadcastToWebSocketClients({
+          type: "service",
+          id,
+          state: "stopped",
+          running: false,
+          pid: null,
+        });
+      }
     } catch { /* may already be stopped */ }
-    // Log broadcasting is stopped by the onTransition callback
-    const status = getServiceRuntimeStatus(entry, STATE_ROOT);
-    return c.json({ ok: true, state: status.state });
+    notifyServicesSnapshot();
+    if (entry) {
+      const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+      return c.json({ ok: true, state: status.state });
+    }
+    return c.json({ ok: true, state: "stopped" });
   });
 
   // GET /api/services/:id/health — quick HTTP ping if port configured
   app.get("/api/services/:id/health", async (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
+    const entry = findManagedService(id);
     if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
 
     const status = getServiceRuntimeStatus(entry, STATE_ROOT);
@@ -260,9 +355,9 @@ export function registerServiceRoutes(
   // GET /api/services/:id/log — tail (last 16KB) or new bytes since ?after=N
   app.get("/api/services/:id/log", (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
-    const logFile = getManagedServiceLogPath(id, STATE_ROOT);
+    const entry = findManagedService(id);
+    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getReverseProxyRuntimeLogPath();
     let logSize = 0;
     if (existsSync(logFile)) {
       try { logSize = statSync(logFile).size; } catch {}
@@ -291,10 +386,10 @@ export function registerServiceRoutes(
   // GET /api/services/:id/stream — SSE live log
   app.get("/api/services/:id/stream", (c) => {
     const id = c.req.param("id");
-    const entry = (state.config.services ?? []).find((e) => e.id === id);
-    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+    const entry = findManagedService(id);
+    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
 
-    const logFile = getManagedServiceLogPath(id, STATE_ROOT);
+    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getReverseProxyRuntimeLogPath();
 
     const enc = new TextEncoder();
     const sseMsg = (data: unknown) => enc.encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -357,12 +452,20 @@ export function registerServiceRoutes(
 
         // Notify client if process dies
         statusCheckId = setInterval(() => {
-          const currentEntry = (state.config.services ?? []).find((e) => e.id === id);
-          if (!currentEntry) return;
-          const status = getServiceRuntimeStatus(currentEntry, STATE_ROOT);
-          if (!status.running) {
-            try { ctrl.enqueue(sseMsg({ type: "status", running: false })); } catch {}
+          if (entry) {
+            const currentEntry = findManagedService(id);
+            if (!currentEntry) return;
+            const status = getServiceRuntimeStatus(currentEntry, STATE_ROOT);
+            if (!status.running) {
+              try { ctrl.enqueue(sseMsg({ type: "status", running: false })); } catch {}
+            }
+            return;
           }
+          getReverseProxyRuntimeState().then((status) => {
+            if (!status.running) {
+              try { ctrl.enqueue(sseMsg({ type: "status", running: false })); } catch {}
+            }
+          }).catch(() => {});
         }, 5_000);
 
         keepaliveId = setInterval(() => {

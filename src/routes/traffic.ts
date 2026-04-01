@@ -16,22 +16,26 @@ import {
   setServicesAccessor,
 } from "../persistence/plugins/traffic-proxy-server.ts";
 import {
-  isReverseProxyRunning,
-  getReverseProxyPort,
-  getReverseProxyStats,
-  getReverseProxyGraphSnapshot,
-  startReverseProxy,
-  stopReverseProxy,
-  restartReverseProxy,
+  getReverseProxyRuntimeGraphSnapshot,
+  getReverseProxyRuntimeSnapshotStatus,
+  getReverseProxyRuntimeState,
+  getReverseProxyRuntimeStats,
   invalidateReverseProxyCert,
   getReverseProxyCaCertPath,
+  restartReverseProxyRuntime,
+  startReverseProxyRuntime,
+  stopReverseProxyRuntime,
 } from "../persistence/plugins/reverse-proxy-server.ts";
 import type { ProxyRoute } from "../types.ts";
 import {
   setMeshSnapshotProvider,
   sendToMeshRoom,
   notifyMeshSnapshot,
+  notifyServicesSnapshot,
   meshRoomHasSubscribers,
+  setReverseProxySnapshotProvider,
+  notifyReverseProxySnapshot,
+  reverseProxyRoomHasSubscribers,
 } from "./websocket.ts";
 
 const MESH_VAR_KEYS = ["HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"];
@@ -68,6 +72,40 @@ function clearMeshSnapshotTimer() {
   meshSnapshotTimer = null;
 }
 
+// ── Reverse proxy push timer ──────────────────────────────────────────────────
+// Fetches stats + graph and pushes to subscribed clients every 3s when running.
+// Stats/graph are async; we cache the last fetch so the sync provider can serve them.
+
+const REVERSE_PROXY_PUSH_INTERVAL_MS = 3_000;
+let reverseProxyPushTimer: ReturnType<typeof setInterval> | null = null;
+let cachedReverseProxyStats: unknown = null;
+let cachedReverseProxySnapshot: unknown = null;
+
+async function pushReverseProxySnapshot() {
+  if (!reverseProxyRoomHasSubscribers()) return;
+  const [stats, snapshot] = await Promise.all([
+    getReverseProxyRuntimeStats(),
+    getReverseProxyRuntimeGraphSnapshot(),
+  ]);
+  cachedReverseProxyStats = stats;
+  cachedReverseProxySnapshot = snapshot;
+  if (!stats && !snapshot) return;
+  notifyReverseProxySnapshot();
+}
+
+function startReverseProxyPushTimer() {
+  if (reverseProxyPushTimer) return;
+  reverseProxyPushTimer = setInterval(() => { void pushReverseProxySnapshot(); }, REVERSE_PROXY_PUSH_INTERVAL_MS);
+}
+
+function stopReverseProxyPushTimer() {
+  if (!reverseProxyPushTimer) return;
+  clearInterval(reverseProxyPushTimer);
+  reverseProxyPushTimer = null;
+  cachedReverseProxyStats = null;
+  cachedReverseProxySnapshot = null;
+}
+
 export function registerTrafficRoutes(
   collector: RouteRegistrar,
   state: RuntimeState,
@@ -87,6 +125,21 @@ export function registerTrafficRoutes(
       },
     };
   });
+
+  setReverseProxySnapshotProvider(() => {
+    const snapshotStatus = getReverseProxyRuntimeSnapshotStatus();
+    if (!snapshotStatus.running) return null;
+    return {
+      stats: cachedReverseProxyStats,
+      snapshot: cachedReverseProxySnapshot,
+      running: snapshotStatus.running,
+    };
+  });
+
+  // If proxy was already running at boot, start the push timer immediately
+  if (getReverseProxyRuntimeSnapshotStatus().running) {
+    startReverseProxyPushTimer();
+  }
 
   // ── GET /api/mesh ──────────────────────────────────────────────
   // Returns the full service graph (nodes + edges)
@@ -251,12 +304,19 @@ export function registerTrafficRoutes(
 
   // ── GET /api/proxy/reverse/status ─────────────────────────────
   // Returns HTTPS reverse proxy status
-  collector.get("/api/proxy/reverse/status", (c) => {
+  collector.get("/api/proxy/reverse/status", async (c) => {
+    const runtime = await getReverseProxyRuntimeState();
+    const snapshot = getReverseProxyRuntimeSnapshotStatus({
+      enabled: state.config.reverseProxyEnabled ?? false,
+      localDomain: normalizeLocalDomain(state.config.localDomain),
+      configuredPort: state.config.reverseProxyPort ?? 4433,
+    });
     return c.json({
       ok: true,
       enabled: state.config.reverseProxyEnabled ?? false,
-      running: isReverseProxyRunning(),
-      port: getReverseProxyPort() ?? state.config.reverseProxyPort ?? 4433,
+      running: runtime.running,
+      pid: runtime.pid,
+      port: runtime.proxyPort ?? snapshot.port ?? state.config.reverseProxyPort ?? 4433,
       certPath: `${STATE_ROOT}/tls/cert.pem`,
       caCertPath: getReverseProxyCaCertPath(),
       localDomain: normalizeLocalDomain(state.config.localDomain),
@@ -284,9 +344,12 @@ export function registerTrafficRoutes(
       localDomain: normalizeLocalDomain(state.config.localDomain),
     };
 
-    if (enabled && !isReverseProxyRunning()) {
+    if (enabled && !getReverseProxyRuntimeSnapshotStatus().running) {
       try {
-        const proxyPort = await startReverseProxy(proxyOpts);
+        const proxyPort = await startReverseProxyRuntime(proxyOpts);
+        notifyServicesSnapshot();
+        void pushReverseProxySnapshot();
+        startReverseProxyPushTimer();
         return c.json({ ok: true, running: true, port: proxyPort });
       } catch (err) {
         logger.error({ err }, "[ReverseProxy] Failed to start");
@@ -294,11 +357,14 @@ export function registerTrafficRoutes(
       }
     }
 
-    if (!enabled && isReverseProxyRunning()) {
-      await stopReverseProxy();
+    if (!enabled && getReverseProxyRuntimeSnapshotStatus().running) {
+      stopReverseProxyPushTimer();
+      await stopReverseProxyRuntime();
+      notifyServicesSnapshot();
     }
 
-    return c.json({ ok: true, running: isReverseProxyRunning(), port: getReverseProxyPort() });
+    const runtime = await getReverseProxyRuntimeState();
+    return c.json({ ok: true, running: runtime.running, port: runtime.proxyPort ?? state.config.reverseProxyPort ?? 4433 });
   });
 
   // ── PUT /api/proxy/reverse/routes ─────────────────────────────
@@ -311,23 +377,25 @@ export function registerTrafficRoutes(
     await persistSetting("runtime.proxyRoutes", routes, { scope: "runtime", source: "user" });
     state.config.proxyRoutes = routes;
 
-    if (isReverseProxyRunning()) {
+    if (getReverseProxyRuntimeSnapshotStatus().running) {
       try {
         const dashPort = Number(state.config.dashboardPort ?? 4000);
-        await restartReverseProxy({
+        await restartReverseProxyRuntime({
           port: state.config.reverseProxyPort ?? 4433,
           dashPort,
           routes,
           services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
           localDomain: normalizeLocalDomain(state.config.localDomain),
         });
+        notifyServicesSnapshot();
+        void pushReverseProxySnapshot();
       } catch (err) {
         logger.error({ err }, "[ReverseProxy] Failed to restart after routes update");
         return c.json({ ok: false, error: String(err) }, 500);
       }
     }
 
-    return c.json({ ok: true, running: isReverseProxyRunning(), routes });
+    return c.json({ ok: true, running: getReverseProxyRuntimeSnapshotStatus().running, routes });
   });
 
   // ── PUT /api/proxy/reverse/domain ─────────────────────────────
@@ -343,37 +411,39 @@ export function registerTrafficRoutes(
     // Invalidate cached cert so it regenerates with the new domain on next start
     invalidateReverseProxyCert();
 
-    if (isReverseProxyRunning()) {
+    if (getReverseProxyRuntimeSnapshotStatus().running) {
       try {
         const dashPort = Number(state.config.dashboardPort ?? 4000);
-        await restartReverseProxy({
+        await restartReverseProxyRuntime({
           port: state.config.reverseProxyPort ?? 4433,
           dashPort,
           routes: state.config.proxyRoutes ?? [],
           services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
           localDomain: domain || undefined,
         });
+        notifyServicesSnapshot();
+        void pushReverseProxySnapshot();
       } catch (err) {
         logger.error({ err }, "[ReverseProxy] Failed to restart after domain update");
         return c.json({ ok: false, error: String(err) }, 500);
       }
     }
 
-    return c.json({ ok: true, localDomain: domain, running: isReverseProxyRunning() });
+    return c.json({ ok: true, localDomain: domain, running: getReverseProxyRuntimeSnapshotStatus().running });
   });
 
   // ── GET /api/proxy/reverse/stats ──────────────────────────────
   // Returns reverse proxy connection/byte/error counters
-  collector.get("/api/proxy/reverse/stats", (c) => {
-    const stats = getReverseProxyStats();
+  collector.get("/api/proxy/reverse/stats", async (c) => {
+    const stats = await getReverseProxyRuntimeStats();
     if (!stats) return c.json({ ok: false, error: "Reverse proxy not running" }, 503);
     return c.json({ ok: true, stats });
   });
 
   // ── GET /api/proxy/reverse/graph ──────────────────────────────
   // Returns the native raffel graph snapshot for the reverse proxy (per-route metrics)
-  collector.get("/api/proxy/reverse/graph", (c) => {
-    const snapshot = getReverseProxyGraphSnapshot();
+  collector.get("/api/proxy/reverse/graph", async (c) => {
+    const snapshot = await getReverseProxyRuntimeGraphSnapshot();
     if (!snapshot) return c.json({ ok: false, error: "Reverse proxy not running" }, 503);
     return c.json({ ok: true, snapshot });
   });

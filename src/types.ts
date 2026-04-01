@@ -566,6 +566,9 @@ export type ServiceStatus = {
   /** Count of ERROR/Exception/FATAL/FAIL occurrences in the last 8KB of the log */
   errorCount: number;
   nextRetryAt?: string;
+  isRuntimeService?: boolean;
+  runtimeServiceKind?: string;
+  managedByFifonyRuntime?: boolean;
 };
 
 // ── Mesh (inter-service traffic proxy) ───────────────────────────

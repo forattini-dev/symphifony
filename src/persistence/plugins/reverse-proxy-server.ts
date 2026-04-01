@@ -1,20 +1,356 @@
 import type { ReverseProxy, ReverseProxyRouteConfig } from "raffel";
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
   unlinkSync,
 } from "node:fs";
-import { join } from "node:path";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import { createSign, generateKeyPairSync } from "node:crypto";
 import { STATE_ROOT } from "../../concerns/constants.ts";
 import { logger } from "../../concerns/logger.ts";
 import type { ProxyRoute } from "../../types.ts";
+import { isProcessAlive } from "../../agents/pid-manager.ts";
 
 // ── Singleton state ──────────────────────────────────────────────
 
 let reverseProxy: ReverseProxy | null = null;
+
+const REVERSE_PROXY_RUNTIME_ID = "reverse-proxy";
+const RUNTIME_CONFIG_PATH = join(STATE_ROOT, `service-${REVERSE_PROXY_RUNTIME_ID}.runtime.json`);
+const RUNTIME_PID_PATH = join(STATE_ROOT, `service-${REVERSE_PROXY_RUNTIME_ID}.pid`);
+const RUNTIME_LOG_PATH = join(STATE_ROOT, `service-${REVERSE_PROXY_RUNTIME_ID}.log`);
+
+type ReverseProxyRuntimeConfig = {
+  port: number;
+  dashPort: number;
+  routes?: ProxyRoute[];
+  services?: Array<{ id: string; port?: number }>;
+  localDomain?: string;
+};
+
+type ReverseProxyRuntimePidInfo = {
+  pid: number;
+  command: string;
+  startedAt: string;
+  controlPort?: number;
+  proxyPort?: number;
+  dashPort?: number;
+  localDomain?: string;
+};
+
+function readRuntimePidInfo(): ReverseProxyRuntimePidInfo | null {
+  if (!existsSync(RUNTIME_PID_PATH)) return null;
+  try {
+    const data = JSON.parse(readFileSync(RUNTIME_PID_PATH, "utf8")) as ReverseProxyRuntimePidInfo;
+    if (!data?.pid || typeof data.pid !== "number") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimePidInfo(info: ReverseProxyRuntimePidInfo): void {
+  writeFileSync(RUNTIME_PID_PATH, JSON.stringify(info));
+}
+
+function removeRuntimePidInfo(): void {
+  try { rmSync(RUNTIME_PID_PATH, { force: true }); } catch {}
+}
+
+function removeRuntimeConfig(): void {
+  try { rmSync(RUNTIME_CONFIG_PATH, { force: true }); } catch {}
+}
+
+export function getReverseProxyRuntimeLogPath(): string {
+  return RUNTIME_LOG_PATH;
+}
+
+export function getReverseProxyRuntimePidPath(): string {
+  return RUNTIME_PID_PATH;
+}
+
+function getPackageRoot(): string {
+  const filePath = fileURLToPath(import.meta.url);
+  return resolve(dirname(filePath), "../../..");
+}
+
+function getReverseProxyRuntimeCommand(): { file: string; command: string } {
+  const packageRoot = process.env.FIFONY_PKG_ROOT ?? getPackageRoot();
+  const file = resolve(packageRoot, "bin", "fifony.js");
+  return {
+    file,
+    command: `${process.execPath} ${file} reverse-proxy-runtime --runtimeConfig ${RUNTIME_CONFIG_PATH}`,
+  };
+}
+
+async function queryRuntimeControl<T>(pathname: string, init?: RequestInit): Promise<T | null> {
+  const info = readRuntimePidInfo();
+  if (!info?.controlPort || !isProcessAlive(info.pid)) return null;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${info.controlPort}${pathname}`, {
+      ...init,
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) return null;
+    return await response.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function startReverseProxyRuntime(options: ReverseProxyRuntimeConfig): Promise<number> {
+  const existing = readRuntimePidInfo();
+  if (existing?.pid && isProcessAlive(existing.pid)) {
+    const status = await queryRuntimeControl<{ proxyPort?: number; running?: boolean }>("/status");
+    if (status?.running) {
+      return status.proxyPort ?? existing.proxyPort ?? options.port;
+    }
+  }
+
+  mkdirSync(STATE_ROOT, { recursive: true });
+  writeFileSync(RUNTIME_CONFIG_PATH, JSON.stringify(options));
+  try { writeFileSync(RUNTIME_LOG_PATH, ""); } catch {}
+
+  const { file, command } = getReverseProxyRuntimeCommand();
+  const logFd = openSync(RUNTIME_LOG_PATH, "a");
+  const child = spawn(process.execPath, [file, "reverse-proxy-runtime", "--runtimeConfig", RUNTIME_CONFIG_PATH], {
+    cwd: process.cwd(),
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    env: process.env,
+  });
+
+  try { closeSync(logFd); } catch {}
+  child.unref();
+
+  if (child.pid == null) {
+    throw new Error("Failed to spawn reverse proxy runtime process.");
+  }
+
+  writeRuntimePidInfo({
+    pid: child.pid,
+    command,
+    startedAt: new Date().toISOString(),
+    dashPort: options.dashPort,
+    proxyPort: options.port,
+    localDomain: options.localDomain,
+  });
+
+  const started = Date.now();
+  while (Date.now() - started < 5_000) {
+    const info = readRuntimePidInfo();
+    if (info?.controlPort && info.proxyPort) {
+      return info.proxyPort;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+
+  return options.port;
+}
+
+export async function stopReverseProxyRuntime(): Promise<void> {
+  const info = readRuntimePidInfo();
+  if (!info) return;
+
+  if (info.controlPort) {
+    await queryRuntimeControl("/stop", { method: "POST" });
+  }
+
+  if (isProcessAlive(info.pid)) {
+    try { process.kill(-info.pid, "SIGTERM"); } catch {}
+    try { process.kill(info.pid, "SIGTERM"); } catch {}
+  }
+
+  const started = Date.now();
+  while (Date.now() - started < 3_000) {
+    if (!isProcessAlive(info.pid)) break;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+
+  if (isProcessAlive(info.pid)) {
+    try { process.kill(-info.pid, "SIGKILL"); } catch {}
+    try { process.kill(info.pid, "SIGKILL"); } catch {}
+  }
+
+  removeRuntimePidInfo();
+  removeRuntimeConfig();
+}
+
+export async function restartReverseProxyRuntime(options: ReverseProxyRuntimeConfig): Promise<number> {
+  await stopReverseProxyRuntime();
+  return startReverseProxyRuntime(options);
+}
+
+export function isReverseProxyRuntimeRunning(): boolean {
+  const info = readRuntimePidInfo();
+  return info?.pid != null && isProcessAlive(info.pid);
+}
+
+export function getReverseProxyRuntimeSnapshotStatus(options?: {
+  enabled?: boolean;
+  localDomain?: string;
+  configuredPort?: number;
+}) {
+  const info = readRuntimePidInfo();
+  const alive = info?.pid != null && isProcessAlive(info.pid);
+  let logSize = 0;
+  if (existsSync(RUNTIME_LOG_PATH)) {
+    try { logSize = statSync(RUNTIME_LOG_PATH).size; } catch {}
+  }
+
+  return {
+    id: REVERSE_PROXY_RUNTIME_ID,
+    name: "HTTPS Reverse Proxy",
+    command: info?.command ?? getReverseProxyRuntimeCommand().command,
+    port: info?.proxyPort ?? options?.configuredPort,
+    state: alive ? "running" : "stopped",
+    running: alive,
+    pid: alive ? info?.pid ?? null : null,
+    startedAt: info?.startedAt ?? null,
+    uptime: alive && info?.startedAt ? Math.max(0, Date.now() - Date.parse(info.startedAt)) : 0,
+    logSize,
+    crashCount: 0,
+    errorCount: 0,
+    isRuntimeService: true,
+    runtimeServiceKind: REVERSE_PROXY_RUNTIME_ID,
+    managedByFifonyRuntime: true,
+    enabled: options?.enabled ?? false,
+    localDomain: options?.localDomain ?? null,
+  };
+}
+
+export async function getReverseProxyRuntimeStats() {
+  const payload = await queryRuntimeControl<{ stats?: unknown }>("/stats");
+  return payload?.stats ?? null;
+}
+
+export async function getReverseProxyRuntimeGraphSnapshot() {
+  const payload = await queryRuntimeControl<{ snapshot?: unknown }>("/graph");
+  return payload?.snapshot ?? null;
+}
+
+export async function getReverseProxyRuntimeState() {
+  const info = readRuntimePidInfo();
+  const alive = info?.pid != null && isProcessAlive(info.pid);
+  if (!info) {
+    return { running: false, pid: null, proxyPort: null, controlPort: null, startedAt: null };
+  }
+
+  const status = await queryRuntimeControl<{
+    running?: boolean;
+    proxyPort?: number;
+    controlPort?: number;
+    startedAt?: string;
+    localDomain?: string;
+  }>("/status");
+
+  return {
+    running: status?.running ?? alive,
+    pid: alive ? info.pid : null,
+    proxyPort: status?.proxyPort ?? info.proxyPort ?? null,
+    controlPort: status?.controlPort ?? info.controlPort ?? null,
+    startedAt: status?.startedAt ?? info.startedAt ?? null,
+    localDomain: status?.localDomain ?? info.localDomain ?? null,
+  };
+}
+
+export async function runReverseProxyRuntimeProcess(configPath: string): Promise<void> {
+  const raw = readFileSync(configPath, "utf8");
+  const config = JSON.parse(raw) as ReverseProxyRuntimeConfig;
+  const startedAt = new Date().toISOString();
+  const proxyPort = await startReverseProxy(config);
+
+  const controlServer = createServer(async (req, res) => {
+    const sendJson = (statusCode: number, payload: unknown) => {
+      res.statusCode = statusCode;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(payload));
+    };
+
+    if (!req.url) {
+      sendJson(404, { ok: false });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/status") {
+      sendJson(200, {
+        ok: true,
+        running: isReverseProxyRunning(),
+        proxyPort: getReverseProxyPort(),
+        startedAt,
+        localDomain: config.localDomain ?? null,
+        pid: process.pid,
+        controlPort: (controlServer.address() as { port?: number } | null)?.port ?? null,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/stats") {
+      sendJson(200, { ok: true, stats: getReverseProxyStats() });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/graph") {
+      sendJson(200, { ok: true, snapshot: getReverseProxyGraphSnapshot() });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/stop") {
+      sendJson(200, { ok: true });
+      setTimeout(() => {
+        stopReverseProxy().catch(() => {}).finally(() => {
+          try { controlServer.close(); } catch {}
+          removeRuntimePidInfo();
+          removeRuntimeConfig();
+          process.exit(0);
+        });
+      }, 20);
+      return;
+    }
+
+    sendJson(404, { ok: false });
+  });
+
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    controlServer.once("error", rejectPromise);
+    controlServer.listen(0, "127.0.0.1", () => resolvePromise());
+  });
+
+  const controlPort = (controlServer.address() as { port?: number } | null)?.port;
+  const { command } = getReverseProxyRuntimeCommand();
+  writeRuntimePidInfo({
+    pid: process.pid,
+    command,
+    startedAt,
+    controlPort,
+    proxyPort,
+    dashPort: config.dashPort,
+    localDomain: config.localDomain,
+  });
+
+  const shutdown = async () => {
+    try { await stopReverseProxy(); } catch {}
+    try { controlServer.close(); } catch {}
+    removeRuntimePidInfo();
+    removeRuntimeConfig();
+    process.exit(0);
+  };
+
+  process.once("SIGINT", () => { void shutdown(); });
+  process.once("SIGTERM", () => { void shutdown(); });
+
+  await new Promise<void>(() => {});
+}
 
 // ── Multi-SAN cert generation ─────────────────────────────────────
 
