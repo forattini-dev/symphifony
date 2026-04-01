@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { api } from "../../../api.js";
 import { timeAgo, formatDuration } from "../../../utils.js";
-import { Section, ConfigStrip } from "../shared.jsx";
+import { Section, ConfigStrip, resolveStageDisplay } from "../shared.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -237,20 +237,30 @@ export function PlanningTab({ issue, onStateChange, workflowConfig }) {
       </div>
 
       {/* Plan config + planner tokens */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        {workflowConfig?.workflow?.plan && (
-          <div className="flex items-center gap-2 text-xs opacity-60">
-            <SlidersHorizontal className="size-3 shrink-0" />
-            <ConfigStrip config={workflowConfig.workflow.plan} />
+      {(() => {
+        const stage = resolveStageDisplay({
+          phaseTokens: issue.tokensByPhase?.planner,
+          tokensByModel: issue.tokensByModel,
+          workflowConfig,
+          stageName: "plan",
+          phaseRan: !!issue.plan,
+        });
+        return stage ? (
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs opacity-60">
+              <SlidersHorizontal className="size-3 shrink-0" />
+              <span className="text-[10px] uppercase tracking-wider opacity-60">{stage.label}</span>
+              <ConfigStrip config={stage.config} variant={stage.variant} />
+            </div>
+            {issue.tokensByPhase?.planner?.totalTokens > 0 && (
+              <div className="flex items-center gap-1.5 text-xs opacity-50">
+                <Zap className="size-3" />
+                <span>{issue.tokensByPhase.planner.totalTokens.toLocaleString()} tokens</span>
+              </div>
+            )}
           </div>
-        )}
-        {issue.tokensByPhase?.planner?.totalTokens > 0 && (
-          <div className="flex items-center gap-1.5 text-xs opacity-50">
-            <Zap className="size-3" />
-            <span>{issue.tokensByPhase.planner.totalTokens.toLocaleString()} tokens</span>
-          </div>
-        )}
-      </div>
+        ) : null;
+      })()}
 
       {/* Last refinement feedback */}
       {refinementCount > 0 && (

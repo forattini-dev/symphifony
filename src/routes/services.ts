@@ -16,6 +16,10 @@ import {
   deleteServiceConfig,
 } from "../persistence/resources/services.resource.ts";
 import {
+  notifyServicesSnapshot,
+  setServicesSnapshotProvider,
+} from "./websocket.ts";
+import {
   closeSync,
   existsSync,
   openSync,
@@ -146,6 +150,10 @@ export function registerServiceRoutes(
   app: RouteRegistrar,
   state: RuntimeState,
 ): void {
+  setServicesSnapshotProvider(() => ({
+    services: listServiceStatuses(state.config.services ?? [], STATE_ROOT),
+  }));
+
   // GET /api/services — list all entries with status
   app.get("/api/services", (c) => {
     const entries = state.config.services ?? [];
@@ -378,7 +386,7 @@ export function registerServiceRoutes(
 
   // POST /api/services/config — save the services array
   app.post("/api/services/config", async (c) => {
-    return replaceServiceConfigs(c, {
+    const response = await replaceServiceConfigs(c, {
       replaceAllServices: async (entries) => {
         const { replaceAllServices } = await import("../persistence/store.ts");
         await replaceAllServices(entries);
@@ -386,6 +394,10 @@ export function registerServiceRoutes(
       replacePersistedService: async () => {},
       deletePersistedService: async () => {},
     });
+    if (response.status < 400) {
+      notifyServicesSnapshot();
+    }
+    return response;
   });
 
   // DELETE /api/services/:id — stop + remove a single entry
@@ -394,7 +406,7 @@ export function registerServiceRoutes(
     try {
       await stopManagedService(id);
     } catch { /* ignore if not running */ }
-    return deleteServiceConfig(c, {
+    const response = await deleteServiceConfig(c, {
       deletePersistedService: async (serviceId) => {
         const { deletePersistedService } = await import("../persistence/store.ts");
         await deletePersistedService(serviceId);
@@ -402,11 +414,15 @@ export function registerServiceRoutes(
       replacePersistedService: async () => {},
       replaceAllServices: async () => {},
     });
+    if (response.status < 400) {
+      notifyServicesSnapshot();
+    }
+    return response;
   });
 
   // PUT /api/services/:id — update a single entry
   app.put("/api/services/:id", async (c) => {
-    return upsertServiceConfig(c, {
+    const response = await upsertServiceConfig(c, {
       replacePersistedService: async (entry) => {
         const { replacePersistedService } = await import("../persistence/store.ts");
         await replacePersistedService(entry);
@@ -414,6 +430,10 @@ export function registerServiceRoutes(
       deletePersistedService: async () => {},
       replaceAllServices: async () => {},
     });
+    if (response.status < 400) {
+      notifyServicesSnapshot();
+    }
+    return response;
   });
 
   // POST /api/services/:id/detect-healthcheck — AI reads log and detects host/port
@@ -439,6 +459,7 @@ export function registerServiceRoutes(
       entry.healthcheck = healthcheck;
       const { replacePersistedService } = await import("../persistence/store.ts");
       await replacePersistedService(entry);
+      notifyServicesSnapshot();
 
       return c.json({ ok: true, found: true, healthcheck, saved: true });
     } catch (err) {

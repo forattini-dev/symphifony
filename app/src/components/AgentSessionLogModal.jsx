@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { X, FileText, Clock, GitBranch } from "lucide-react";
 import { api } from "../api.js";
 import { formatDuration, timeAgo } from "../utils.js";
+import { useDashboard } from "../context/DashboardContext.jsx";
 import { useIssueLog } from "../hooks/useIssueLog.js";
 
 const ROLE_BADGE = {
@@ -74,7 +75,8 @@ export function AgentSessionLogModal({ issue, onClose }) {
   const prevLiveLog = useRef(null);
   const [elapsed, setElapsed] = useState(0);
   const isActive = ACTIVE_STATES.has(issue?.state);
-  const { log: liveLog } = useIssueLog(issue?.id, isActive);
+  const { liveMode } = useDashboard();
+  const { log: liveLog } = useIssueLog(issue?.id, isActive, liveMode);
 
   const fetchSessions = useCallback(async () => {
     if (!issue?.id) return;

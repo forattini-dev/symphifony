@@ -73,7 +73,7 @@ function SourcesSection({ onCatalogRefresh }) {
             <Loader2 className="size-3 animate-spin" /> Loading...
           </div>
         ) : (
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
             {repos.map((repo) => {
               const syncing = syncingRepos.has(repo.id);
               const counts = repo?.artifactCounts ?? null;

@@ -380,7 +380,7 @@ function ProjectSettings() {
           </div>
           <p className="text-xs opacity-50">Pick how completed issues are integrated.</p>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <label className={`flex-1 cursor-pointer rounded-xl border-2 p-3 text-center text-sm font-medium transition-colors ${mergeMode === "local" ? "border-primary bg-primary/10" : "border-base-300 bg-base-100"}`}>
               <input type="radio" name="settings-merge-mode" className="hidden" checked={mergeMode === "local"} onChange={() => { setMergeMode("local"); autoSaveDelivery("local", prBaseBranch); }} />
               <GitMerge className="size-4 mx-auto mb-1 opacity-60" />

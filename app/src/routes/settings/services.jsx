@@ -3,10 +3,11 @@ import { useState, useCallback, useEffect } from "react";
 import { api } from "../../api.js";
 import { useServices } from "../../hooks/useServices.js";
 import { useVariables, getVariablesList, useVariableMutations, VARIABLES_QUERY_KEY } from "../../hooks/useVariables.js";
+import { useDashboard } from "../../context/DashboardContext.jsx";
 import { SettingsSection } from "../../components/SettingsSection.jsx";
 import {
   Globe, Server, Play, Square, Loader2, Plus, Trash2, Pencil, Check, X, Sparkles, Circle,
-  Network, Terminal, Heart, ChevronDown, FolderOpen,
+  Network, Terminal, Heart, ChevronDown, FolderOpen, ShieldCheck, ExternalLink, Info,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings/services")({
@@ -202,10 +203,20 @@ const SERVICE_STATUS_DOT = {
   crashed:  "text-error fill-error",
   stopped:  "text-base-content/20 fill-base-content/20",
 };
+const LOCAL_DOMAIN_PORT_SUFFIX = /:\d+$/;
 
-function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpdate, onVariableDelete, onVariableAdd }) {
+function normalizeLocalDomain(host: string = ""): string {
+  const trimmed = host.trim();
+  if (!trimmed) return "";
+  const withoutScheme = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  const hostOnly = withoutScheme.split("/")[0]?.split("?")[0] ?? "";
+  return hostOnly.replace(LOCAL_DOMAIN_PORT_SUFFIX, "").toLowerCase();
+}
+
+function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpdate, onVariableDelete, onVariableAdd, proxyRoutes = [], onProxyRoutesChange }) {
   const [editing, setEditing] = useState(false);
   const [varsOpen, setVarsOpen] = useState(false);
+  const [routesOpen, setRoutesOpen] = useState(false);
   const [draft, setDraft] = useState({
     name: service.name,
     command: service.command,
@@ -221,6 +232,7 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
   const state = service.state ?? (service.running ? "running" : "stopped");
   const dotColor = SERVICE_STATUS_DOT[state] ?? "text-base-content/20 fill-base-content/20";
   const serviceVars = variables.filter((v) => v.scope === service.id);
+  const serviceRoutes = proxyRoutes.filter((r) => r.serviceId === service.id);
 
   useEffect(() => {
     if (!editing) {
@@ -297,6 +309,12 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
               Variables{serviceVars.length > 0 && <span className="badge badge-xs badge-primary">{serviceVars.length}</span>}
             </button>
             <button
+              className={`btn btn-xs btn-ghost gap-1 ${routesOpen ? "text-primary" : "opacity-50 hover:opacity-100"}`}
+              onClick={() => setRoutesOpen((v) => !v)}
+            >
+              Routes{serviceRoutes.length > 0 && <span className="badge badge-xs badge-primary">{serviceRoutes.length}</span>}
+            </button>
+            <button
               className={`btn btn-xs btn-ghost ${editing ? "text-primary" : "opacity-50 hover:opacity-100"}`}
               onClick={() => setEditing((v) => !v)}
               title="Edit service"
@@ -324,6 +342,78 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
               onDelete={onVariableDelete}
               onAdd={onVariableAdd}
             />
+          </div>
+        )}
+
+        {/* Per-service proxy routes */}
+        {routesOpen && (
+          <div className="pl-5 border-l border-base-content/10 ml-1 space-y-2">
+            <p className="text-xs opacity-40">Proxy routes that forward to this service via the HTTPS reverse proxy.</p>
+            {serviceRoutes.length > 0 && (
+              <div>
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-2 pb-1">
+                  <span className="text-[10px] opacity-30 uppercase tracking-wider">Host</span>
+                  <span className="text-[10px] opacity-30 uppercase tracking-wider">Path prefix</span>
+                  <span />
+                </div>
+                {serviceRoutes.map((route) => {
+                  const globalIdx = proxyRoutes.findIndex((r) => r.id === route.id);
+                  return (
+                    <div key={route.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center py-1.5 border-b border-base-content/5 last:border-0">
+                      <input
+                        className="input input-xs input-bordered font-mono"
+                        value={route.host ?? ""}
+                        onChange={(e) => {
+                          const updated = { ...route, host: e.target.value || undefined };
+                          const next = proxyRoutes.map((r, i) => i === globalIdx ? updated : r);
+                          onProxyRoutesChange?.(next);
+                        }}
+                        placeholder="app.myproject.local"
+                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          className="input input-xs input-bordered font-mono flex-1 min-w-0"
+                          value={route.pathPrefix ?? ""}
+                          onChange={(e) => {
+                            const updated = { ...route, pathPrefix: e.target.value || undefined };
+                            const next = proxyRoutes.map((r, i) => i === globalIdx ? updated : r);
+                            onProxyRoutesChange?.(next);
+                          }}
+                          placeholder="/api"
+                        />
+                        {route.pathPrefix && (
+                          <label className="label cursor-pointer gap-1 p-0 shrink-0" title="Strip prefix before forwarding">
+                            <input
+                              type="checkbox"
+                              className="checkbox checkbox-xs checkbox-primary"
+                              checked={route.stripPrefix !== false}
+                              onChange={(e) => {
+                                const updated = { ...route, stripPrefix: e.target.checked };
+                                const next = proxyRoutes.map((r, i) => i === globalIdx ? updated : r);
+                                onProxyRoutesChange?.(next);
+                              }}
+                            />
+                            <span className="label-text text-[10px] opacity-50">strip</span>
+                          </label>
+                        )}
+                      </div>
+                      <button
+                        className="btn btn-xs btn-ghost btn-square text-error opacity-40 hover:opacity-100"
+                        onClick={() => onProxyRoutesChange?.(proxyRoutes.filter((r) => r.id !== route.id))}
+                      >
+                        <Trash2 className="size-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              className="btn btn-xs btn-ghost gap-1 opacity-50 hover:opacity-100"
+              onClick={() => onProxyRoutesChange?.([...proxyRoutes, { id: `route-${Date.now()}`, serviceId: service.id }])}
+            >
+              <Plus className="size-3" /> Add route
+            </button>
           </div>
         )}
 
@@ -595,16 +685,349 @@ function EmptyServicesState({ onAdd, onDetect, detecting }) {
   );
 }
 
+// ── Proxy route row ───────────────────────────────────────────────────────────
+
+function ProxyRouteRow({ route, services, onChange, onDelete, localDomain }) {
+  const [useService, setUseService] = useState(!!route.serviceId);
+
+  const update = (patch) => onChange({ ...route, ...patch });
+  const hostPlaceholder = localDomain ? `app.${localDomain}` : "app.myproject.local";
+
+  return (
+    <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 items-center py-1.5 border-b border-base-content/5 last:border-0">
+      {/* Host */}
+      <input
+        className="input input-xs input-bordered font-mono"
+        value={route.host ?? ""}
+        onChange={(e) => update({ host: e.target.value || undefined })}
+        placeholder={hostPlaceholder}
+      />
+
+      {/* Path prefix */}
+      <div className="flex items-center gap-1">
+        <input
+          className="input input-xs input-bordered font-mono flex-1 min-w-0"
+          value={route.pathPrefix ?? ""}
+          onChange={(e) => update({ pathPrefix: e.target.value || undefined })}
+          placeholder="/login"
+        />
+        {route.pathPrefix && (
+          <label className="label cursor-pointer gap-1 p-0 shrink-0" title="Strip prefix before forwarding">
+            <input
+              type="checkbox"
+              className="checkbox checkbox-xs checkbox-primary"
+              checked={route.stripPrefix !== false}
+              onChange={(e) => update({ stripPrefix: e.target.checked })}
+            />
+            <span className="label-text text-[10px] opacity-50">strip</span>
+          </label>
+        )}
+      </div>
+
+      {/* Target */}
+      <div className="flex items-center gap-1">
+        <button
+          className="btn btn-xs btn-ghost font-mono opacity-50 hover:opacity-100 shrink-0"
+          onClick={() => { setUseService((v) => !v); update({ serviceId: undefined, target: undefined }); }}
+          title={useService ? "Switch to custom URL" : "Switch to service"}
+        >
+          {useService ? "svc" : "url"}
+        </button>
+        {useService ? (
+          <select
+            className="select select-xs select-bordered flex-1 min-w-0 font-mono text-[11px]"
+            value={route.serviceId ?? ""}
+            onChange={(e) => update({ serviceId: e.target.value || undefined, target: undefined })}
+          >
+            <option value="">— pick service —</option>
+            {services.filter((s) => s.port).map((s) => (
+              <option key={s.id} value={s.id}>{s.name} :{s.port}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="input input-xs input-bordered font-mono flex-1 min-w-0"
+            value={route.target ?? ""}
+            onChange={(e) => update({ target: e.target.value || undefined, serviceId: undefined })}
+            placeholder="http://127.0.0.1:3000"
+          />
+        )}
+      </div>
+
+      {/* Delete */}
+      <button className="btn btn-xs btn-ghost btn-square text-error opacity-40 hover:opacity-100" onClick={onDelete}>
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+// ── Reverse proxy section ─────────────────────────────────────────────────────
+
+function ReverseProxySection({ services, proxyRoutes, onRoutesChange }) {
+  const [status, setStatus] = useState(null);
+  const [portDraft, setPortDraft] = useState("");
+  const [domainDraft, setDomainDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [portSaved, setPortSaved] = useState(false);
+  const [domainSaved, setDomainSaved] = useState(false);
+
+  useEffect(() => {
+    api.get("/proxy/reverse/status").then((res) => {
+      if (res) {
+        setStatus(res);
+        setPortDraft(String(res.port ?? 4433));
+        setDomainDraft(res.localDomain ?? "");
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleToggle = async (enabled) => {
+    setBusy(true);
+    try {
+      const res = await api.post("/proxy/reverse/toggle", { enabled });
+      setStatus((prev) => ({ ...prev, enabled, running: res.running, port: res.port }));
+    } catch {} finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePortSave = async () => {
+    const p = parseInt(portDraft, 10);
+    if (!p || p < 1024 || p > 65535) return;
+    setBusy(true);
+    try {
+      await api.post(`/settings/${encodeURIComponent("runtime.reverseProxyPort")}`, { value: p, scope: "runtime", source: "user" });
+      setStatus((prev) => ({ ...prev, port: p }));
+      setPortSaved(true);
+      setTimeout(() => setPortSaved(false), 1500);
+    } catch {} finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDomainSave = async () => {
+    const d = domainDraft.trim();
+    setBusy(true);
+    try {
+      await api.put("/proxy/reverse/domain", { localDomain: d });
+      setStatus((prev) => ({ ...prev, localDomain: d }));
+      setDomainSaved(true);
+      setTimeout(() => setDomainSaved(false), 1500);
+    } catch {} finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRouteChange = (idx, updated) => {
+    onRoutesChange(proxyRoutes.map((r, i) => i === idx ? updated : r));
+  };
+
+  const handleRouteDelete = (idx) => {
+    onRoutesChange(proxyRoutes.filter((_, i) => i !== idx));
+  };
+
+  const handleRouteAdd = () => {
+    onRoutesChange([...proxyRoutes, { id: `route-${Date.now()}` }]);
+  };
+
+  const enabled = status?.enabled ?? false;
+  const running = status?.running ?? false;
+  const proxyPort = status?.port ?? 4433;
+  const localDomain = status?.localDomain ?? "";
+  const normalizedDomain = normalizeLocalDomain(localDomain);
+  const publicHost = normalizedDomain || "localhost";
+  const httpsUrl = running ? `https://${publicHost}:${proxyPort}` : null;
+  const certHosts = ["localhost", ...(normalizedDomain ? [normalizedDomain, `*.${normalizedDomain}`] : [])];
+  const certPath = status?.certPath ?? null;
+  const caCertPath = status?.caCertPath ?? null;
+
+  // Collect unique hosts that need /etc/hosts entries
+  // Include the localDomain itself if set
+  const hostsFromRoutes = proxyRoutes.map((r) => r.host).filter(Boolean).filter((h) => !h.endsWith("localhost"));
+  const customHosts = [...new Set([...(normalizedDomain ? [normalizedDomain] : []), ...hostsFromRoutes])];
+
+  return (
+    <SettingsSection
+      icon={ShieldCheck}
+      title="HTTPS Reverse Proxy"
+      description="Serve the dashboard over HTTPS with a self-signed certificate. Route services by subdomain or path."
+    >
+      <div className="space-y-5">
+        {/* Enable + port + domain row */}
+        <div className="flex items-end gap-4 flex-wrap">
+          <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-[14rem]">
+            <input
+              type="checkbox"
+              className="toggle toggle-primary toggle-sm"
+              checked={enabled}
+              disabled={busy || status === null}
+              onChange={(e) => handleToggle(e.target.checked)}
+            />
+            <div>
+              <p className="text-sm font-medium">Enable HTTPS proxy</p>
+              <p className="text-xs opacity-50 mt-0.5">
+                {running
+                  ? <span className="text-success">Running</span>
+                  : enabled ? "Starts on next boot" : "Disabled"}
+              </p>
+            </div>
+          </label>
+
+          <div className="flex items-end gap-1.5">
+            <label className="form-control">
+              <div className="label py-0.5"><span className="label-text text-xs">Local domain</span></div>
+              <input
+                className="input input-bordered input-sm font-mono text-xs w-40"
+                value={domainDraft}
+                onChange={(e) => setDomainDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleDomainSave(); }}
+                placeholder="spark.local"
+              />
+            </label>
+            <button className="btn btn-sm btn-ghost" onClick={handleDomainSave} disabled={busy} title="Save domain">
+              {domainSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+            </button>
+          </div>
+
+          <div className="flex items-end gap-1.5">
+            <label className="form-control">
+              <div className="label py-0.5"><span className="label-text text-xs">Port</span></div>
+              <input
+                type="number"
+                className="input input-bordered input-sm font-mono text-xs w-24"
+                value={portDraft}
+                min={1024}
+                max={65535}
+                onChange={(e) => setPortDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handlePortSave(); }}
+                placeholder="4433"
+              />
+            </label>
+            <button className="btn btn-sm btn-ghost" onClick={handlePortSave} disabled={busy} title="Save port">
+              {portSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Live HTTPS URL */}
+        {httpsUrl && (
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-success/10 border border-success/20">
+            <ShieldCheck className="size-4 text-success shrink-0" />
+            <p className="text-xs font-mono text-success flex-1">{httpsUrl}</p>
+            <a href={httpsUrl} target="_blank" rel="noopener noreferrer" className="btn btn-xs btn-ghost gap-1 text-success">
+              <ExternalLink className="size-3" /> Open
+            </a>
+          </div>
+        )}
+
+        {/* Route table */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold opacity-50 uppercase tracking-wider">Routing rules</p>
+          </div>
+
+          {proxyRoutes.length > 0 && (
+            <div>
+              {/* Column headers */}
+              <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 px-0 pb-1">
+                <span className="text-[10px] opacity-30 uppercase tracking-wider">Host</span>
+                <span className="text-[10px] opacity-30 uppercase tracking-wider">Path prefix</span>
+                <span className="text-[10px] opacity-30 uppercase tracking-wider">Target</span>
+                <span />
+              </div>
+              {proxyRoutes.map((route, idx) => (
+                <ProxyRouteRow
+                  key={route.id}
+                  route={route}
+                  services={services}
+                  localDomain={normalizedDomain}
+                  onChange={(updated) => handleRouteChange(idx, updated)}
+                  onDelete={() => handleRouteDelete(idx)}
+                />
+              ))}
+            </div>
+          )}
+
+          <button className="btn btn-xs btn-ghost gap-1 opacity-50 hover:opacity-100" onClick={handleRouteAdd}>
+            <Plus className="size-3" /> Add rule
+          </button>
+
+          {proxyRoutes.length === 0 && (
+            <p className="text-xs opacity-30">
+              No custom rules — all traffic goes to the dashboard. Add rules to route by subdomain or path.
+            </p>
+          )}
+        </div>
+
+        {/* /etc/hosts helper */}
+        {customHosts.length > 0 && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-warning/10 border border-warning/20">
+            <Info className="size-3.5 shrink-0 mt-0.5 text-warning" />
+            <div className="space-y-1.5 flex-1 min-w-0">
+              <p className="text-xs font-medium">Add to <span className="font-mono">/etc/hosts</span></p>
+              <pre className="text-[11px] font-mono bg-base-300/60 rounded p-2 select-all leading-relaxed">
+                {customHosts.map((h) => `127.0.0.1  ${h}`).join("\n")}
+              </pre>
+              <p className="text-[11px] opacity-50">Required for custom domains to resolve locally. Run <span className="font-mono">sudo nano /etc/hosts</span>.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Cert info */}
+        {enabled && certPath && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-base-300/50">
+            <Info className="size-3.5 shrink-0 mt-0.5 opacity-40" />
+            <div className="text-xs opacity-50 space-y-1">
+              <p>
+                Cert covers: {certHosts.map((host, idx) => (
+                  <span key={host} className="font-mono">
+                    {idx === 0 ? "" : ", "}{host}
+                  </span>
+                ))}
+              </p>
+              {caCertPath && (
+                <p>
+                  To trust in browser/OS: import the CA cert at <span className="font-mono select-all">{caCertPath}</span>
+                </p>
+              )}
+              <p>Or open the HTTPS URL in Chrome and proceed past the warning.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </SettingsSection>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 function ServicesSettings() {
-  const { services, loading: servicesLoading, refresh } = useServices();
+  const { liveMode } = useDashboard();
+  const { services, loading: servicesLoading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 30_000 });
   const variablesQuery = useVariables();
   const variables = getVariablesList(variablesQuery.data);
   const { upsert, remove } = useVariableMutations();
+  const servicesRefresh = useCallback(() => {
+    if (liveMode) return Promise.resolve();
+    return refresh();
+  }, [liveMode, refresh]);
   const [addingNew, setAddingNew] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectedSuggestions, setDetectedSuggestions] = useState([]);
+  const [proxyRoutes, setProxyRoutes] = useState([]);
+
+  // Load initial routes
+  useEffect(() => {
+    api.get("/proxy/reverse/status").then((res) => {
+      if (res?.routes) setProxyRoutes(res.routes);
+    }).catch(() => {});
+  }, []);
+
+  const handleProxyRoutesChange = useCallback(async (newRoutes) => {
+    setProxyRoutes(newRoutes);
+    try { await api.put("/proxy/reverse/routes", { routes: newRoutes }); } catch {}
+  }, []);
 
   const handleVariableUpdate = useCallback(async (oldKey, newKey, value, scope) => {
     if (oldKey !== newKey) {
@@ -615,20 +1038,20 @@ function ServicesSettings() {
 
   const handleServiceSave = useCallback(async (entry) => {
     await api.put(`/services/${entry.id}`, entry);
-    await refresh();
-  }, [refresh]);
+    await servicesRefresh();
+  }, [servicesRefresh]);
 
   const handleServiceDelete = useCallback(async (id) => {
     await api.delete(`/services/${id}`);
-    await refresh();
-  }, [refresh]);
+    await servicesRefresh();
+  }, [servicesRefresh]);
 
   const handleServiceAdd = useCallback(async (entry) => {
     await api.put(`/services/${entry.id}`, entry);
-    await refresh();
+    await servicesRefresh();
     setAddingNew(false);
     setDetectedSuggestions([]);
-  }, [refresh]);
+  }, [servicesRefresh]);
 
   const handleDetectFromEmpty = useCallback(async () => {
     setDetecting(true);
@@ -644,6 +1067,9 @@ function ServicesSettings() {
 
   return (
     <div className="space-y-4">
+
+      {/* HTTPS Reverse Proxy */}
+      <ReverseProxySection services={services} proxyRoutes={proxyRoutes} onRoutesChange={handleProxyRoutesChange} />
 
       {/* Global variables */}
       <SettingsSection
@@ -726,6 +1152,8 @@ function ServicesSettings() {
                 onVariableUpdate={handleVariableUpdate}
                 onVariableDelete={remove}
                 onVariableAdd={upsert}
+                proxyRoutes={proxyRoutes}
+                onProxyRoutesChange={handleProxyRoutesChange}
               />
             ))}
             {addingNew && !detectedSuggestions.length

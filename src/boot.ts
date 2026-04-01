@@ -43,7 +43,12 @@ import {
   stopTrafficProxy,
   setServicesAccessor,
 } from "./persistence/plugins/traffic-proxy-server.ts";
-import { sendToMeshRoom } from "./routes/websocket.ts";
+import { stopReverseProxy } from "./persistence/plugins/reverse-proxy-server.ts";
+import {
+  sendToMeshRoom,
+  notifyMeshSnapshot,
+  meshRoomHasSubscribers,
+} from "./routes/websocket.ts";
 import {
   startServiceLogBroadcasting,
   stopServiceLogBroadcasting,
@@ -51,6 +56,20 @@ import {
 import { hydrate as hydrateTokenLedger } from "./domains/tokens.ts";
 import { join } from "node:path";
 import type { RuntimeState } from "./types.ts";
+
+const MESH_WS_SNAPSHOT_DEBOUNCE_MS = 500;
+let bootMeshSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleBootMeshSnapshot() {
+  if (!meshRoomHasSubscribers()) return;
+  if (bootMeshSnapshotTimer) return;
+
+  bootMeshSnapshotTimer = setTimeout(() => {
+    bootMeshSnapshotTimer = null;
+    if (!meshRoomHasSubscribers()) return;
+    notifyMeshSnapshot();
+  }, MESH_WS_SNAPSHOT_DEBOUNCE_MS);
+}
 
 function parsePort(args: string[]): number | undefined {
   for (let i = 0; i < args.length; i += 1) {
@@ -370,7 +389,10 @@ async function main() {
       await startTrafficProxy({
         port: apiState.config.meshProxyPort ?? 0,
         bufferSize: apiState.config.meshBufferSize ?? 1000,
-        onEntry: (entry) => sendToMeshRoom({ type: "mesh:entry", entry }),
+        onEntry: (entry) => {
+          sendToMeshRoom({ type: "mesh:entry", entry });
+          scheduleBootMeshSnapshot();
+        },
       });
     } catch (err) {
       logger.warn({ err }, "[Boot] Mesh traffic proxy failed to start — continuing without mesh");
@@ -415,9 +437,23 @@ async function main() {
     },
   );
 
-  // Stop mesh proxy on shutdown
-  process.once("SIGINT", () => { stopTrafficProxy().catch(() => {}); });
-  process.once("SIGTERM", () => { stopTrafficProxy().catch(() => {}); });
+  // Stop proxies on shutdown
+  process.once("SIGINT", () => {
+    if (bootMeshSnapshotTimer) {
+      clearTimeout(bootMeshSnapshotTimer);
+      bootMeshSnapshotTimer = null;
+    }
+    stopTrafficProxy().catch(() => {});
+    stopReverseProxy().catch(() => {});
+  });
+  process.once("SIGTERM", () => {
+    if (bootMeshSnapshotTimer) {
+      clearTimeout(bootMeshSnapshotTimer);
+      bootMeshSnapshotTimer = null;
+    }
+    stopTrafficProxy().catch(() => {});
+    stopReverseProxy().catch(() => {});
+  });
 
   installGracefulShutdown(state);
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { publishNotification } from "../notifications/notificationPublisher.js";
 import {
-  getSettingValue,
   getSettingsList,
   persistUiSetting,
   useSettings,
@@ -24,19 +24,6 @@ function formatTokenCount(tokens) {
 function getPermission() {
   if (!("Notification" in window)) return "unsupported";
   return Notification.permission;
-}
-
-function sendNotification(title, body, tag) {
-  if (getPermission() !== "granted") return;
-  try {
-    new Notification(title, {
-      body,
-      tag: `fifony-${tag}`,
-      icon: "/icon.svg",
-      badge: "/icon.svg",
-      silent: false,
-    });
-  } catch {}
 }
 
 // ── Web Audio notification sound ────────────────────────────────────────────
@@ -169,6 +156,17 @@ export function useNotifications(issues) {
     qc.invalidateQueries({ queryKey: ["settings"] });
   }, [qc]);
 
+  const publishTestNotification = useCallback(() => {
+    void publishNotification({
+      title: "fifony",
+      body: "Notifications are working!",
+      tag: "ui-test",
+      data: {
+        url: "/settings/notifications",
+      },
+    });
+  }, []);
+
   // Track state changes and notify
   useEffect(() => {
     if (!enabled || permission !== "granted" || !Array.isArray(issues)) return;
@@ -185,7 +183,16 @@ export function useNotifications(issues) {
         if (config && isNotificationEventEnabled(settings, issue.state)) {
           const title = `${config.label}: ${issue.identifier}`;
           const body = issue.title;
-          sendNotification(title, body, `${config.id}-${issue.id}`);
+          void publishNotification({
+            title,
+            body,
+            tag: `${config.id}-${issue.id}`,
+            data: {
+              issueId: issue.id,
+              issueIdentifier: issue.identifier,
+              state: issue.state,
+            },
+          });
           notificationCenter.addNotification({
             title,
             body,
@@ -214,7 +221,17 @@ export function useNotifications(issues) {
                 const label = formatTokenCount(milestone);
                 const title = `Token milestone: ${label}`;
                 const body = `${issue.identifier} has used ${label} tokens`;
-                sendNotification(title, body, `tokens-${milestone}-${issue.id}`);
+                void publishNotification({
+                  title,
+                  body,
+                  tag: `tokens-${milestone}-${issue.id}`,
+                  data: {
+                    issueId: issue.id,
+                    issueIdentifier: issue.identifier,
+                    milestone,
+                    state: "token-milestone",
+                  },
+                });
                 notificationCenter.addNotification({
                   title,
                   body,
@@ -240,6 +257,7 @@ export function useNotifications(issues) {
     requestPermission,
     eventSettings,
     setEventEnabled,
+    publishTestNotification,
     ...notificationCenter,
   };
 }

@@ -132,6 +132,11 @@ h1, h2, h3, .stat-value {
   to   { transform: rotate(360deg); }
 }
 
+@keyframes api-gate-fill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(100%) scale(0.95); }
   to   { opacity: 1; transform: translateX(0) scale(1); }
@@ -601,8 +606,8 @@ h1, h2, h3, .stat-value {
   }
 
   .overflow-x-auto > .grid > .kanban-column {
-    min-width: calc(100vw - 24px);
-    max-width: calc(100vw - 24px);
+    min-width: calc(100vw - 56px);
+    max-width: calc(100vw - 56px);
     flex-shrink: 0;
     scroll-snap-align: start;
   }
@@ -646,11 +651,11 @@ h1, h2, h3, .stat-value {
 
 @media (max-width: 400px) {
   .text-\[10px\] {
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
 
   .font-mono {
-    font-size: max(11px, inherit);
+    font-size: max(12px, inherit);
   }
 }
 

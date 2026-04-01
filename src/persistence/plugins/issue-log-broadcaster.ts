@@ -48,7 +48,14 @@ export function startIssueLogBroadcasting(issueId: string, workspacePath: string
   stopIssueLogBroadcasting(issueId);
 
   const logPath = agentLogPath(workspacePath);
-  const entry: Entry = { timerId: null!, position: 0 };
+  let initialPosition = 0;
+  try {
+    initialPosition = statSync(logPath).size;
+  } catch {
+    initialPosition = 0;
+  }
+
+  const entry: Entry = { timerId: null!, position: initialPosition };
 
   const flush = () => {
     if (!existsSync(logPath)) return; // file not created yet — agent CLI hasn't started

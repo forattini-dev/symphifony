@@ -8,8 +8,8 @@ const NAV_ITEMS = [
   { to: "/kanban", label: "Kanban", icon: Kanban },
   { to: "/issues", label: "Issues", icon: ListTodo },
   { to: "/agents", label: "Agents", icon: Bot },
-  { to: "/analytics", label: "Analytics", icon: TrendingUp },
-  { to: "/services", label: "Services", icon: Server },
+  { to: "/analytics", label: "Analytics", icon: TrendingUp, dockHidden: true },
+  { to: "/services", label: "Services", icon: Server, dockHidden: true },
   { to: "/settings", label: "Settings", icon: Sliders },
 ];
 

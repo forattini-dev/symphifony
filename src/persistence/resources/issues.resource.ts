@@ -760,18 +760,42 @@ export async function getIssueLive(c: unknown) {
 
     const wp = issue.workspacePath;
     const liveLog = wp ? `${wp}/live-output.log` : null;
+    const req = c as { req?: { query: (name: string) => string | undefined } };
+    const afterParam = req.req?.query?.("after");
+    const after = afterParam !== undefined ? parseInt(afterParam, 10) : null;
+
     let logTail = "";
     let logSize = 0;
+    let text = "";
+    let truncated = false;
+    let hasIncremental = false;
+
     if (liveLog && existsSync(liveLog)) {
       try {
         const stat = statSync(liveLog);
         logSize = stat.size;
         const fd = openSync(liveLog, "r");
-        const readSize = Math.min(logSize, 8192);
-        const buf = Buffer.alloc(readSize);
-        readSync(fd, buf, 0, readSize, Math.max(0, logSize - readSize));
-        closeSync(fd);
-        logTail = buf.toString("utf8");
+
+        if (Number.isInteger(after) && after >= 0) {
+          if (logSize < after) {
+            truncated = true;
+          } else if (logSize > after) {
+            const readSize = Math.min(logSize - after, 8192);
+            const delta = Buffer.alloc(readSize);
+            readSync(fd, delta, 0, readSize, after);
+            text = delta.toString("utf8");
+            hasIncremental = true;
+            closeSync(fd);
+          }
+        }
+
+        if (!hasIncremental) {
+          const readSize = Math.min(logSize, 8192);
+          const buf = Buffer.alloc(readSize);
+          readSync(fd, buf, 0, readSize, Math.max(0, logSize - readSize));
+          logTail = buf.toString("utf8");
+          closeSync(fd);
+        }
       } catch {}
     }
     const agentStatus = isAgentStillRunning(issue);
@@ -788,6 +812,8 @@ export async function getIssueLive(c: unknown) {
         startedAt: startedAtText || updatedAtText || now(),
         elapsed: Number.isFinite(elapsed) ? elapsed : 0,
         logSize,
+        text,
+        truncated,
         logTail,
         outputTail: issue.commandOutputTail || "",
       },

@@ -113,7 +113,7 @@ export default function CommandPalette({ issues, onSelect, onNavigate, onAction,
     <>
       <div className="fixed inset-0 bg-black/40 z-50 animate-fade-in" onClick={onClose} />
       <div
-        className="fixed top-[15%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg bg-base-100 rounded-2xl shadow-2xl border border-base-300 overflow-hidden animate-fade-in-up"
+        className="fixed top-[15%] left-1/2 -translate-x-1/2 z-50 w-[calc(100vw-1.5rem)] max-w-lg bg-base-100 rounded-2xl shadow-2xl border border-base-300 overflow-hidden animate-fade-in-up"
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}

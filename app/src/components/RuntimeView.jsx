@@ -3,6 +3,7 @@ import { Cpu, Circle, Clock, Terminal, CheckCircle2, XCircle, AlertTriangle, Eye
 import { timeAgo, formatDuration } from "../utils.js";
 import { useWorkflowConfig } from "../hooks/useWorkflowConfig.js";
 import { useHourlyAnalytics } from "../hooks.js";
+import { useDashboard } from "../context/DashboardContext.jsx";
 import { useIssueLog } from "../hooks/useIssueLog.js";
 
 // ── Mini sparkline (pure SVG, no deps) ──────────────────────────────────────
@@ -51,7 +52,8 @@ function formatModelName(slug) {
 
 function SlotLiveInfo({ issueId, issueState }) {
   const isActive = issueState === "Running" || issueState === "Reviewing";
-  const { log, liveInfo } = useIssueLog(issueId, isActive);
+  const { liveMode } = useDashboard();
+  const { log, liveInfo } = useIssueLog(issueId, isActive, liveMode);
   const [expanded, setExpanded] = useState(true);
   const logRef = useRef(null);
 

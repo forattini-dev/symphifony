@@ -367,21 +367,92 @@ function OnboardingRedirect() {
   return <LoadingHero />;
 }
 
+const RETRY_INTERVAL_MS = 3000;
+
+function ApiGate({ children }) {
+  const [ready, setReady] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  // Key cycles 0→1→2 to restart the CSS fill animation on each retry
+  const [barKey, setBarKey] = useState(0);
+
+  useEffect(() => {
+    if (ready) return;
+    let cancelled = false;
+
+    const probe = async () => {
+      try {
+        const res = await fetch("/api/status", {
+          signal: AbortSignal.timeout(2000),
+          cache: "no-store",
+        });
+        if (res.ok && !cancelled) { setReady(true); return; }
+      } catch { /* network error or timeout — expected while API is starting */ }
+
+      if (!cancelled) {
+        setAttempt((a) => a + 1);
+        setBarKey((k) => (k + 1) % 3);
+        setTimeout(probe, RETRY_INTERVAL_MS);
+      }
+    };
+
+    probe();
+    return () => { cancelled = true; };
+  }, [ready]);
+
+  if (!ready) return <ApiWaitingScreen attempt={attempt} barKey={barKey} />;
+  return children;
+}
+
+function ApiWaitingScreen({ attempt, barKey }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-base-100 flex flex-col items-center justify-center gap-5 overflow-hidden">
+      <img
+        src={mascotUrl}
+        alt=""
+        className="h-20 sm:h-24 object-contain select-none pointer-events-none opacity-60"
+        style={{ filter: "drop-shadow(0 6px 20px rgba(128, 0, 255, 0.20))" }}
+      />
+
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        <p className="text-sm font-medium text-base-content/60">Waiting for API to start...</p>
+        {attempt > 0 && (
+          <p className="text-xs text-base-content/30 tabular-nums">
+            Attempt {attempt + 1} · retrying every {RETRY_INTERVAL_MS / 1000}s
+          </p>
+        )}
+      </div>
+
+      {/* Progress bar that fills over RETRY_INTERVAL_MS then restarts */}
+      <div className="w-40 h-0.5 bg-base-content/10 rounded-full overflow-hidden">
+        <div
+          key={barKey}
+          className="h-full bg-primary/50 rounded-full"
+          style={{
+            animation: `api-gate-fill ${RETRY_INTERVAL_MS}ms linear forwards`,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function RootComponent() {
   const routerState = useRouterState();
   const isOnboarding = routerState.location.pathname === "/onboarding";
 
   return (
     <HotkeysProvider>
-      <DashboardProvider>
-        {isOnboarding ? (
-          <Outlet />
-        ) : (
-          <OnboardingGate>
-            <RootLayout />
-          </OnboardingGate>
-        )}
-      </DashboardProvider>
+      <ApiGate>
+        <DashboardProvider>
+          {isOnboarding ? (
+            <Outlet />
+          ) : (
+            <OnboardingGate>
+              <RootLayout />
+            </OnboardingGate>
+          )}
+        </DashboardProvider>
+      </ApiGate>
     </HotkeysProvider>
   );
 }

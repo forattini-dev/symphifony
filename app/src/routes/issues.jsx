@@ -189,9 +189,9 @@ function IssuesPage() {
     <div className="flex-1 flex flex-col min-h-0 px-4 pb-4">
       {/* Sticky toolbar */}
       <div className="sticky top-0 z-10 bg-base-100 pt-3 pb-3 border-b border-base-300 space-y-3">
-        {/* Row 1: Search + filter toggle + sort + result count */}
-        <div className="flex items-center gap-2">
-          <label className="input input-bordered input-sm flex items-center gap-2 flex-1">
+        {/* Row 1: Search + controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="input input-bordered input-sm flex items-center gap-2 flex-1 min-w-0 basis-full sm:basis-0">
             <Search className="size-4 opacity-40" />
             <input
               ref={searchRef}

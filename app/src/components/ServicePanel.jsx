@@ -12,6 +12,7 @@ import {
 import { api } from "../api.js";
 import { useServices, useServiceLog } from "../hooks/useServices.js";
 import { formatDuration } from "../utils.js";
+import { useDashboard } from "../context/DashboardContext.jsx";
 
 // ── Uptime counter ────────────────────────────────────────────────────────────
 
@@ -185,21 +186,26 @@ function ServiceCard({ service, onRefresh }) {
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 export default function ServicePanel() {
-  const { services, loading, refresh } = useServices();
+  const { liveMode } = useDashboard();
+  const { services, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 30_000 });
+  const refreshServices = useCallback(() => {
+    if (liveMode) return Promise.resolve();
+    return refresh();
+  }, [liveMode, refresh]);
 
   const handleStartAll = useCallback(async () => {
     await Promise.all(
       services.filter((service) => !service.running).map((service) => api.post(`/services/${service.id}/start`, {})),
     );
-    await refresh();
-  }, [services, refresh]);
+    await refreshServices();
+  }, [services, refreshServices]);
 
   const handleStopAll = useCallback(async () => {
     await Promise.all(
       services.filter((service) => service.running).map((service) => api.post(`/services/${service.id}/stop`, {})),
     );
-    await refresh();
-  }, [services, refresh]);
+    await refreshServices();
+  }, [services, refreshServices]);
 
   if (loading && services.length === 0) {
     return null;
@@ -237,7 +243,7 @@ export default function ServicePanel() {
 
       <div className="flex flex-col gap-2">
         {services.map((service) => (
-          <ServiceCard key={service.id} service={service} onRefresh={refresh} />
+          <ServiceCard key={service.id} service={service} onRefresh={refreshServices} />
         ))}
       </div>
     </div>

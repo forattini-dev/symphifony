@@ -2,7 +2,27 @@ import { useEffect, useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api.js";
 import { getSettingsList, getSettingValue, upsertSettingPayload } from "./settings-payload.js";
-import { safeJson } from "./utils.js";
+import {
+  resolveAnalyticsQueryKey,
+  isRuntimeStatePayload,
+  WS_MESSAGE_TYPES,
+} from "./ws/contracts.js";
+import {
+  onRuntimeMessage,
+  onRuntimeStatus,
+  sendWsPayload,
+  startRuntimeSocket,
+  subscribeAnalyticsTopic,
+  unsubscribeAnalyticsTopic,
+  subscribeIssueLog,
+  unsubscribeIssueLog,
+  subscribeMesh,
+  unsubscribeMesh,
+  subscribeServices,
+  unsubscribeServices,
+  subscribeServiceLog,
+  unsubscribeServiceLog,
+} from "./ws/runtimeSocket.js";
 
 // ── Delta-merge helpers ─────────────────────────────────────────────────────
 
@@ -35,15 +55,6 @@ function applyWsPayload(current, payload) {
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
-
-/**
- * Connects to the runtime WebSocket on the same host.
- * Merges incoming delta/full payloads into the ["runtime-state"] query cache.
- * Returns connection status: "connected" | "connecting" | "disconnected" | "error".
- */
-// ── Module-level WS send (set by the singleton WebSocket connection) ─────────
-
-let _activeSend = null;
 
 const PWA_DISPLAY_MODE_QUERIES = [
   "(display-mode: fullscreen)",
@@ -83,159 +94,60 @@ async function queryServiceWorker(message) {
   });
 }
 
-/** Send a message on the shared runtime WebSocket. No-op if not connected. */
-export function sendWsMessage(msg) {
-  if (_activeSend) {
-    try { _activeSend(JSON.stringify(msg)); } catch {}
-  }
-}
-
-// ── Service log WS room subscriptions ────────────────────────────────────────
-// Tracked so subscriptions can be restored after WS reconnect.
-
-const _serviceLogSubs = new Set(); // active serviceIds
-
-export function subscribeServiceLog(serviceId) {
-  _serviceLogSubs.add(serviceId);
-  if (_activeSend) {
-    try { _activeSend(JSON.stringify({ type: "service:log:subscribe", id: serviceId })); } catch {}
-  }
-}
-
-export function unsubscribeServiceLog(serviceId) {
-  _serviceLogSubs.delete(serviceId);
-  if (_activeSend) {
-    try { _activeSend(JSON.stringify({ type: "service:log:unsubscribe", id: serviceId })); } catch {}
-  }
-}
-
-// ── Analytics WS room subscriptions ──────────────────────────────────────────
-// Reference-counted so multiple hook instances share one WS subscription.
-
-const _analyticsRefCounts = new Map(); // topic → subscriber count
-
-function subscribeAnalyticsTopic(topic) {
-  const prev = _analyticsRefCounts.get(topic) ?? 0;
-  _analyticsRefCounts.set(topic, prev + 1);
-  if (prev === 0 && _activeSend) {
-    try { _activeSend(JSON.stringify({ type: "analytics:subscribe", topic })); } catch {}
-  }
-}
-
-function unsubscribeAnalyticsTopic(topic) {
-  const prev = _analyticsRefCounts.get(topic) ?? 0;
-  const next = Math.max(prev - 1, 0);
-  _analyticsRefCounts.set(topic, next);
-  if (next === 0 && _activeSend) {
-    try { _activeSend(JSON.stringify({ type: "analytics:unsubscribe", topic })); } catch {}
-  }
-}
-
 export function useRuntimeWebSocket(onMessage) {
   const [status, setStatus] = useState("disconnected");
   const qc = useQueryClient();
 
   useEffect(() => {
-    const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-    let ws = null;
-    let timer = null;
-    let alive = true;
-    let backoff = 2000; // Start at 2s, double each failure, cap at 30s
-    const MAX_BACKOFF = 30000;
-
-    const connect = () => {
-      try {
-        ws = new WebSocket(url);
-      } catch {
-        setStatus("error");
-        timer = setTimeout(connect, backoff);
-        backoff = Math.min(backoff * 2, MAX_BACKOFF);
+    const offStatus = onRuntimeStatus(setStatus);
+    const offMessage = onRuntimeMessage("*", (msg) => {
+      if (msg?.type === WS_MESSAGE_TYPES.ANALYTICS_UPDATE && msg?.topic && msg?.data) {
+        const queryKey = resolveAnalyticsQueryKey(msg.topic);
+        if (queryKey) {
+          qc.setQueriesData({ queryKey }, msg.data);
+        }
         return;
       }
 
-      setStatus("connecting");
-
-      let pingInterval = null;
-
-      ws.onopen = () => {
-        setStatus("connected");
-        _activeSend = (data) => ws.send(data);
-        backoff = 2000; // Reset backoff on successful connection
-        // Re-subscribe all analytics topics after reconnect
-        for (const [topic, count] of _analyticsRefCounts) {
-          if (count > 0) {
-            try { ws.send(JSON.stringify({ type: "analytics:subscribe", topic })); } catch {}
-          }
-        }
-        // Re-subscribe all active service log rooms after reconnect
-        for (const serviceId of _serviceLogSubs) {
-          try { ws.send(JSON.stringify({ type: "service:log:subscribe", id: serviceId })); } catch {}
-        }
-        // Heartbeat — keeps connection alive through proxies/NATs
-        clearInterval(pingInterval);
-        pingInterval = setInterval(() => {
-          try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
-        }, 25_000);
-      };
-
-      ws.onmessage = (e) => {
-        const msg = safeJson(e.data);
-        if (!msg) return;
-        // Route analytics updates to their corresponding query cache keys
-        if (msg.type === "analytics:update" && msg.topic && msg.data) {
-          const topicKeyMap = {
-            "analytics:tokens": ["token-analytics"],
-            "analytics:lines": ["analytics-lines"],
-            "analytics:kpis": ["analytics-kpis"],
-            "analytics:hourly": ["hourly-analytics"],
-          };
-          const qk = topicKeyMap[msg.topic];
-          if (qk) qc.setQueriesData({ queryKey: qk }, msg.data);
-          return;
-        }
-        // Only apply full-state/delta payloads to the runtime-state cache here.
-        // Other message types (issue:transition, service:log, pong, etc.) are
-        // handled by onMessage or are not state data — spreading them into the
-        // cache via applyWsPayload pollutes it with unrelated fields and can
-        // cause stale-data races when a useQuery refetch resolves concurrently.
-        const isStatePayload = msg.type === "connected" || msg.type === "state:update" || msg.type === "state:delta";
-        if (isStatePayload || msg.type === "issue:transition") {
-          // Cancel any in-flight HTTP polls so their stale responses don't
-          // overwrite the fresh WS data we're about to apply.
-          qc.cancelQueries({ queryKey: ["runtime-state"] });
-        }
-        if (isStatePayload) {
-          qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => applyWsPayload(cur || {}, msg));
-        }
-        if (onMessage) onMessage(msg);
-      };
-
-      ws.onclose = () => {
-        setStatus("disconnected");
-        _activeSend = null;
-        clearInterval(pingInterval);
-        if (alive) {
-          timer = setTimeout(connect, backoff);
-          backoff = Math.min(backoff * 2, MAX_BACKOFF);
-        }
-      };
-
-      ws.onerror = () => {
-        setStatus("error");
-      };
-    };
-
-    connect();
+      const isStatePayload = isRuntimeStatePayload(msg);
+      if (isStatePayload || msg?.type === WS_MESSAGE_TYPES.ISSUE_TRANSITION) {
+        qc.cancelQueries({ queryKey: ["runtime-state"] });
+      }
+      if (isStatePayload) {
+        qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => applyWsPayload(cur || {}, msg));
+      }
+      if (onMessage) onMessage(msg);
+    });
+    const stop = startRuntimeSocket();
 
     return () => {
-      alive = false;
-      clearTimeout(timer);
-      ws?.close();
+      stop();
+      offStatus();
+      offMessage();
     };
   }, [qc, onMessage]);
 
   return status;
 }
+
+/** Send a message on the shared runtime WebSocket. No-op if not connected. */
+export function sendWsMessage(msg) {
+  if (!msg || typeof msg !== "object") return;
+  sendWsPayload(msg);
+}
+
+export {
+  subscribeServiceLog,
+  unsubscribeServiceLog,
+  subscribeIssueLog,
+  unsubscribeIssueLog,
+  subscribeMesh,
+  unsubscribeMesh,
+  subscribeServices,
+  unsubscribeServices,
+  subscribeAnalyticsTopic,
+  unsubscribeAnalyticsTopic,
+};
 
 /** Fetch runtime state with polling. showAll=true bypasses the recent-only filter. */
 export function useRuntimeState({ pollInterval = 3000, showAll = false } = {}) {

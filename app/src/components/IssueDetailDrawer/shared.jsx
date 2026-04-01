@@ -48,21 +48,82 @@ export function CopyButton({ text }) {
 
 // ── ConfigStrip ──────────────────────────────────────────────────────────────
 
-export function ConfigStrip({ config }) {
+export function ConfigStrip({ config, variant }) {
   if (!config) return null;
   const { provider, model, effort } = config;
   if (!provider && !model && !effort) return null;
+  const isHistorical = variant === "historical";
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       {provider && (
-        <span className="badge badge-xs badge-ghost font-mono gap-1">
+        <span className={`badge badge-xs font-mono gap-1 ${isHistorical ? "badge-primary/50" : "badge-ghost"}`}>
           <Terminal className="size-2.5" />{provider}
         </span>
       )}
-      {model && <span className="badge badge-xs badge-ghost font-mono">{model}</span>}
-      {effort && <span className="badge badge-xs badge-outline">{effort}</span>}
+      {model && <span className={`badge badge-xs font-mono ${isHistorical ? "badge-primary/50" : "badge-ghost"}`}>{model}</span>}
+      {effort && <span className={`badge badge-xs ${isHistorical ? "badge-primary badge-outline" : "badge-outline"}`}>{effort}</span>}
     </div>
   );
+}
+
+/**
+ * Infer provider from model name.
+ */
+function inferProvider(model) {
+  if (!model) return undefined;
+  if (model.startsWith("claude")) return "claude";
+  if (model.startsWith("gpt") || model.startsWith("codex") || model.startsWith("o")) return "codex";
+  if (model.startsWith("gemini")) return "gemini";
+  return undefined;
+}
+
+/**
+ * Resolves what to show for a pipeline stage: historical (what ran) vs configured (what will run).
+ * Returns { config, label, variant } where variant is "historical" | "configured".
+ */
+export function resolveStageDisplay({ phaseTokens, tokensByModel, workflowConfig, stageName, phaseRan }) {
+  const hasTokens = phaseTokens?.totalTokens > 0;
+  const hasRun = phaseRan ?? hasTokens;
+  const stageConfig = workflowConfig?.workflow?.[stageName];
+
+  if (hasRun) {
+    // Phase already ran — prefer actual model from token data
+    let model = phaseTokens?.model;
+
+    // Fallback: if no model on phase, try to infer from tokensByModel
+    if (!model && tokensByModel) {
+      const models = Object.keys(tokensByModel).filter((m) => tokensByModel[m]?.totalTokens > 0);
+      if (models.length === 1) model = models[0];
+    }
+
+    if (model) {
+      return {
+        config: { provider: inferProvider(model), model, effort: undefined },
+        label: "Ran with",
+        variant: "historical",
+      };
+    }
+
+    // Ran but can't determine exact model — show config as best-effort with "Ran with" label
+    if (stageConfig) {
+      return {
+        config: stageConfig,
+        label: "Ran with",
+        variant: "historical",
+      };
+    }
+  }
+
+  // Phase hasn't run — show configured
+  if (stageConfig) {
+    return {
+      config: stageConfig,
+      label: "Configured",
+      variant: "configured",
+    };
+  }
+
+  return null;
 }
 
 // ── TokenPhaseBreakdown ───────────────────────────────────────────────────────

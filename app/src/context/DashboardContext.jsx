@@ -18,11 +18,10 @@ import {
   SETTING_ID_UI_EVENTS_ISSUE_ID,
 } from "../hooks";
 import { useNotifications } from "../hooks/useNotifications";
-import { dispatchServiceLog, dispatchServiceUpdate } from "../hooks/useServices.js";
-import { dispatchIssueLog } from "../hooks/useIssueLog.js";
-import { dispatchMeshEntry } from "../hooks/useMesh.js";
 import { STATES } from "../utils";
 import { resolveProjectMeta } from "../project-meta.js";
+import { createMessageBus } from "../ws/messageBus.js";
+import { registerDashboardMessageHandlers } from "../ws/dashboardMessageBus.js";
 
 const DashboardContext = createContext(null);
 const EVENT_KINDS = ["all", "info", "state", "progress", "error", "manual", "runner"];
@@ -67,84 +66,25 @@ export function DashboardProvider({ children }) {
   const [isEventsOpen, setIsEventsOpen] = useState(false);
   const [eventSnapshot, setEventSnapshot] = useState([]);
   const [issueProgress, setIssueProgress] = useState({}); // { [issueId]: IssueProgress }
+  const [issueSubTasks, setIssueSubTasks] = useState({}); // { [issueId]: { phase, tasks[] } }
   const pwa = usePwa();
 
   const qc = useQueryClient();
+  const messageBus = useMemo(() => createMessageBus(), []);
+
+  useEffect(() => {
+    const stop = registerDashboardMessageHandlers(messageBus, {
+      qc,
+      setIssueProgress,
+      setIssueSubTasks,
+      setEventSnapshot,
+    });
+    return stop;
+  }, [messageBus, qc, setIssueProgress, setIssueSubTasks, setEventSnapshot]);
+
   const handleRuntimeSocketMessage = useCallback((msg) => {
-    if (msg?.type === "service:log") {
-      dispatchServiceLog(msg.id, msg.chunk);
-      return;
-    }
-    if (msg?.type === "service" && msg.id) {
-      dispatchServiceUpdate(msg);
-      return;
-    }
-    if (msg?.type === "issue:log") {
-      dispatchIssueLog(msg.id, msg.chunk);
-      return;
-    }
-    if (msg?.type === "mesh:entry" && msg.entry) {
-      dispatchMeshEntry(msg.entry);
-      return;
-    }
-
-    // Real-time execution progress — token counts, turn info, elapsed time
-    if (msg?.type === "issue:progress" && msg.issueId) {
-      setIssueProgress((prev) => ({ ...prev, [msg.issueId]: msg }));
-      return;
-    }
-
-    // Direct issue transition push — instant patch, no full state needed
-    if (msg?.type === "issue:transition" && msg.issue) {
-      qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => {
-        if (!cur || !Array.isArray(cur.issues)) return cur;
-        const exists = cur.issues.some((i) => i.id === msg.issue.id);
-        const issues = exists
-          ? cur.issues.map((i) => i.id === msg.issue.id ? msg.issue : i)
-          : [...cur.issues, msg.issue];
-        return { ...cur, issues };
-      });
-      return;
-    }
-
-    // Full state broadcast: initial WS connection or periodic full push from persistState
-    if (msg?.type === "connected" || msg?.type === "state:update") {
-      if (Array.isArray(msg.issues)) {
-        qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) =>
-          cur ? { ...cur, issues: msg.issues, metrics: msg.metrics ?? cur.metrics, milestones: msg.milestones ?? cur.milestones } : cur
-        );
-      }
-      if (Array.isArray(msg.events)) setEventSnapshot(msg.events);
-      return;
-    }
-
-    // Delta update — common case: only changed/removed issues sent
-    if (msg?.type === "state:delta") {
-      const delta = Array.isArray(msg.issuesDelta) ? msg.issuesDelta : [];
-      const removed = new Set(Array.isArray(msg.issuesRemoved) ? msg.issuesRemoved : []);
-      if (delta.length > 0 || removed.size > 0) {
-        const deltaMap = new Map(delta.map((i) => [i.id, i]));
-        qc.setQueriesData({ queryKey: ["runtime-state"] }, (cur) => {
-          if (!cur) return cur;
-          const existing = Array.isArray(cur.issues) ? cur.issues : [];
-          const existingIds = new Set(existing.map((i) => i.id));
-          const updated = existing
-            .filter((i) => !removed.has(i.id))
-            .map((i) => (deltaMap.has(i.id) ? deltaMap.get(i.id) : i));
-          for (const issue of delta) {
-            if (!existingIds.has(issue.id)) updated.push(issue);
-          }
-          return { ...cur, issues: updated, metrics: msg.metrics ?? cur.metrics, milestones: msg.milestones ?? cur.milestones };
-        });
-      }
-      if (Array.isArray(msg.events)) setEventSnapshot(msg.events);
-      return;
-    }
-
-    if (Array.isArray(msg?.events)) {
-      setEventSnapshot(msg.events);
-    }
-  }, [qc]);
+    messageBus.dispatch(msg);
+  }, [messageBus]);
 
   const wsStatus = useRuntimeWebSocket(handleRuntimeSocketMessage);
   const liveMode = wsStatus === "connected";
@@ -344,10 +284,12 @@ export function DashboardProvider({ children }) {
     confetti, showConfetti, clearConfetti,
     // Execution progress (real-time)
     issueProgress,
+    // Parallel sub-task status (real-time)
+    issueSubTasks,
   }), [
     theme, status, wsStatus, liveMode, data, issues, filtered, metrics, eventsData,
     providers, parallelism, issueOptions, runtime,
-    projectMeta, issueProgress,
+    projectMeta, issueProgress, issueSubTasks,
     query, stateFilter, completionFilter,
     isEventsOpen, eventKind, eventIssueId,
     isCreateOpen, selectedIssue, concurrency, toast, toastExiting, confetti, pwa, notifications,

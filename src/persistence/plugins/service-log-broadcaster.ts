@@ -42,15 +42,21 @@ function readNewBytes(
 }
 
 export function startServiceLogBroadcasting(id: string, fifonyDir: string): void {
-  stopServiceLogBroadcasting(id);
+  if (active.has(id)) return;
 
   const logPath = serviceLogPath(fifonyDir, id);
   if (!existsSync(logPath)) return;
 
-  const entry: Entry = { watcher: null!, position: 0 };
+  let initialPosition = 0;
+  try {
+    initialPosition = statSync(logPath).size;
+  } catch {
+    initialPosition = 0;
+  }
+
+  const entry: Entry = { watcher: null!, position: initialPosition };
 
   const flush = () => {
-    if (serviceLogRoomSize(id) === 0) return;
     try {
       // Reset position on truncation (new service session)
       const size = statSync(logPath).size;

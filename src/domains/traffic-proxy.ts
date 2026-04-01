@@ -47,6 +47,7 @@ export class TrafficRingBuffer {
 // ── Service Graph Accumulator ────────────────────────────────────
 
 type EdgeKey = string; // "source:target"
+type ProtocolCount = { protocol: string; count: number };
 type LatencyBucket = { sum: number; count: number; values: number[] };
 
 function edgeKey(source: string, target: string): EdgeKey {
@@ -67,6 +68,7 @@ export class ServiceGraphAccumulator {
       latency: LatencyBucket;
       lastSeenAt: string;
       pathCounts: Map<string, number>;
+      protocolCounts: Map<string, number>;
     }
   >();
   private totalRequests = 0;
@@ -88,6 +90,7 @@ export class ServiceGraphAccumulator {
         latency: { sum: 0, count: 0, values: [] },
         lastSeenAt: entry.startedAt,
         pathCounts: new Map(),
+        protocolCounts: new Map(),
       };
       this.edges.set(key, edge);
     }
@@ -101,6 +104,7 @@ export class ServiceGraphAccumulator {
     edge.latency.values.push(entry.durationMs);
     edge.lastSeenAt = entry.startedAt;
     edge.pathCounts.set(entry.path, (edge.pathCounts.get(entry.path) ?? 0) + 1);
+    edge.protocolCounts.set(entry.protocol ?? "unknown", (edge.protocolCounts.get(entry.protocol ?? "unknown") ?? 0) + 1);
   }
 
   getGraph(services: ServiceStatus[]): ServiceGraph {
@@ -119,12 +123,17 @@ export class ServiceGraphAccumulator {
         .sort((a, b) => b[1] - a[1])
         .slice(0, MAX_TOP_PATHS)
         .map(([path, count]) => ({ path, count }));
+      const protocolCounts: ProtocolCount[] = [...e.protocolCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([protocol, count]) => ({ protocol, count }));
 
       edges.push({
         source: e.source,
         target: e.target,
         requestCount: e.requestCount,
         errorCount: e.errorCount,
+        dominantProtocol: protocolCounts[0]?.protocol ?? "unknown",
+        protocolCounts,
         avgLatencyMs: e.latency.count > 0 ? Math.round(e.latency.sum / e.latency.count) : 0,
         p50LatencyMs: pct(0.5),
         p90LatencyMs: pct(0.9),
@@ -223,11 +232,25 @@ export function buildTrafficEntry(
     path = url;
   }
 
+  const protocol = (() => {
+    try {
+      return new URL(url).protocol.replace(":", "").toLowerCase();
+    } catch {
+      if (/^https:\/\//i.test(url)) return "https";
+      if (/^wss:\/\//i.test(url)) return "wss";
+      if (/^ws:\/\//i.test(url)) return "ws";
+      if (/^http:\/\//i.test(url)) return "http";
+      if (/^tcp:\/\//i.test(url)) return "tcp";
+      return "unknown";
+    }
+  })();
+
   return {
     id: `tr_${Date.now()}_${++entrySeq}`,
     sourceServiceId,
     targetServiceId,
     method,
+    protocol,
     url,
     path,
     statusCode,

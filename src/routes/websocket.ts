@@ -9,10 +9,195 @@ import type { RuntimeState } from "../types.ts";
 // s3db.js 21.2.7 WebSocket contract: handlers receive (socketId, send, req)
 // instead of raw socket objects. We track socketId → send function.
 
+type WsClientMessage = Record<string, unknown>;
+type WsClientCommandHandler = (socketId: string, payload: WsClientMessage, send: WsSendFn) => void;
+
+type WsClientMessageType =
+  | "ping"
+  | "service:log:subscribe"
+  | "service:log:unsubscribe"
+  | "services:subscribe"
+  | "services:unsubscribe"
+  | "analytics:subscribe"
+  | "analytics:unsubscribe"
+  | "issue:log:subscribe"
+  | "issue:log:unsubscribe"
+  | "mesh:subscribe"
+  | "mesh:unsubscribe";
+
+type MeshSnapshotPayload = {
+  graph: unknown;
+  traffic: unknown;
+  nativeGraph?: unknown;
+  status?: Record<string, unknown>;
+};
+
+type ServicesSnapshotPayload = {
+  services: unknown;
+};
+
+type MeshSnapshotProvider = (() => MeshSnapshotPayload | null) | null;
+type ServicesSnapshotProvider = (() => ServicesSnapshotPayload | null) | null;
+
+let meshSnapshotProvider: MeshSnapshotProvider = null;
+let servicesSnapshotProvider: ServicesSnapshotProvider = null;
+let meshSnapshotSeq = 0;
+
+const wsClientHandlers = new Map<WsClientMessageType, WsClientCommandHandler>();
+const wsClientTypeGuards: Record<WsClientMessageType, (msg: WsClientMessage) => boolean> = {
+  ping: () => true,
+  "service:log:subscribe": (msg) => typeof msg?.id === "string",
+  "service:log:unsubscribe": (msg) => typeof msg?.id === "string",
+  "services:subscribe": () => true,
+  "services:unsubscribe": () => true,
+  "analytics:subscribe": (msg) => typeof msg?.topic === "string",
+  "analytics:unsubscribe": (msg) => typeof msg?.topic === "string",
+  "issue:log:subscribe": (msg) => typeof msg?.id === "string",
+  "issue:log:unsubscribe": (msg) => typeof msg?.id === "string",
+  "mesh:subscribe": () => true,
+  "mesh:unsubscribe": () => true,
+};
+
+const wsTelemetry = {
+  startedAt: now(),
+  connectionAttempts: 0,
+  successfulConnections: 0,
+  disconnections: 0,
+  connectionErrors: 0,
+  inboundMessages: 0,
+  outboundMessages: 0,
+  inboundByType: Object.create(null),
+  outboundByType: Object.create(null),
+  invalidMessages: 0,
+  unknownCommands: 0,
+  invalidCommandPayloads: 0,
+  commandErrors: 0,
+  lastInboundAt: null as string | null,
+  lastOutboundAt: null as string | null,
+  lastConnectedAt: null as string | null,
+  lastDisconnectedAt: null as string | null,
+};
+
+function wsNow() {
+  return now();
+}
+
+function normalizeWsMessageType(value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : "__unknown__";
+}
+
+function incrementRecord(target: Record<string, number>, key: string): void {
+  target[key] = (target[key] ?? 0) + 1;
+}
+
+function resolvePayloadType(payload: string | object): string {
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && typeof parsed === "object" && typeof (parsed as { type?: unknown }).type === "string") {
+        return normalizeWsMessageType((parsed as { type?: unknown }).type);
+      }
+    } catch {
+      return "__invalid-json__";
+    }
+  } else if ((payload as { type?: unknown }).type !== undefined) {
+    return normalizeWsMessageType((payload as { type?: unknown }).type);
+  }
+  return "__unknown__";
+}
+
+function trackOutboundMessage(payload: string | object): void {
+  const type = resolvePayloadType(payload);
+  wsTelemetry.outboundMessages += 1;
+  wsTelemetry.lastOutboundAt = wsNow();
+  incrementRecord(wsTelemetry.outboundByType, type);
+}
+
+function trackInboundMessage(message: WsClientMessage): void {
+  const type = normalizeWsMessageType(message?.type);
+  wsTelemetry.inboundMessages += 1;
+  wsTelemetry.lastInboundAt = wsNow();
+  incrementRecord(wsTelemetry.inboundByType, type);
+}
+
+function cleanupStaleSocket(socketId: string): void {
+  unsubscribeFromAllRooms(socketId);
+  wsClients.delete(socketId);
+}
+
+function sendToSocket(socketId: string, payload: string | object): boolean {
+  const send = wsClients.get(socketId);
+  if (!send) return false;
+  const encoded = typeof payload === "string" ? payload : JSON.stringify(payload);
+  try {
+    send(encoded);
+    trackOutboundMessage(encoded);
+    return true;
+  } catch {
+    wsTelemetry.connectionErrors += 1;
+    cleanupStaleSocket(socketId);
+    return false;
+  }
+}
+
+function sendToSocketList(socketIds: Set<string>, payload: string | object): void {
+  const safePayload = typeof payload === "string" ? payload : JSON.stringify(payload);
+  for (const socketId of [...socketIds]) {
+    const send = wsClients.get(socketId);
+    if (!send) {
+      socketIds.delete(socketId);
+      continue;
+    }
+    try {
+      send(safePayload);
+      trackOutboundMessage(safePayload);
+    } catch {
+      wsTelemetry.connectionErrors += 1;
+      cleanupStaleSocket(socketId);
+      socketIds.delete(socketId);
+    }
+  }
+}
+
 export type WsSendFn = (data: string) => void;
 export const wsClients = new Map<string, WsSendFn>(); // socketId → send
 export let broadcastSeq = 0;
+let servicesSnapshotSeq = 0;
 export let lastBroadcastIssueSnapshot: Map<string, string> = new Map(); // id → JSON
+
+export function setMeshSnapshotProvider(fn: MeshSnapshotProvider): void {
+  meshSnapshotProvider = fn;
+}
+
+export function setServicesSnapshotProvider(fn: ServicesSnapshotProvider): void {
+  servicesSnapshotProvider = fn;
+}
+
+export function notifyServicesSnapshot(): void {
+  const payload = servicesSnapshotProvider?.();
+  if (!payload || wsClients.size === 0) return;
+
+  servicesSnapshotSeq += 1;
+  sendToServicesRoom({
+    type: "services:snapshot",
+    ...payload,
+    seq: servicesSnapshotSeq,
+    timestamp: now(),
+  });
+}
+
+export function notifyMeshSnapshot(): void {
+  const payload = meshSnapshotProvider?.();
+  if (!payload || !meshRoomHasSubscribers()) return;
+
+  meshSnapshotSeq += 1;
+  sendToMeshRoom({
+    type: "mesh:snapshot",
+    ...payload,
+    seq: meshSnapshotSeq,
+    timestamp: now(),
+  });
+}
 
 // ── Service log rooms ─────────────────────────────────────────────────────────
 // Clients subscribe to a specific service's log stream.
@@ -61,11 +246,7 @@ export function sendToAnalyticsRoom(topic: string, data: Record<string, unknown>
   const room = analyticsRooms.get(topic);
   if (!room || room.size === 0) return;
   const msg = JSON.stringify({ type: "analytics:update", topic, data });
-  for (const socketId of [...room]) {
-    const send = wsClients.get(socketId);
-    if (!send) { room.delete(socketId); continue; }
-    try { send(msg); } catch { wsClients.delete(socketId); room.delete(socketId); }
-  }
+  sendToSocketList(room, msg);
 }
 
 // ── Issue log rooms ───────────────────────────────────────────────────────────
@@ -90,11 +271,30 @@ export function issueLogRoomSize(issueId: string): number {
 export function sendToIssueLogRoom(issueId: string, data: string): void {
   const room = issueLogRooms.get(issueId);
   if (!room || room.size === 0) return;
-  for (const socketId of [...room]) {
-    const send = wsClients.get(socketId);
-    if (!send) { room.delete(socketId); continue; }
-    try { send(data); } catch { wsClients.delete(socketId); room.delete(socketId); }
-  }
+  sendToSocketList(room, data);
+}
+
+// ── Services room ────────────────────────────────────────────────────────────
+// Clients subscribed to this room receive the global services list snapshot.
+
+const servicesRoom = new Set<string>(); // socketIds
+
+export function subscribeServicesRoom(socketId: string): void {
+  servicesRoom.add(socketId);
+}
+
+export function unsubscribeServicesRoom(socketId: string): void {
+  servicesRoom.delete(socketId);
+}
+
+export function servicesRoomHasSubscribers(): boolean {
+  return servicesRoom.size > 0;
+}
+
+export function sendToServicesRoom(data: Record<string, unknown>): void {
+  if (servicesRoom.size === 0) return;
+  const msg = JSON.stringify(data);
+  sendToSocketList(servicesRoom, msg);
 }
 
 // ── Mesh traffic room ─────────────────────────────────────────────────────────
@@ -113,11 +313,7 @@ export function unsubscribeMeshRoom(socketId: string): void {
 export function sendToMeshRoom(data: Record<string, unknown>): void {
   if (meshRoom.size === 0) return;
   const msg = JSON.stringify(data);
-  for (const socketId of [...meshRoom]) {
-    const send = wsClients.get(socketId);
-    if (!send) { meshRoom.delete(socketId); continue; }
-    try { send(msg); } catch { wsClients.delete(socketId); meshRoom.delete(socketId); }
-  }
+  sendToSocketList(meshRoom, msg);
 }
 
 export function meshRoomHasSubscribers(): boolean {
@@ -128,6 +324,7 @@ export function unsubscribeFromAllRooms(socketId: string): void {
   for (const room of serviceLogRooms.values()) room.delete(socketId);
   for (const room of analyticsRooms.values()) room.delete(socketId);
   for (const room of issueLogRooms.values()) room.delete(socketId);
+  servicesRoom.delete(socketId);
   meshRoom.delete(socketId);
 }
 
@@ -138,19 +335,154 @@ export function serviceLogRoomSize(serviceId: string): number {
 export function sendToServiceLogRoom(serviceId: string, data: string): void {
   const room = serviceLogRooms.get(serviceId);
   if (!room || room.size === 0) return;
-  for (const socketId of [...room]) {
-    const send = wsClients.get(socketId);
-    if (!send) { room.delete(socketId); continue; }
-    try { send(data); } catch { wsClients.delete(socketId); room.delete(socketId); }
-  }
+  sendToSocketList(room, data);
 }
 
 export function sendToAllClients(data: string): void {
-  for (const [socketId, send] of [...wsClients]) {
-    try { send(data); } catch (error) {
-      logger.debug(`WebSocket send failed for ${socketId}, removing (remaining: ${wsClients.size - 1}): ${String(error)}`);
-      wsClients.delete(socketId);
+  for (const socketId of [...wsClients.keys()]) {
+    if (!sendToSocket(socketId, data)) {
+      logger.debug(`WebSocket send failed for ${socketId}, removing (remaining: ${wsClients.size - 1})`);
     }
+  }
+}
+
+export function parseWsClientMessage(raw: string | Buffer): WsClientMessage | null {
+  if (typeof raw !== "string" && !Buffer.isBuffer(raw)) return null;
+  const payload = typeof raw === "string" ? raw : raw.toString("utf8");
+  try {
+    const msg = JSON.parse(payload);
+    return msg && typeof msg === "object" ? msg : null;
+  } catch {
+    return null;
+  }
+}
+
+function registerWsCommandHandlers() {
+  if (wsClientHandlers.size > 0) return;
+
+  wsClientHandlers.set("ping", (_socketId, _payload) => {
+    const payload = _payload as { type?: unknown; seq?: unknown; clientTs?: unknown };
+    const seq = typeof payload.seq === "number" ? payload.seq : undefined;
+    const clientTs = typeof payload.clientTs === "number" || typeof payload.clientTs === "string"
+      ? payload.clientTs
+      : undefined;
+    sendToSocket(_socketId, {
+      type: "pong",
+      seq,
+      clientTs,
+      timestamp: now(),
+    });
+  });
+
+  wsClientHandlers.set("service:log:subscribe", (socketId, payload) => {
+    const serviceId = payload.id;
+    if (typeof serviceId !== "string") return;
+    subscribeServiceLogRoom(socketId, serviceId);
+    // Ensure the file watcher is active — it may not be if the server restarted
+    // while the service was already running, or if the page opened mid-run.
+    startServiceLogBroadcasting(serviceId, STATE_ROOT);
+    logger.debug({ socketId, serviceId }, "[WebSocket] Subscribed to service log room");
+  });
+  wsClientHandlers.set("service:log:unsubscribe", (socketId, payload) => {
+    const serviceId = payload.id;
+    if (typeof serviceId !== "string") return;
+    unsubscribeServiceLogRoom(socketId, serviceId);
+    logger.debug({ socketId, serviceId }, "[WebSocket] Unsubscribed from service log room");
+  });
+
+  wsClientHandlers.set("services:subscribe", (socketId) => {
+    subscribeServicesRoom(socketId);
+    const snapshot = servicesSnapshotProvider?.();
+    if (snapshot) {
+      sendToSocket(socketId, {
+        type: "services:snapshot",
+        ...snapshot,
+        seq: servicesSnapshotSeq,
+        timestamp: now(),
+      });
+    }
+    logger.debug({ socketId }, "[WebSocket] Subscribed to services room");
+  });
+  wsClientHandlers.set("services:unsubscribe", (socketId) => {
+    unsubscribeServicesRoom(socketId);
+    logger.debug({ socketId }, "[WebSocket] Unsubscribed from services room");
+  });
+
+  wsClientHandlers.set("analytics:subscribe", (socketId, payload) => {
+    const topic = payload.topic;
+    if (typeof topic !== "string") return;
+    subscribeAnalyticsRoom(socketId, topic);
+    logger.debug({ socketId, topic }, "[WebSocket] Subscribed to analytics room");
+  });
+  wsClientHandlers.set("analytics:unsubscribe", (socketId, payload) => {
+    const topic = payload.topic;
+    if (typeof topic !== "string") return;
+    unsubscribeAnalyticsRoom(socketId, topic);
+    logger.debug({ socketId, topic }, "[WebSocket] Unsubscribed from analytics room");
+  });
+
+  wsClientHandlers.set("issue:log:subscribe", (socketId, payload) => {
+    const issueId = payload.id;
+    if (typeof issueId !== "string") return;
+    subscribeIssueLogRoom(socketId, issueId);
+    logger.debug({ socketId, issueId }, "[WebSocket] Subscribed to issue log room");
+  });
+  wsClientHandlers.set("issue:log:unsubscribe", (socketId, payload) => {
+    const issueId = payload.id;
+    if (typeof issueId !== "string") return;
+    unsubscribeIssueLogRoom(socketId, issueId);
+    logger.debug({ socketId, issueId }, "[WebSocket] Unsubscribed from issue log room");
+  });
+
+  wsClientHandlers.set("mesh:subscribe", (socketId) => {
+    subscribeMeshRoom(socketId);
+    const snapshot = meshSnapshotProvider?.();
+    if (snapshot) {
+      sendToSocket(socketId, {
+        type: "mesh:snapshot",
+        ...snapshot,
+        seq: meshSnapshotSeq,
+        timestamp: now(),
+      });
+    }
+    logger.debug({ socketId }, "[WebSocket] Subscribed to mesh traffic room");
+  });
+  wsClientHandlers.set("mesh:unsubscribe", (socketId) => {
+    unsubscribeMeshRoom(socketId);
+    logger.debug({ socketId }, "[WebSocket] Unsubscribed from mesh traffic room");
+  });
+}
+
+export function handleWsClientMessage(socketId: string, rawMessage: string | Buffer, send: WsSendFn): void {
+  const msg = parseWsClientMessage(rawMessage);
+  if (!msg) {
+    wsTelemetry.invalidMessages += 1;
+    return;
+  }
+
+  trackInboundMessage(msg);
+  const type = msg.type;
+  if (typeof type !== "string") {
+    wsTelemetry.invalidMessages += 1;
+    return;
+  }
+  const handler = wsClientHandlers.get(type as WsClientMessageType);
+  if (!handler) {
+    wsTelemetry.unknownCommands += 1;
+    return;
+  }
+
+  const guard = wsClientTypeGuards[type as WsClientMessageType];
+  if (guard && !guard(msg)) {
+    wsTelemetry.invalidCommandPayloads += 1;
+    return;
+  }
+
+  try {
+    handler(socketId, msg, send);
+  } catch (error) {
+    wsTelemetry.commandErrors += 1;
+    logger.debug({ err: String(error), type, socketId }, "[WebSocket] Command handler failed");
   }
 }
 
@@ -255,15 +587,20 @@ export function broadcastToWebSocketClients(message: Record<string, unknown>): v
 }
 
 export function makeWebSocketConfig(state: RuntimeState) {
+  registerWsCommandHandlers();
   return {
     enabled: true,
     path: "/ws",
     maxPayloadBytes: 512_000,
     onConnection: (socketId: string, send: WsSendFn) => {
       wsClients.set(socketId, send);
+      wsTelemetry.connectionAttempts += 1;
+      wsTelemetry.successfulConnections += 1;
+      wsTelemetry.lastConnectedAt = wsNow();
       logger.debug(`WebSocket client connected: ${socketId} (total: ${wsClients.size})`);
       try {
-        send(JSON.stringify({
+        subscribeServicesRoom(socketId);
+        sendToSocket(socketId, JSON.stringify({
           type: "connected",
           seq: broadcastSeq,
           timestamp: now(),
@@ -272,49 +609,74 @@ export function makeWebSocketConfig(state: RuntimeState) {
           issues: state.issues,
           events: state.events.slice(0, 50),
         }));
+
+        const servicesSnapshot = servicesSnapshotProvider?.();
+        if (servicesSnapshot) {
+          sendToSocket(socketId, {
+            type: "services:snapshot",
+            ...servicesSnapshot,
+            seq: servicesSnapshotSeq,
+            timestamp: now(),
+          });
+        }
+
+        const meshSnapshot = meshSnapshotProvider?.();
+        if (meshSnapshot) {
+          sendToSocket(socketId, {
+            type: "mesh:snapshot",
+            ...meshSnapshot,
+            seq: meshSnapshotSeq,
+            timestamp: now(),
+          });
+        }
       } catch (error) {
         logger.debug(`WebSocket initial send failed for ${socketId}: ${String(error)}`);
       }
     },
     onMessage: (socketId: string, message: string | Buffer, send: WsSendFn) => {
-      try {
-        const msg = JSON.parse(typeof message === "string" ? message : message.toString("utf8"));
-        if (msg.type === "ping") {
-          send(JSON.stringify({ type: "pong", timestamp: now() }));
-        } else if (msg.type === "service:log:subscribe" && typeof msg.id === "string") {
-          subscribeServiceLogRoom(socketId, msg.id);
-          // Ensure the file watcher is active — it may not be if the server restarted
-          // while the service was already running, or if the page opened mid-run.
-          startServiceLogBroadcasting(msg.id, STATE_ROOT);
-          logger.debug({ socketId, serviceId: msg.id }, "[WebSocket] Subscribed to service log room");
-        } else if (msg.type === "service:log:unsubscribe" && typeof msg.id === "string") {
-          unsubscribeServiceLogRoom(socketId, msg.id);
-          logger.debug({ socketId, serviceId: msg.id }, "[WebSocket] Unsubscribed from service log room");
-        } else if (msg.type === "analytics:subscribe" && typeof msg.topic === "string") {
-          subscribeAnalyticsRoom(socketId, msg.topic);
-          logger.debug({ socketId, topic: msg.topic }, "[WebSocket] Subscribed to analytics room");
-        } else if (msg.type === "analytics:unsubscribe" && typeof msg.topic === "string") {
-          unsubscribeAnalyticsRoom(socketId, msg.topic);
-          logger.debug({ socketId, topic: msg.topic }, "[WebSocket] Unsubscribed from analytics room");
-        } else if (msg.type === "issue:log:subscribe" && typeof msg.id === "string") {
-          subscribeIssueLogRoom(socketId, msg.id);
-          logger.debug({ socketId, issueId: msg.id }, "[WebSocket] Subscribed to issue log room");
-        } else if (msg.type === "issue:log:unsubscribe" && typeof msg.id === "string") {
-          unsubscribeIssueLogRoom(socketId, msg.id);
-          logger.debug({ socketId, issueId: msg.id }, "[WebSocket] Unsubscribed from issue log room");
-        } else if (msg.type === "mesh:subscribe") {
-          subscribeMeshRoom(socketId);
-          logger.debug({ socketId }, "[WebSocket] Subscribed to mesh traffic room");
-        } else if (msg.type === "mesh:unsubscribe") {
-          unsubscribeMeshRoom(socketId);
-          logger.debug({ socketId }, "[WebSocket] Unsubscribed from mesh traffic room");
-        }
-      } catch {}
+      handleWsClientMessage(socketId, message, send);
     },
     onClose: (socketId: string) => {
       wsClients.delete(socketId);
+      wsTelemetry.disconnections += 1;
+      wsTelemetry.lastDisconnectedAt = wsNow();
       unsubscribeFromAllRooms(socketId);
       logger.debug(`WebSocket client disconnected: ${socketId} (total: ${wsClients.size})`);
     },
   };
+}
+
+export function getWsTelemetry() {
+  return {
+    ...wsTelemetry,
+    activeConnections: wsClients.size,
+    inboundByType: { ...wsTelemetry.inboundByType },
+    outboundByType: { ...wsTelemetry.outboundByType },
+    startedAt: wsTelemetry.startedAt,
+    lastInboundAt: wsTelemetry.lastInboundAt,
+    lastOutboundAt: wsTelemetry.lastOutboundAt,
+    lastConnectedAt: wsTelemetry.lastConnectedAt,
+    lastDisconnectedAt: wsTelemetry.lastDisconnectedAt,
+  };
+}
+
+export function resetWsTelemetry() {
+  wsTelemetry.startedAt = now();
+  wsTelemetry.connectionAttempts = 0;
+  wsTelemetry.successfulConnections = 0;
+  wsTelemetry.disconnections = 0;
+  wsTelemetry.connectionErrors = 0;
+  wsTelemetry.inboundMessages = 0;
+  wsTelemetry.outboundMessages = 0;
+  wsTelemetry.inboundByType = Object.create(null);
+  wsTelemetry.outboundByType = Object.create(null);
+  wsTelemetry.invalidMessages = 0;
+  wsTelemetry.unknownCommands = 0;
+  wsTelemetry.invalidCommandPayloads = 0;
+  wsTelemetry.commandErrors = 0;
+  wsTelemetry.lastInboundAt = null;
+  wsTelemetry.lastOutboundAt = null;
+  wsTelemetry.lastConnectedAt = null;
+  wsTelemetry.lastDisconnectedAt = null;
+  return getWsTelemetry();
 }

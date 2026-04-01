@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, Terminal, SlidersHorizontal, Zap, Send, ChevronDown, Activity } from "lucide-react";
+import { AlertTriangle, Terminal, SlidersHorizontal, Zap, Send, ChevronDown, Activity, GitBranch } from "lucide-react";
 import { api } from "../../../api.js";
 import { formatDate, formatDuration } from "../../../utils.js";
 import { Section, Field, CopyButton, ConfigStrip, TokenPhaseBreakdown, resolveStageDisplay } from "../shared.jsx";
@@ -101,6 +101,56 @@ function ProgressStrip({ issueId }) {
       {progress.directiveSummary && (
         <div className="text-xs opacity-50 mt-1 truncate">{progress.directiveSummary}</div>
       )}
+    </div>
+  );
+}
+
+// ── SubTaskStrip (parallel sub-task WS visibility) ───────────────────────────
+
+const SUBTASK_STATUS_STYLES = {
+  pending:  "badge-ghost opacity-50",
+  running:  "badge-info animate-pulse",
+  done:     "badge-success",
+  failed:   "badge-error",
+};
+
+function SubTaskStrip({ issueId }) {
+  const { issueSubTasks } = useDashboard();
+  const entry = issueSubTasks[issueId];
+  if (!entry || !entry.tasks?.length) return null;
+
+  const allDone = entry.tasks.every((t) => t.status === "done" || t.status === "failed");
+  const anyFailed = entry.tasks.some((t) => t.status === "failed");
+  const runningCount = entry.tasks.filter((t) => t.status === "running").length;
+
+  return (
+    <div className="rounded-box border border-secondary/30 bg-secondary/5 px-3 py-2 space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <GitBranch className="size-3 text-secondary" />
+        <span className="font-medium text-secondary">
+          Parallel agents
+        </span>
+        <span className="opacity-50">
+          {allDone
+            ? anyFailed ? "completed with failures" : "all done"
+            : `${runningCount} running`}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {entry.tasks.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 text-xs">
+            <span className={`badge badge-xs ${SUBTASK_STATUS_STYLES[t.status] ?? "badge-ghost"}`}>
+              {t.status}
+            </span>
+            <span className="opacity-70 truncate flex-1">{t.label}</span>
+            {t.result && t.status === "failed" && (
+              <span className="opacity-40 truncate max-w-[140px]" title={t.result}>
+                {t.result}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -253,6 +303,9 @@ export function ExecutionTab({ issue, workflowConfig }) {
     <div className="space-y-5">
       {/* Real-time progress strip (WS-pushed) */}
       {isRunning && <ProgressStrip issueId={issue.id} />}
+
+      {/* Parallel sub-task status (WS-pushed) */}
+      {isRunning && <SubTaskStrip issueId={issue.id} />}
 
       {/* Live monitor */}
       <LiveMonitor

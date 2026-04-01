@@ -58,6 +58,21 @@ export const SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS = "runtime.autoApproveTrivial
 export const SETTING_ID_AUTO_COMMIT_BEFORE_MERGE = "runtime.autoCommitBeforeMerge";
 export const SETTING_ID_AUTO_RESOLVE_CONFLICTS = "runtime.autoResolveConflicts";
 export const SETTING_ID_SANDBOX_EXECUTION = "runtime.sandboxExecution";
+export const SETTING_ID_REVERSE_PROXY_ENABLED = "runtime.reverseProxyEnabled";
+export const SETTING_ID_REVERSE_PROXY_PORT = "runtime.reverseProxyPort";
+export const SETTING_ID_PROXY_ROUTES = "runtime.proxyRoutes";
+export const SETTING_ID_LOCAL_DOMAIN = "runtime.localDomain";
+
+const LOCAL_DOMAIN_PORT_SUFFIX = /:\d+$/;
+
+function normalizeLocalDomain(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const withoutScheme = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  const hostOnly = withoutScheme.split("/")[0]?.split("?")[0] ?? "";
+  return hostOnly.replace(LOCAL_DOMAIN_PORT_SUFFIX, "").toLowerCase();
+}
 
 export async function loadRuntimeSettings(): Promise<RuntimeSettingRecord[]> {
   return loadPersistedSettings();
@@ -97,6 +112,10 @@ export const RUNTIME_CONFIG_SETTING_IDS = new Set<string>([
   SETTING_ID_AUTO_COMMIT_BEFORE_MERGE,
   SETTING_ID_AUTO_RESOLVE_CONFLICTS,
   SETTING_ID_SANDBOX_EXECUTION,
+  SETTING_ID_REVERSE_PROXY_ENABLED,
+  SETTING_ID_REVERSE_PROXY_PORT,
+  SETTING_ID_PROXY_ROUTES,
+  SETTING_ID_LOCAL_DOMAIN,
 ]);
 
 const VALID_REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "extra-high"]);
@@ -195,6 +214,10 @@ function buildRuntimeConfigSettings(
     { id: SETTING_ID_AUTO_COMMIT_BEFORE_MERGE, scope: "runtime", value: config.autoCommitBeforeMerge ?? true, source, updatedAt },
     { id: SETTING_ID_AUTO_RESOLVE_CONFLICTS, scope: "runtime", value: config.autoResolveConflicts ?? false, source, updatedAt },
     { id: SETTING_ID_SANDBOX_EXECUTION, scope: "runtime", value: config.sandboxExecution ?? false, source, updatedAt },
+    { id: SETTING_ID_REVERSE_PROXY_ENABLED, scope: "runtime", value: config.reverseProxyEnabled ?? false, source, updatedAt },
+    { id: SETTING_ID_REVERSE_PROXY_PORT, scope: "runtime", value: config.reverseProxyPort ?? 4433, source, updatedAt },
+    { id: SETTING_ID_PROXY_ROUTES, scope: "runtime", value: config.proxyRoutes ?? [], source, updatedAt },
+    { id: SETTING_ID_LOCAL_DOMAIN, scope: "runtime", value: config.localDomain ?? "", source, updatedAt },
   ];
 }
 
@@ -395,6 +418,28 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
       }
       case SETTING_ID_SANDBOX_EXECUTION: {
         nextConfig.sandboxExecution = toBooleanValue(setting.value, false);
+        break;
+      }
+      case SETTING_ID_REVERSE_PROXY_ENABLED: {
+        nextConfig.reverseProxyEnabled = toBooleanValue(setting.value, false);
+        break;
+      }
+      case SETTING_ID_REVERSE_PROXY_PORT: {
+        const parsed = Number(setting.value);
+        if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 65535) {
+          nextConfig.reverseProxyPort = parsed;
+        }
+        break;
+      }
+      case SETTING_ID_PROXY_ROUTES: {
+        if (Array.isArray(setting.value)) {
+          nextConfig.proxyRoutes = setting.value as import("../types.ts").ProxyRoute[];
+        }
+        break;
+      }
+      case SETTING_ID_LOCAL_DOMAIN: {
+        const d = normalizeLocalDomain(setting.value);
+        if (d) nextConfig.localDomain = d;
         break;
       }
       default:

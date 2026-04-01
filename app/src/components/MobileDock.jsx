@@ -5,9 +5,11 @@ export function MobileDock() {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
+  const dockItems = NAV_ITEMS.filter((item) => !item.dockHidden);
+
   return (
     <div className="dock md:hidden">
-      {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+      {dockItems.map(({ to, label, icon: Icon }) => {
         const isActive = currentPath.startsWith(to);
         return (
           <Link

@@ -25,6 +25,7 @@ import {
 } from "../store.ts";
 import type { RouteHandler, RouteRegistrar } from "../../routes/http.ts";
 import { setApiRuntimeContext } from "./api-runtime-context.ts";
+import { startReverseProxy, stopReverseProxy } from "./reverse-proxy-server.ts";
 import { makeWebSocketConfig } from "../../routes/websocket.ts";
 export { broadcastToWebSocketClients } from "../../routes/websocket.ts";
 
@@ -108,13 +109,23 @@ export async function startApiServer(
   };
 
   const devPort = _options?.devPort;
+  const LOCAL_DOMAIN_PORT_SUFFIX = /:\d+$/;
+  const normalizeLocalDomain = (value?: string | null) => {
+    if (!value) return "";
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const withoutScheme = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+    const hostOnly = withoutScheme.split("/")[0]?.split("?")[0] ?? "";
+    return hostOnly.replace(LOCAL_DOMAIN_PORT_SUFFIX, "").toLowerCase();
+  };
+  const getDashboardHost = () => normalizeLocalDomain(state.config.localDomain) || "localhost";
 
   const serveAppShell = (path?: string) => {
     // In dev mode, redirect browser to the Vite HMR server
     if (devPort) {
       return new Response(null, {
         status: 302,
-        headers: { location: `http://localhost:${devPort}${path ?? "/"}` },
+        headers: { location: `http://${getDashboardHost()}:${devPort}${path ?? "/"}` },
       });
     }
     if (!existsSync(FRONTEND_INDEX)) {
@@ -181,6 +192,22 @@ export async function startApiServer(
     tls: false,
     versionPrefix: false,
     metrics: { enabled: false, logLevel: false },
+    setup: async ({ addManagedServer }: { addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void }) => {
+      if (state.config.reverseProxyEnabled) {
+        try {
+          await startReverseProxy({
+            port: state.config.reverseProxyPort ?? 4433,
+            dashPort: port,
+            routes: state.config.proxyRoutes ?? [],
+            services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
+            localDomain: normalizeLocalDomain(state.config.localDomain),
+          });
+          addManagedServer({ stop: () => stopReverseProxy() }, "reverse-proxy");
+        } catch (err) {
+          logger.warn({ err }, "[Proxy] Failed to start HTTPS reverse proxy — continuing without it");
+        }
+      }
+    },
     // HTTP + WebSocket on the same port via listeners
     listeners: [{
       bind: { host: "0.0.0.0", port },
@@ -191,7 +218,7 @@ export async function startApiServer(
     }],
     rootRoute: () => new Response(null, {
       status: 302,
-      headers: { location: devPort ? `http://localhost:${devPort}/` : "/kanban" },
+      headers: { location: devPort ? `http://${getDashboardHost()}:${devPort}/` : "/kanban" },
     }),
     static: [{
       driver: "filesystem",

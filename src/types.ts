@@ -575,6 +575,7 @@ export type TrafficEntry = {
   sourceServiceId: string | null;
   targetServiceId: string | null;
   method: string;
+  protocol: string;
   url: string;
   path: string;
   statusCode: number;
@@ -590,6 +591,8 @@ export type ServiceGraphEdge = {
   target: string;
   requestCount: number;
   errorCount: number;
+  dominantProtocol: string;
+  protocolCounts: { protocol: string; count: number }[];
   avgLatencyMs: number;
   p50LatencyMs: number;
   p90LatencyMs: number;
@@ -680,7 +683,29 @@ export type RuntimeConfig = {
   autoResolveConflicts?: boolean;
   /** When true, execute agents inside ai-jail sandbox for filesystem isolation. */
   sandboxExecution?: boolean;
+  /** When true, start a local HTTPS reverse proxy fronting the dashboard. Default: false */
+  reverseProxyEnabled?: boolean;
+  /** Port for the local HTTPS reverse proxy. Default: 4433 */
+  reverseProxyPort?: number;
+  /** Custom routing rules for the HTTPS reverse proxy. Evaluated top-down; catch-all to dashboard is always appended. */
+  proxyRoutes?: ProxyRoute[];
+  /** Local domain used by the HTTPS reverse proxy, e.g. "spark.local". A cert for domain + *.domain is auto-generated. */
+  localDomain?: string;
 };
+
+export interface ProxyRoute {
+  id: string;
+  /** Host to match, e.g. "app.tetis.local" or "*.tetis.local" */
+  host?: string;
+  /** Path prefix to match, e.g. "/login" */
+  pathPrefix?: string;
+  /** ID of a configured service — resolved to its port at proxy start */
+  serviceId?: string;
+  /** Explicit upstream URL — used when serviceId is not set */
+  target?: string;
+  /** Strip pathPrefix before forwarding. Defaults to true when pathPrefix is set */
+  stripPrefix?: boolean;
+}
 
 export type ProjectNameSource = "saved" | "detected" | "missing";
 export type MilestoneNameSource = ProjectNameSource;

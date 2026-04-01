@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
-import { subscribeServiceLog, unsubscribeServiceLog } from "../hooks.js";
+import {
+  subscribeServiceLog,
+  unsubscribeServiceLog,
+  subscribeServices,
+  unsubscribeServices,
+} from "../hooks.js";
 
 // ── Service log pub/sub (WebSocket push path) ───────────────────────────────
 
@@ -27,6 +32,20 @@ export function dispatchServiceUpdate(update) {
   for (const cb of serviceStateSubs) cb(update);
 }
 
+// ── Service snapshot pub/sub (WS push path) ────────────────────────────────
+
+const serviceSnapshotSubs = new Set(); // Set<(payload: {services: unknown}) => void>
+
+/** Called by DashboardContext when a "services:snapshot" WS message arrives. */
+export function dispatchServicesSnapshot(payload) {
+  for (const cb of serviceSnapshotSubs) cb(payload);
+}
+
+export function onServicesSnapshot(cb) {
+  serviceSnapshotSubs.add(cb);
+  return () => serviceSnapshotSubs.delete(cb);
+}
+
 // ── Service restart pub/sub ───────────────────────────────────────────────────
 
 const serviceRestartSubs = new Map(); // id → Set<() => void>
@@ -39,12 +58,14 @@ export function onServiceRestart(id, cb) {
 
 /**
  * Fetches all service statuses and polls at `pollInterval` ms.
- * Pass `pollInterval: false` (or 0) to disable polling — use when WS is connected.
+ * Pass `liveMode: true` (or `pollInterval: false`) to disable polling — use when WS is connected.
  * Regardless of polling, always patches state from WS "service" messages instantly.
  */
-export function useServices({ pollInterval = 3_000 } = {}) {
+export function useServices({ pollInterval = 30_000, liveMode = false } = {}) {
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastSnapshotSeq = useRef(0);
+  const gotSnapshot = useRef(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -62,14 +83,44 @@ export function useServices({ pollInterval = 3_000 } = {}) {
   }, [fetchAll]);
 
   useEffect(() => {
-    if (!pollInterval) return;
+    if (liveMode || !pollInterval) return;
     const id = setInterval(fetchAll, pollInterval);
     return () => clearInterval(id);
-  }, [fetchAll, pollInterval]);
+  }, [fetchAll, liveMode, pollInterval]);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    subscribeServices();
+    return () => unsubscribeServices();
+  }, [liveMode]);
+
+  useEffect(() => {
+    if (!liveMode || !pollInterval) return;
+    const timeout = setTimeout(() => {
+      if (!gotSnapshot.current) fetchAll();
+    }, 750);
+    return () => clearTimeout(timeout);
+  }, [fetchAll, liveMode, pollInterval]);
+
+  useEffect(() => {
+    const handler = ({ services: snapshotServices, seq } = {}) => {
+      if (!Array.isArray(snapshotServices)) return;
+      if (typeof seq === "number" && seq <= lastSnapshotSeq.current) return;
+      if (typeof seq === "number") {
+        lastSnapshotSeq.current = seq;
+      }
+      setServices(snapshotServices);
+      setLoading(false);
+      gotSnapshot.current = true;
+    };
+    serviceSnapshotSubs.add(handler);
+    return () => serviceSnapshotSubs.delete(handler);
+  }, []);
 
   // Patch individual service state from WS push — instant, no re-fetch needed
   useEffect(() => {
     const handler = ({ id, state, running, pid }) => {
+      if (!id) return;
       setServices((prev) =>
         prev.map((s) => s.id === id ? { ...s, state, running, pid: pid ?? s.pid } : s)
       );
