@@ -51,11 +51,15 @@ export function buildServiceCommand(
   command: string,
   globalEnv?: ServiceEnvironment,
   serviceEnv?: ServiceEnvironment,
+  enforcedEnv?: ServiceEnvironment,
 ): string {
   const baseCommand = command.trim();
   if (!baseCommand) return "";
 
-  const env = mergeServiceEnvironment(globalEnv, serviceEnv);
+  const env = {
+    ...mergeServiceEnvironment(globalEnv, serviceEnv),
+    ...(enforcedEnv ?? {}),
+  };
   const assignments = Object.entries(env).map(([key, value]) => `${key}=${shellQuoteEnvValue(value)}`);
   return assignments.length > 0 ? `${assignments.join(" ")} ${baseCommand}` : baseCommand;
 }

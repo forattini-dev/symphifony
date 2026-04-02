@@ -1,6 +1,14 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { IssueEntry } from "../src/types.ts";
+import { buildRuntimeState } from "../src/domains/issues.ts";
+import { deriveConfig } from "../src/domains/config.ts";
+import { clearApiRuntimeContext, setApiRuntimeContext } from "../src/persistence/plugins/api-runtime-context.ts";
+import { registerAnalyticsRoutes } from "../src/routes/analytics.ts";
+
+afterEach(() => {
+  clearApiRuntimeContext();
+});
 
 describe("analytics contract", () => {
   it("hydrates top issues with per-phase breakdown", async () => {
@@ -60,6 +68,104 @@ describe("analytics contract", () => {
     assert.equal(top?.costUsd, 0.6000000000000001);
     assert.equal(top?.byPhase?.planner?.totalTokens, 15);
     assert.equal(top?.byPhase?.executor?.totalTokens, 40);
+  });
+
+  it("exposes stage-quality aggregates by role", async () => {
+    const state = buildRuntimeState(null, deriveConfig([]));
+    state.issues = [
+      {
+        id: "issue-stage-1",
+        identifier: "#201",
+        title: "Merged issue",
+        description: "desc",
+        state: "Merged",
+        labels: [],
+        blockedBy: [],
+        assignedToWorker: false,
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        completedAt: "2026-04-01T01:00:00.000Z",
+        history: [],
+        attempts: 1,
+        maxAttempts: 3,
+        planVersion: 1,
+        executeAttempt: 1,
+        reviewAttempt: 1,
+        tokensByPhase: {
+          executor: { inputTokens: 90, outputTokens: 10, totalTokens: 100, costUsd: 1.25, model: "claude-opus-4.6" },
+          reviewer: { inputTokens: 30, outputTokens: 10, totalTokens: 40, costUsd: 0.5, model: "claude-opus-4.6" },
+        },
+        previousAttemptSummaries: [],
+      } as IssueEntry,
+      {
+        id: "issue-stage-2",
+        identifier: "#202",
+        title: "Rework issue",
+        description: "desc",
+        state: "Approved",
+        labels: [],
+        blockedBy: [],
+        assignedToWorker: false,
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        completedAt: "2026-04-01T02:00:00.000Z",
+        history: [],
+        attempts: 2,
+        maxAttempts: 3,
+        planVersion: 1,
+        executeAttempt: 2,
+        reviewAttempt: 2,
+        tokensByPhase: {
+          executor: { inputTokens: 45, outputTokens: 5, totalTokens: 50, costUsd: 0.75, model: "gpt-5.4" },
+        },
+        previousAttemptSummaries: [
+          { planVersion: 1, executeAttempt: 1, phase: "review", error: "needs rework", timestamp: "2026-04-01T01:30:00.000Z" },
+        ],
+      } as IssueEntry,
+    ];
+    setApiRuntimeContext(state);
+
+    const handlers = new Map<string, (context: any) => Response | Promise<Response>>();
+    registerAnalyticsRoutes({
+      get(path, handler) { handlers.set(path, handler); },
+      post() {},
+      put() {},
+      patch() {},
+      delete() {},
+    });
+
+    const response = await handlers.get("/api/analytics/stage-quality")!({
+      req: {
+        query() { return undefined; },
+        param() { return undefined; },
+        async json() { return {}; },
+      },
+      json(body: unknown, status?: number) {
+        return new Response(JSON.stringify(body), { status });
+      },
+      body(body: unknown, status?: number, headers?: Record<string, string>) {
+        return new Response(body as BodyInit, { status, headers });
+      },
+    });
+    const payload = await response.json() as {
+      ok: boolean;
+      roles: Array<{
+        role: string;
+        totalTokens: number;
+        issueCount: number;
+        outcomes: Record<string, number>;
+        topIssues: Array<{ identifier: string }>;
+      }>;
+    };
+
+    assert.equal(payload.ok, true);
+    const executor = payload.roles.find((entry) => entry.role === "executor");
+    assert.ok(executor, "executor bucket should exist");
+    assert.equal(executor?.totalTokens, 150);
+    assert.equal(executor?.issueCount, 2);
+    assert.equal(executor?.outcomes.Merged, 1);
+    assert.equal(executor?.outcomes.rework, 1);
+    assert.equal(executor?.topIssues[0]?.identifier, "#201");
   });
 
   it("computes quality gate metrics from review reports", async () => {

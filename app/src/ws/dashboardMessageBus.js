@@ -4,7 +4,7 @@ import {
   dispatchServicesSnapshot,
 } from "../hooks/useServices.js";
 import { dispatchIssueLog } from "../hooks/useIssueLog.js";
-import { dispatchMeshEntry, dispatchMeshSnapshot } from "../hooks/useMesh.js";
+import { dispatchMeshEntry, dispatchMeshEvent, dispatchMeshSnapshot } from "../hooks/useMesh.js";
 import { dispatchReverseProxySnapshot } from "../hooks/useReverseProxy.js";
 import { WS_MESSAGE_TYPES } from "./contracts.js";
 
@@ -57,6 +57,11 @@ export function registerDashboardMessageHandlers(messageBus, options) {
   unsubscribers.push(
     messageBus.on(WS_MESSAGE_TYPES.MESH_ENTRY, (payload) => {
       if (payload?.entry) dispatchMeshEntry(payload.entry);
+    }),
+  );
+  unsubscribers.push(
+    messageBus.on(WS_MESSAGE_TYPES.MESH_EVENT, (payload) => {
+      if (payload?.event) dispatchMeshEvent(payload.event);
     }),
   );
   unsubscribers.push(

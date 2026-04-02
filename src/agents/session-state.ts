@@ -30,6 +30,7 @@ export function buildAgentSessionState(
     issueId: issue.id,
     issueIdentifier: issue.identifier,
     attempt,
+    traceDir: undefined,
     status: "running",
     startedAt: createdAt,
     updatedAt: createdAt,

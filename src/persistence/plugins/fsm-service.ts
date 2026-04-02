@@ -16,7 +16,7 @@ import { now } from "../../concerns/helpers.ts";
 import type { ServiceEntry, ServiceState, ServiceStatus } from "../../types.ts";
 import { buildServiceCommand } from "../../domains/service-env.ts";
 import type { ServiceEnvironment } from "../../domains/service-env.ts";
-import { getTrafficProxyPort } from "./traffic-proxy-server.ts";
+import { getMeshRuntimePortSnapshot } from "./reverse-proxy-server.ts";
 import { buildProxyEnvVars } from "../../domains/traffic-proxy.ts";
 import { S3DB_SERVICES_RESOURCE } from "../../concerns/constants.ts";
 
@@ -150,12 +150,17 @@ function spawnProcess(
   const log = serviceLogPath(fifonyDir, entry.id);
   // Merge mesh proxy env vars if the proxy is running
   let mergedGlobalEnv = globalEnv;
-  const proxyPort = getTrafficProxyPort();
+  const proxyPort = getMeshRuntimePortSnapshot();
   if (proxyPort) {
     const dashPort = Number(process.env.FIFONY_PORT ?? 4000);
     mergedGlobalEnv = { ...(globalEnv ?? {}), ...buildProxyEnvVars(proxyPort, entry.id, dashPort) };
   }
-  const command = buildServiceCommand(entry.command, mergedGlobalEnv, entry.env);
+  const enforcedEnv: ServiceEnvironment = entry.port
+    ? {
+      PORT: String(entry.port),
+    }
+    : {};
+  const command = buildServiceCommand(entry.command, mergedGlobalEnv, entry.env, enforcedEnv);
   // Truncate log on each start so the viewer shows a clean session
   try { writeFileSync(log, ""); } catch {}
   // Use fd inheritance — OS redirects child stdout/stderr to file.
@@ -299,6 +304,7 @@ type ServiceRuntimeContext = {
   targetRoot: string;
   getEntries: () => ServiceEntry[];
   getGlobalEnv: () => ServiceEnvironment;
+  getServiceEnv?: (serviceId: string) => ServiceEnvironment;
   onTransition?: (t: ServiceTransition) => void;
 };
 
@@ -352,7 +358,11 @@ export async function sendServiceEvent(
     }
     if (!entry) throw new Error(`Service entry not found: ${entityId}`);
     const globalEnv = getGlobalEnv() ?? {};
-    const spawned = spawnProcess(entry, targetRoot, fifonyDir, globalEnv);
+    const serviceVaulterEnv = serviceRuntime.getServiceEnv?.(entityId) ?? {};
+    const effectiveEntry = Object.keys(serviceVaulterEnv).length > 0
+      ? { ...entry, env: { ...serviceVaulterEnv, ...(entry.env ?? {}) } }
+      : entry;
+    const spawned = spawnProcess(effectiveEntry, targetRoot, fifonyDir, globalEnv);
     writePidInfo(fifonyDir, entityId, {
       pid: spawned.pid,
       command: spawned.command,
@@ -360,7 +370,13 @@ export async function sendServiceEvent(
       state: "starting",
       crashCount: 0,
     });
-    const transition = { id: entityId, from: "stopped", to: "starting" as ServiceState, reason: "manual start", pid: spawned.pid };
+    const transition: ServiceTransition = {
+      id: entityId,
+      from: "stopped",
+      to: "starting",
+      reason: "manual start",
+      pid: spawned.pid,
+    };
     onTransition?.(transition);
     logger.info({ id: entityId, pid: spawned.pid }, "[ServiceFSM] START → starting");
     return { pid: spawned.pid, state: "starting" };
@@ -561,6 +577,10 @@ export const serviceStateMachineConfig = {
 
       const { fifonyDir, targetRoot } = serviceRuntime;
       const globalEnv = serviceRuntime.getGlobalEnv();
+      const serviceVaulterEnv = serviceRuntime.getServiceEnv?.(entry.id) ?? {};
+      const effectiveEntry = Object.keys(serviceVaulterEnv).length > 0
+        ? { ...entry, env: { ...serviceVaulterEnv, ...(entry.env ?? {}) } }
+        : entry;
 
       // Kill existing process if any (idempotent)
       const existing = readPidInfo(fifonyDir, entry.id);
@@ -569,7 +589,7 @@ export const serviceStateMachineConfig = {
         try { process.kill(existing.pid, "SIGKILL"); } catch {}
       }
 
-      const spawned = spawnProcess(entry, targetRoot, fifonyDir, globalEnv);
+      const spawned = spawnProcess(effectiveEntry, targetRoot, fifonyDir, globalEnv);
 
       // Determine crash count: manual START resets, AUTO_RESTART preserves
       const isAutoRestart = _event === "AUTO_RESTART";
@@ -796,7 +816,7 @@ function tickOne(
     case "stopping": {
       if (!alive) {
         removePidInfo(fifonyDir, entry.id);
-        return { id: entry.id, from: "stopping", to: "stopped", reason: "process exited" };
+        return { id: entry.id, from: "stopping", to: "stopped", reason: "process exited", pid: null };
       }
       const stoppingAgeMs = info.stoppingAt ? nowMs - Date.parse(info.stoppingAt) : STOPPING_KILL_MS + 1;
       if (stoppingAgeMs >= STOPPING_KILL_MS) {
@@ -853,5 +873,3 @@ export function initServiceWatcher(
   }, SERVICE_WATCHER_INTERVAL_MS);
   return { stop: () => clearInterval(id) };
 }
-
-

@@ -21,7 +21,7 @@ import type {
   RuntimeState,
   WorkflowConfig,
 } from "../../types.ts";
-import { SOURCE_ROOT, STATE_ROOT, TARGET_ROOT, TERMINAL_STATES, WORKSPACE_ROOT, DEFAULT_MAX_REVIEW_AUTO_RETRIES, DEFAULT_MAX_TURNS, DEFAULT_MAX_TURNS_BY_MODE, DEFAULT_AUTO_REPLAN_STALL_THRESHOLD, DEFAULT_MAX_CONTEXT_RESETS } from "../../concerns/constants.ts";
+import { SOURCE_ROOT, STATE_ROOT, TARGET_ROOT, TERMINAL_STATES, WORKSPACE_ROOT, DEFAULT_MAX_REVIEW_AUTO_RETRIES, DEFAULT_MAX_TURNS, DEFAULT_MAX_TURNS_BY_MODE, DEFAULT_MAX_CONTEXT_RESETS } from "../../concerns/constants.ts";
 import { now, idToSafePath } from "../../concerns/helpers.ts";
 import { logger } from "../../concerns/logger.ts";
 import { markIssueDirty } from "../dirty-tracker.ts";
@@ -52,7 +52,6 @@ import {
   sendIssueToManualDecisionCommand,
   startIssueReviewCommand,
 } from "../../commands/agent-issue-outcomes.command.ts";
-import { extractFailureInsights } from "../../agents/failure-analyzer.ts";
 import { readAgentPid, isProcessAlive } from "../../agents/pid-manager.ts";
 import {
   findRecurringBlockingFailures,
@@ -757,35 +756,6 @@ async function finalizeReviewSuccess(
   await approveIssueAfterReviewCommand(issue, completionNote, container);
 }
 
-const FRONTEND_EXTS = [".jsx", ".tsx", ".css", ".vue", ".svelte"];
-
-function hasFrontendChanges(issue: IssueEntry, diffSummary: string): boolean {
-  if (issue.paths?.some((p) => FRONTEND_EXTS.some((ext) => p.endsWith(ext)))) return true;
-  if (FRONTEND_EXTS.some((ext) => diffSummary.includes(ext))) return true;
-  return false;
-}
-
-function ensurePlaywrightMcpConfig(stateRoot: string): string | null {
-  try {
-    execSync("npx --yes @playwright/mcp@latest --version 2>/dev/null", { stdio: "pipe", timeout: 5_000 });
-  } catch {
-    return null;
-  }
-  const configPath = join(stateRoot, "playwright-mcp.json");
-  if (!existsSync(configPath)) {
-    try {
-      writeFileSync(configPath, JSON.stringify({
-        mcpServers: {
-          playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
-        },
-      }, null, 2), "utf8");
-    } catch {
-      return null;
-    }
-  }
-  return configPath;
-}
-
 type ReviewEvaluation = {
   reviewer: AgentProviderDefinition;
   reviewResult: AgentSessionResult;
@@ -994,11 +964,8 @@ async function runScopedReviewEvaluation(
     : BLUEPRINT_EXECUTION_NODE_IDS.finalReview;
 
   const diffSummary = computeDiffSummary(issue, workspacePath);
-  const playwrightConfigPath = (state.config.enablePlaywrightReview && hasFrontendChanges(issue, diffSummary))
-    ? ensurePlaywrightMcpConfig(STATE_ROOT)
-    : null;
 
-  const compiled = await compileReview(issue, reviewer, workspacePath, diffSummary, state.config, playwrightConfigPath ?? undefined, scope);
+  const compiled = await compileReview(issue, reviewer, workspacePath, diffSummary, state.config, scope);
   issue.reviewProfile = compiled.meta.reviewProfile;
   markIssueDirty(issue.id);
   const effectiveReviewer = { ...reviewer, command: compiled.command || reviewer.command };
@@ -1036,7 +1003,6 @@ async function runScopedReviewEvaluation(
             reasoningEffort: effectiveReviewer.reasoningEffort,
           },
           diffSummary,
-          playwrightConfigPath,
         },
       ),
     ];
@@ -1590,29 +1556,6 @@ async function runExecuteOnce(
     issue.lastFailedPhase = "execute";
     issue.attempts += 1;
 
-    // Stall detection: if the same error type repeats N times, auto-replan to break the loop
-    if (state.config.autoReplanOnStall && issue.attempts < issue.maxAttempts) {
-      const stallThreshold = state.config.autoReplanStallThreshold ?? DEFAULT_AUTO_REPLAN_STALL_THRESHOLD;
-      const currentInsight = extractFailureInsights(runResult.output ?? "", runResult.code);
-      const prev = issue.previousAttemptSummaries ?? [];
-      const recentTypes = prev.slice(-(stallThreshold - 1)).map((s) => s.insight?.errorType);
-      const stallDetected =
-        recentTypes.length >= stallThreshold - 1 &&
-        currentInsight.errorType !== "unknown" &&
-        recentTypes.every((t) => t === currentInsight.errorType);
-
-      if (stallDetected && (issue.planVersion ?? 1) < 4) {
-        logger.warn({ issueId: issue.id, errorType: currentInsight.errorType, planVersion: issue.planVersion },
-          "[AgentFSM] Stall detected — triggering auto-replan");
-        container.eventStore.addEvent(issue.id, "runner",
-          `Auto-replan: "${currentInsight.errorType}" repeated ${stallThreshold}× — replanning to break the loop.`);
-        // BFS finds path: Running → Blocked → Planning
-        const { replanIssueCommand } = await import("../../commands/replan-issue.command.ts");
-        await replanIssueCommand({ issue }, container);
-        return;
-      }
-    }
-
     if (issue.attempts >= issue.maxAttempts) {
       issue.commandExitCode = runResult.code;
       await blockIssueForRetryCommand(issue, `Execution failed — max attempts reached (${issue.attempts}/${issue.maxAttempts}). Manual intervention required.`, container);
@@ -1675,16 +1618,6 @@ export async function runReviewPhase(
     _startReviewLog(issue.id, workspacePath);
 
     const reviewer = getReviewProvider(state, issue, workflowConfig);
-
-    // Warn if Playwright review is enabled but no service is configured
-    if (state.config.enablePlaywrightReview && hasFrontendChanges(issue, "")) {
-      const services = state.config.services ?? [];
-      if (services.length === 0) {
-        container.eventStore.addEvent(issue.id, "info",
-          `Playwright review is enabled but no services are configured. ` +
-          `Go to Settings → Services and add one so the reviewer can navigate to localhost:5173.`);
-      }
-    }
 
     if (requiresCheckpointReview(issue)) {
       issue.lastError = "Contractual checkpoint review must pass before final review can start.";

@@ -1,6 +1,9 @@
 /**
- * Service log broadcaster — watches log files via fs.watch and pushes new
- * chunks to connected WebSocket clients.  Zero polling; driven by inotify.
+ * Service log broadcaster — pushes new log chunks to connected WebSocket clients.
+ *
+ * Primary: fs.watch (inotify on Linux) for zero-latency delivery.
+ * Fallback: 500ms polling to catch events fs.watch misses silently on some
+ * filesystems / kernel versions / Docker bind mounts.
  */
 
 import {
@@ -17,8 +20,9 @@ import { serviceLogPath } from "./fsm-service.ts";
 import { logger } from "../../concerns/logger.ts";
 
 const MAX_CHUNK_BYTES = 16_384;
+const POLL_INTERVAL_MS = 500;
 
-type Entry = { watcher: FSWatcher; position: number };
+type Entry = { stop: () => void; position: number };
 
 const active = new Map<string, Entry>();
 
@@ -54,7 +58,7 @@ export function startServiceLogBroadcasting(id: string, fifonyDir: string): void
     initialPosition = 0;
   }
 
-  const entry: Entry = { watcher: null!, position: initialPosition };
+  const entry: Entry = { stop: () => {}, position: initialPosition };
 
   const flush = () => {
     try {
@@ -68,23 +72,34 @@ export function startServiceLogBroadcasting(id: string, fifonyDir: string): void
     sendToServiceLogRoom(id, JSON.stringify({ type: "service:log", id, chunk: result.chunk }));
   };
 
+  // Primary: fs.watch for zero-latency delivery (inotify on Linux)
+  let watcher: FSWatcher | null = null;
   try {
-    const watcher = watch(logPath, { persistent: false }, flush);
-    watcher.on("error", () => active.delete(id));
-    entry.watcher = watcher;
-    active.set(id, entry);
-    logger.debug({ id }, "[ServiceLogBroadcaster] Started");
-    // Flush immediately to catch bytes written before watcher was registered
-    flush();
-  } catch (err) {
-    logger.debug({ err, id }, "[ServiceLogBroadcaster] Could not watch log file");
+    watcher = watch(logPath, { persistent: false }, flush);
+    watcher.on("error", () => { watcher = null; });
+  } catch {
+    // fs.watch unavailable — polling will cover it
   }
+
+  // Fallback: 500ms poll to catch events fs.watch misses silently
+  const pollTimer = setInterval(flush, POLL_INTERVAL_MS);
+
+  entry.stop = () => {
+    if (watcher) try { watcher.close(); } catch {}
+    clearInterval(pollTimer);
+  };
+
+  active.set(id, entry);
+  logger.debug({ id }, "[ServiceLogBroadcaster] Started");
+
+  // Flush immediately to catch bytes written before watcher was registered
+  flush();
 }
 
 export function stopServiceLogBroadcasting(id: string): void {
   const entry = active.get(id);
   if (!entry) return;
-  try { entry.watcher.close(); } catch {}
+  entry.stop();
   active.delete(id);
 }
 

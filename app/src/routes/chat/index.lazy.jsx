@@ -9,7 +9,6 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowDown,
-  Sparkles,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import Markdown from "react-markdown";
@@ -126,6 +125,63 @@ function renderContent(text) {
   return <Markdown components={MD_COMPONENTS}>{text}</Markdown>;
 }
 
+// ── Reasoning mode ──────────────────────────────────────────────────────────
+
+const READ_ACTIONS = new Set(["read-file", "read-service-log"]);
+const DISPATCH_ACTIONS = new Set(["create-issue", "approve-issue", "merge-issue", "retry-issue", "replan-issue"]);
+const SERVICE_ACTIONS = new Set(["start-service", "stop-service", "restart-service"]);
+
+const RING_STYLES = {
+  direct:     null,
+  explored:   "0 0 0 2px oklch(0.62 0.21 250 / 0.65)",
+  dispatched: "0 0 0 2px oklch(0.65 0.2 145 / 0.65)",
+  operated:   "0 0 0 2px oklch(0.70 0.18 68 / 0.65)",
+  multi:      "0 0 0 2px oklch(0.62 0.22 300 / 0.65), 0 0 8px oklch(0.62 0.22 300 / 0.25)",
+};
+
+const MODE_TOOLTIP = {
+  direct:     "Fifony",
+  explored:   "Read files to answer",
+  dispatched: "Dispatched an action",
+  operated:   "Managed a service",
+  multi:      "Used multiple tools",
+};
+
+function deriveReasoningMode(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return "direct";
+  const types = actions.map((a) => a?.type ?? a?.action ?? "").filter(Boolean);
+  let hasRead = false;
+  let hasDispatch = false;
+  let hasService = false;
+  for (const t of types) {
+    if (READ_ACTIONS.has(t)) hasRead = true;
+    else if (DISPATCH_ACTIONS.has(t)) hasDispatch = true;
+    else if (SERVICE_ACTIONS.has(t)) hasService = true;
+  }
+  const count = (hasRead ? 1 : 0) + (hasDispatch ? 1 : 0) + (hasService ? 1 : 0);
+  if (count >= 2) return "multi";
+  if (hasRead) return "explored";
+  if (hasDispatch) return "dispatched";
+  if (hasService) return "operated";
+  return "direct";
+}
+
+// ── DinoAvatar ───────────────────────────────────────────────────────────────
+
+function DinoAvatar({ mode = "direct", pulsing = false }) {
+  const ringStyle = RING_STYLES[mode] ?? null;
+  const tooltip = MODE_TOOLTIP[mode] ?? "Fifony";
+  return (
+    <div
+      className={`w-8 h-8 rounded-full overflow-hidden shrink-0${pulsing ? " animate-pulse" : ""}`}
+      style={ringStyle ? { boxShadow: ringStyle } : undefined}
+      title={tooltip}
+    >
+      <img src="/dinofffaur.webp" alt="Fifony" className="w-full h-full rounded-full object-cover" />
+    </div>
+  );
+}
+
 // ── TypingDots ──────────────────────────────────────────────────────────────
 
 function TypingDots({ startedAt }) {
@@ -139,8 +195,11 @@ function TypingDots({ startedAt }) {
   }, [startedAt]);
 
   return (
-    <div className="flex items-start gap-3 chat-msg-in">
-      <div className="flex items-center gap-1.5 px-3 py-2.5 rounded-2xl rounded-tl-md bg-base-200/60">
+    <div className="chat chat-start chat-msg-in">
+      <div className="chat-image avatar">
+        <DinoAvatar mode="direct" pulsing />
+      </div>
+      <div className="chat-bubble bg-base-200/60 text-base-content flex items-center gap-1.5 py-2.5 px-3">
         <span className="typing-dot size-1.5 rounded-full bg-base-content/40" style={{ animationDelay: "0ms" }} />
         <span className="typing-dot size-1.5 rounded-full bg-base-content/40" style={{ animationDelay: "150ms" }} />
         <span className="typing-dot size-1.5 rounded-full bg-base-content/40" style={{ animationDelay: "300ms" }} />
@@ -174,30 +233,47 @@ function InlineError({ error, onRetry }) {
 
 function MessageBubble({ role, content, timestamp, actions, sessionId, showTime }) {
   const isUser = role === "user";
+  const mode = isUser ? null : deriveReasoningMode(actions);
+
+  if (isUser) {
+    return (
+      <div className="chat chat-end chat-msg-out">
+        <div
+          className="chat-bubble bg-primary text-primary-content text-sm leading-relaxed"
+          style={{ wordBreak: "break-word" }}
+        >
+          {content}
+        </div>
+        {showTime && timestamp && (
+          <div className="chat-footer opacity-40 text-[10px] select-none">
+            {relativeTime(timestamp)}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} gap-0.5 ${isUser ? "chat-msg-out" : "chat-msg-in"}`}>
-      <div
-        className={`max-w-[85%] md:max-w-[70%] text-sm leading-relaxed px-3.5 py-2.5 ${
-          isUser
-            ? "bg-primary text-primary-content rounded-2xl rounded-br-md"
-            : "bg-base-200/60 text-base-content rounded-2xl rounded-tl-md"
-        }`}
-        style={{ wordBreak: "break-word" }}
-      >
-        {isUser ? content : renderContent(content)}
+    <div className="flex flex-col gap-1 items-start chat-msg-in">
+      <div className="chat chat-start w-full">
+        <div className="chat-image avatar">
+          <DinoAvatar mode={mode} />
+        </div>
+        <div className="chat-bubble bg-base-200/60 text-base-content text-sm leading-relaxed" style={{ wordBreak: "break-word" }}>
+          {renderContent(content)}
+        </div>
+        {showTime && timestamp && (
+          <div className="chat-footer opacity-40 text-[10px] select-none">
+            {relativeTime(timestamp)}
+          </div>
+        )}
       </div>
-      {!isUser && Array.isArray(actions) && actions.length > 0 && (
-        <div className="flex flex-col gap-2 mt-1.5 max-w-[85%] md:max-w-[70%]">
+      {Array.isArray(actions) && actions.length > 0 && (
+        <div className="flex flex-col gap-2 pl-10">
           {actions.map((action, i) => (
             <ChatActionCard key={i} action={action} sessionId={sessionId} />
           ))}
         </div>
-      )}
-      {showTime && timestamp && (
-        <span className="text-[10px] text-base-content/25 px-1 mt-0.5 select-none">
-          {relativeTime(timestamp)}
-        </span>
       )}
     </div>
   );
@@ -750,25 +826,6 @@ function ChatPage() {
             issueCount={issues.length}
           />
 
-          {/* Desktop: sidebar toggle + header */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 border-b border-base-300/50 shrink-0 bg-base-100">
-            <button
-              className="btn btn-ghost btn-xs btn-square opacity-30 hover:opacity-70"
-              onClick={() => setSidebarOpen((v) => !v)}
-              aria-label="Toggle sidebar"
-            >
-              {sidebarOpen ? <ChevronRight className="size-3.5 rotate-180" /> : <ChevronRight className="size-3.5" />}
-            </button>
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <Sparkles className="size-3 text-primary/40" />
-              <span className="text-xs font-medium text-base-content/50">Spark Chat</span>
-            </div>
-            {provider && (
-              <span className="text-[10px] font-mono text-base-content/20 shrink-0">
-                via {provider}
-              </span>
-            )}
-          </div>
 
           {/* Mobile issues tab content */}
           {mobileTab === "issues" && (
@@ -863,11 +920,21 @@ function ChatPage() {
                   </button>
                 </div>
                 <div className="flex items-center justify-between mt-1.5 px-1">
-                  <span className="text-[10px] text-base-content/15">
-                    Enter to send, Shift+Enter for newline
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="hidden md:flex btn btn-ghost btn-xs btn-square size-4 opacity-20 hover:opacity-50 p-0"
+                      onClick={() => setSidebarOpen((v) => !v)}
+                      aria-label="Toggle sidebar"
+                      title="Toggle issues sidebar"
+                    >
+                      {sidebarOpen ? <ChevronRight className="size-3 rotate-180" /> : <ChevronRight className="size-3" />}
+                    </button>
+                    <span className="text-[10px] text-base-content/15">
+                      Enter to send · Shift+Enter for newline
+                    </span>
+                  </div>
                   {provider && (
-                    <span className="text-[10px] text-base-content/15 md:hidden">
+                    <span className="text-[10px] text-base-content/15">
                       via {provider}
                     </span>
                   )}

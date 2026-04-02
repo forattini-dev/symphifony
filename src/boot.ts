@@ -4,7 +4,8 @@ import { env, exit, argv } from "node:process";
 import { CLI_ARGS, STATE_ROOT, TARGET_ROOT } from "./concerns/constants.ts";
 import { debugBoot, fail, now, parseIntArg } from "./concerns/helpers.ts";
 import { initLogger, logger } from "./concerns/logger.ts";
-import { initStateStore, loadPersistedState, persistState, persistStateFull, closeStateStore, loadPersistedServices, loadPersistedMilestones, loadLegacyPersistedServices, replaceAllServices, loadPersistedVariables, upsertPersistedVariable } from "./persistence/store.ts";
+import { initStateStore, loadPersistedState, persistState, persistStateFull, closeStateStore, loadPersistedServices, loadPersistedMilestones, loadLegacyPersistedServices, replaceAllServices } from "./persistence/store.ts";
+import { initVaulterClient, loadAllFromVaulter, upsertVariableInVaulter } from "./persistence/vaulter.ts";
 import { initQueueWorkers, stopQueueWorkers, recoverState, recoverOrphans, cleanTerminalWorkspaces } from "./persistence/plugins/queue-workers.ts";
 import { createContainer } from "./persistence/container.ts";
 import {
@@ -39,19 +40,11 @@ import {
 } from "./domains/agents.ts";
 import { broadcastToWebSocketClients } from "./routes/websocket.ts";
 import {
-  startTrafficProxy,
-  stopTrafficProxy,
-  setServicesAccessor,
-} from "./persistence/plugins/traffic-proxy-server.ts";
-import {
+  applyNetworkRuntimeConfig,
+  getMeshRuntimeSnapshotStatus,
   getReverseProxyRuntimeSnapshotStatus,
-  startReverseProxyRuntime,
-  stopReverseProxyRuntime,
 } from "./persistence/plugins/reverse-proxy-server.ts";
 import {
-  sendToMeshRoom,
-  notifyMeshSnapshot,
-  meshRoomHasSubscribers,
 } from "./routes/websocket.ts";
 import {
   startServiceLogBroadcasting,
@@ -60,20 +53,6 @@ import {
 import { hydrate as hydrateTokenLedger } from "./domains/tokens.ts";
 import { join } from "node:path";
 import type { RuntimeState } from "./types.ts";
-
-const MESH_WS_SNAPSHOT_DEBOUNCE_MS = 500;
-let bootMeshSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleBootMeshSnapshot() {
-  if (!meshRoomHasSubscribers()) return;
-  if (bootMeshSnapshotTimer) return;
-
-  bootMeshSnapshotTimer = setTimeout(() => {
-    bootMeshSnapshotTimer = null;
-    if (!meshRoomHasSubscribers()) return;
-    notifyMeshSnapshot();
-  }, MESH_WS_SNAPSHOT_DEBOUNCE_MS);
-}
 
 function parsePort(args: string[]): number | undefined {
   for (let i = 0; i < args.length; i += 1) {
@@ -167,6 +146,10 @@ async function main() {
   logger.info("[Boot] State store initialized");
   debugBoot("main:store-initialized");
 
+  await initVaulterClient();
+  logger.debug("[Boot] Vaulter client initialized");
+  debugBoot("main:vaulter-initialized");
+
   // ── Early API start: dashboard available while boot continues ─────────────
   // Build a minimal placeholder state for the early API server
   const earlyState: RuntimeState = {
@@ -224,7 +207,7 @@ async function main() {
     loadPersistedServices(),
     loadLegacyPersistedServices(),
     loadPersistedMilestones(),
-    loadPersistedVariables(),
+    loadAllFromVaulter(),
     persistDetectedProvidersSetting(detectedProviders),
     recoverPlanningSession(),
   ]);
@@ -263,7 +246,7 @@ async function main() {
       }
     }
     if (migrated.length > 0) {
-      await Promise.all(migrated.map((v) => upsertPersistedVariable(v)));
+      await Promise.all(migrated.map((v) => upsertVariableInVaulter(v)));
       state.variables = migrated;
       logger.info({ count: migrated.length }, "[Boot] Migrated legacy env vars to variables resource");
     }
@@ -329,6 +312,17 @@ async function main() {
     logger.warn({ err }, "[Boot] Agent state reconciliation failed — continuing");
   }
 
+  // Helpers that read live env vars from in-memory state (used by service FSM + watcher)
+  const getGlobalEnvFromVars = () =>
+    Object.fromEntries(
+      (apiState.variables ?? []).filter((v) => v.scope === "global").map((v) => [v.key, v.value])
+    );
+
+  const getServiceEnvFromVars = (serviceId: string) =>
+    Object.fromEntries(
+      (apiState.variables ?? []).filter((v) => v.scope === serviceId).map((v) => [v.key, v.value])
+    );
+
   // Services: inject runtime context, reconcile states, auto-start
   try {
     const services = state.config.services ?? [];
@@ -338,7 +332,8 @@ async function main() {
       fifonyDir: STATE_ROOT,
       targetRoot: TARGET_ROOT,
       getEntries: () => apiState.config.services ?? [],
-      getGlobalEnv: () => apiState.config.serviceEnv ?? {},
+      getGlobalEnv: getGlobalEnvFromVars,
+      getServiceEnv: getServiceEnvFromVars,
       onTransition: (t) => {
         logger.info({ id: t.id, from: t.from, to: t.to, reason: t.reason }, "[Service] FSM transition");
         broadcastToWebSocketClients({
@@ -363,13 +358,18 @@ async function main() {
     for (const status of listServiceStatuses(services, STATE_ROOT)) {
       if (status.running) startServiceLogBroadcasting(status.id, STATE_ROOT);
     }
-    if (apiState.config.reverseProxyEnabled) {
-      await startReverseProxyRuntime({
-        port: apiState.config.reverseProxyPort ?? 4433,
+    if (apiState.config.reverseProxyEnabled || apiState.config.meshEnabled) {
+      await applyNetworkRuntimeConfig({
         dashPort: Number(apiState.config.dashboardPort ?? 4000),
+        services: apiState.config.services ?? [],
         routes: apiState.config.proxyRoutes ?? [],
-        services: (apiState.config.services ?? []).map((service) => ({ id: service.id, port: service.port })),
         localDomain: apiState.config.localDomain,
+        reverseProxyEnabled: apiState.config.reverseProxyEnabled ?? false,
+        port: apiState.config.reverseProxyPort ?? 4433,
+        meshEnabled: apiState.config.meshEnabled ?? false,
+        meshPort: apiState.config.meshProxyPort ?? 0,
+        meshBufferSize: apiState.config.meshBufferSize ?? 1000,
+        meshLiveWindowSeconds: apiState.config.meshLiveWindowSeconds ?? 900,
       });
     }
     const reverseProxyRuntime = getReverseProxyRuntimeSnapshotStatus({
@@ -379,6 +379,13 @@ async function main() {
     });
     if (reverseProxyRuntime.running) {
       startServiceLogBroadcasting(reverseProxyRuntime.id, STATE_ROOT);
+    }
+    const meshRuntime = getMeshRuntimeSnapshotStatus({
+      enabled: apiState.config.meshEnabled ?? false,
+      configuredPort: apiState.config.meshProxyPort ?? 0,
+    });
+    if (meshRuntime.running) {
+      logger.info({ port: meshRuntime.port }, "[Boot] Mesh runtime already active");
     }
   } catch (err) {
     logger.warn({ err }, "[Boot] Service init failed — continuing");
@@ -403,28 +410,11 @@ async function main() {
     logger.warn({ err: error }, "[Boot] Queue workers failed to initialize — continuing without queue-based dispatch");
   }
 
-  // Start mesh traffic proxy if enabled
-  if (apiState.config.meshEnabled) {
-    try {
-      setServicesAccessor(() => listServiceStatuses(apiState.config.services ?? [], STATE_ROOT));
-      await startTrafficProxy({
-        port: apiState.config.meshProxyPort ?? 0,
-        bufferSize: apiState.config.meshBufferSize ?? 1000,
-        onEntry: (entry) => {
-          sendToMeshRoom({ type: "mesh:entry", entry });
-          scheduleBootMeshSnapshot();
-        },
-      });
-    } catch (err) {
-      logger.warn({ err }, "[Boot] Mesh traffic proxy failed to start — continuing without mesh");
-    }
-  }
-
   // Service watcher — StateMachinePlugin triggers are unreliable, keep manual watcher as primary
   const { initServiceWatcher: initWatcher } = await import("./persistence/plugins/fsm-service.ts");
   serviceWatcherRef = initWatcher(
     () => apiState.config.services ?? [],
-    () => apiState.config.serviceEnv ?? {},
+    getGlobalEnvFromVars,
     STATE_ROOT,
     TARGET_ROOT,
     (t) => {
@@ -458,22 +448,10 @@ async function main() {
     },
   );
 
-  // Stop proxies on shutdown
+  // Runtime sidecars must survive Fifony shutdown; do not stop them here.
   process.once("SIGINT", () => {
-    if (bootMeshSnapshotTimer) {
-      clearTimeout(bootMeshSnapshotTimer);
-      bootMeshSnapshotTimer = null;
-    }
-    stopTrafficProxy().catch(() => {});
-    stopReverseProxyRuntime().catch(() => {});
   });
   process.once("SIGTERM", () => {
-    if (bootMeshSnapshotTimer) {
-      clearTimeout(bootMeshSnapshotTimer);
-      bootMeshSnapshotTimer = null;
-    }
-    stopTrafficProxy().catch(() => {});
-    stopReverseProxyRuntime().catch(() => {});
   });
 
   installGracefulShutdown(state);

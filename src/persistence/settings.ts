@@ -14,7 +14,6 @@ import type { DiscoveredModel } from "../agents/providers.ts";
 import { clamp, now, toBooleanValue } from "../concerns/helpers.ts";
 import {
   DEFAULT_ADAPTIVE_POLICY_MIN_SAMPLES,
-  DEFAULT_AUTO_REPLAN_STALL_THRESHOLD,
   DEFAULT_MAX_REVIEW_AUTO_RETRIES,
 } from "../concerns/constants.ts";
 import { normalizeServiceEnvironment } from "../domains/service-env.ts";
@@ -44,9 +43,6 @@ export const SETTING_ID_AUTO_REVIEW_APPROVAL = "runtime.autoReviewApproval";
 export const SETTING_ID_DOCKER_EXECUTION = "runtime.dockerExecution";
 export const SETTING_ID_DOCKER_IMAGE = "runtime.dockerImage";
 export const SETTING_ID_MAX_REVIEW_AUTO_RETRIES = "runtime.maxReviewAutoRetries";
-export const SETTING_ID_ENABLE_PLAYWRIGHT_REVIEW = "runtime.enablePlaywrightReview";
-export const SETTING_ID_AUTO_REPLAN_ON_STALL = "runtime.autoReplanOnStall";
-export const SETTING_ID_AUTO_REPLAN_STALL_THRESHOLD = "runtime.autoReplanStallThreshold";
 export const SETTING_ID_ADAPTIVE_HARNESS_SELECTION = "runtime.adaptiveHarnessSelection";
 export const SETTING_ID_ADAPTIVE_REVIEW_ROUTING = "runtime.adaptiveReviewRouting";
 export const SETTING_ID_ADAPTIVE_POLICY_MIN_SAMPLES = "runtime.adaptivePolicyMinSamples";
@@ -54,6 +50,7 @@ export const SETTING_ID_SERVICE_ENV = "runtime.serviceEnv";
 export const SETTING_ID_MESH_ENABLED = "runtime.meshEnabled";
 export const SETTING_ID_MESH_PROXY_PORT = "runtime.meshProxyPort";
 export const SETTING_ID_MESH_BUFFER_SIZE = "runtime.meshBufferSize";
+export const SETTING_ID_MESH_LIVE_WINDOW_SECONDS = "runtime.meshLiveWindowSeconds";
 export const SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS = "runtime.autoApproveTrivialPlans";
 export const SETTING_ID_AUTO_COMMIT_BEFORE_MERGE = "runtime.autoCommitBeforeMerge";
 export const SETTING_ID_AUTO_RESOLVE_CONFLICTS = "runtime.autoResolveConflicts";
@@ -98,9 +95,6 @@ export const RUNTIME_CONFIG_SETTING_IDS = new Set<string>([
   SETTING_ID_DOCKER_EXECUTION,
   SETTING_ID_DOCKER_IMAGE,
   SETTING_ID_MAX_REVIEW_AUTO_RETRIES,
-  SETTING_ID_ENABLE_PLAYWRIGHT_REVIEW,
-  SETTING_ID_AUTO_REPLAN_ON_STALL,
-  SETTING_ID_AUTO_REPLAN_STALL_THRESHOLD,
   SETTING_ID_ADAPTIVE_HARNESS_SELECTION,
   SETTING_ID_ADAPTIVE_REVIEW_ROUTING,
   SETTING_ID_ADAPTIVE_POLICY_MIN_SAMPLES,
@@ -108,6 +102,7 @@ export const RUNTIME_CONFIG_SETTING_IDS = new Set<string>([
   SETTING_ID_MESH_ENABLED,
   SETTING_ID_MESH_PROXY_PORT,
   SETTING_ID_MESH_BUFFER_SIZE,
+  SETTING_ID_MESH_LIVE_WINDOW_SECONDS,
   SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS,
   SETTING_ID_AUTO_COMMIT_BEFORE_MERGE,
   SETTING_ID_AUTO_RESOLVE_CONFLICTS,
@@ -200,9 +195,6 @@ function buildRuntimeConfigSettings(
     { id: SETTING_ID_DOCKER_EXECUTION, scope: "runtime", value: config.dockerExecution, source, updatedAt },
     { id: SETTING_ID_DOCKER_IMAGE, scope: "runtime", value: config.dockerImage, source, updatedAt },
     { id: SETTING_ID_MAX_REVIEW_AUTO_RETRIES, scope: "runtime", value: config.maxReviewAutoRetries ?? DEFAULT_MAX_REVIEW_AUTO_RETRIES, source, updatedAt },
-    { id: SETTING_ID_ENABLE_PLAYWRIGHT_REVIEW, scope: "runtime", value: config.enablePlaywrightReview ?? false, source, updatedAt },
-    { id: SETTING_ID_AUTO_REPLAN_ON_STALL, scope: "runtime", value: config.autoReplanOnStall ?? false, source, updatedAt },
-    { id: SETTING_ID_AUTO_REPLAN_STALL_THRESHOLD, scope: "runtime", value: config.autoReplanStallThreshold ?? DEFAULT_AUTO_REPLAN_STALL_THRESHOLD, source, updatedAt },
     { id: SETTING_ID_ADAPTIVE_HARNESS_SELECTION, scope: "runtime", value: config.adaptiveHarnessSelection !== false, source, updatedAt },
     { id: SETTING_ID_ADAPTIVE_REVIEW_ROUTING, scope: "runtime", value: config.adaptiveReviewRouting !== false, source, updatedAt },
     { id: SETTING_ID_ADAPTIVE_POLICY_MIN_SAMPLES, scope: "runtime", value: config.adaptivePolicyMinSamples ?? DEFAULT_ADAPTIVE_POLICY_MIN_SAMPLES, source, updatedAt },
@@ -210,6 +202,7 @@ function buildRuntimeConfigSettings(
     { id: SETTING_ID_MESH_ENABLED, scope: "runtime", value: config.meshEnabled ?? false, source, updatedAt },
     { id: SETTING_ID_MESH_PROXY_PORT, scope: "runtime", value: config.meshProxyPort ?? 0, source, updatedAt },
     { id: SETTING_ID_MESH_BUFFER_SIZE, scope: "runtime", value: config.meshBufferSize ?? 1000, source, updatedAt },
+    { id: SETTING_ID_MESH_LIVE_WINDOW_SECONDS, scope: "runtime", value: config.meshLiveWindowSeconds ?? 900, source, updatedAt },
     { id: SETTING_ID_AUTO_APPROVE_TRIVIAL_PLANS, scope: "runtime", value: config.autoApproveTrivialPlans ?? true, source, updatedAt },
     { id: SETTING_ID_AUTO_COMMIT_BEFORE_MERGE, scope: "runtime", value: config.autoCommitBeforeMerge ?? true, source, updatedAt },
     { id: SETTING_ID_AUTO_RESOLVE_CONFLICTS, scope: "runtime", value: config.autoResolveConflicts ?? false, source, updatedAt },
@@ -349,21 +342,6 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
         }
         break;
       }
-      case SETTING_ID_ENABLE_PLAYWRIGHT_REVIEW: {
-        nextConfig.enablePlaywrightReview = toBooleanValue(setting.value, false);
-        break;
-      }
-      case SETTING_ID_AUTO_REPLAN_ON_STALL: {
-        nextConfig.autoReplanOnStall = toBooleanValue(setting.value, false);
-        break;
-      }
-      case SETTING_ID_AUTO_REPLAN_STALL_THRESHOLD: {
-        const parsed = parseIntegerSetting(setting.value);
-        if (parsed !== null && parsed >= 2 && parsed <= 5) {
-          nextConfig.autoReplanStallThreshold = parsed;
-        }
-        break;
-      }
       case SETTING_ID_ADAPTIVE_HARNESS_SELECTION: {
         nextConfig.adaptiveHarnessSelection = toBooleanValue(setting.value, true);
         break;
@@ -401,6 +379,13 @@ export function applyPersistedSettings(config: RuntimeConfig, settings: RuntimeS
         const parsed = Number(setting.value);
         if (!Number.isNaN(parsed) && parsed >= 100 && parsed <= 10000) {
           nextConfig.meshBufferSize = parsed;
+        }
+        break;
+      }
+      case SETTING_ID_MESH_LIVE_WINDOW_SECONDS: {
+        const parsed = Number(setting.value);
+        if (!Number.isNaN(parsed) && parsed >= 30 && parsed <= 86400) {
+          nextConfig.meshLiveWindowSeconds = parsed;
         }
         break;
       }

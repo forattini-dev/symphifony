@@ -158,6 +158,84 @@ The Setup step blocks execution until the workspace is a git repository with at 
 
 The **Issue Detail Drawer** shows the full plan (phases and steps), the workspace diff, and a per-phase token breakdown — Plan / Execute / Review — with input and output counts per model.
 
+### Managed Services — Environment Variables
+
+Environment variables for managed services are stored via **Vaulter** (SQLite at `.fifony/secrets.db`) and injected at process startup.
+
+- **Global variables** (`Settings → Services → Global variables`) — injected into every service.
+- **Per-service variables** (`Settings → Services → <service> → Variables`) — injected only into that service and override global variables of the same key.
+
+Variables are applied on the **next start or restart** of the service — a process already running does not receive changes automatically.
+
+The injection order (last wins):
+```
+global vars  →  per-service vars  →  PORT (enforced, always wins)
+```
+
+### Managed Services Port Contract
+
+Managed services started by fifony must bind to the `PORT` environment variable.
+
+- If you configure a service port manually, fifony injects that value as `PORT`.
+- If you leave the port empty, fifony assigns a free local port above `12000`, persists it, and injects it as `PORT` on startup.
+- Reverse proxy routing by service and mesh topology resolution both depend on each managed service having a resolvable port.
+
+### Reverse Proxy — Local HTTPS Setup (Linux)
+
+fifony includes a built-in HTTPS reverse proxy for routing `.local` domains (e.g. `https://admin.tetis.local`) to managed services. Two one-time host setup steps are required:
+
+**1. Allow binding to port 443 without root**
+
+By default, Linux only allows root processes to bind to ports below 1024. Lower the limit permanently:
+
+```bash
+echo "net.ipv4.ip_unprivileged_port_start=443" | sudo tee /etc/sysctl.d/99-local-dev.conf
+sudo sysctl -p /etc/sysctl.d/99-local-dev.conf
+```
+
+Then set the HTTPS Port to `443` in **Settings → Services**.
+
+**2. Trust the local CA certificate**
+
+fifony generates a self-signed CA at `.fifony/tls/ca.pem` on first run. Install it so the browser accepts the certificates:
+
+```bash
+# System-wide (curl, etc.)
+sudo cp .fifony/tls/ca.pem /usr/local/share/ca-certificates/fifony-ca.crt
+sudo update-ca-certificates
+
+# Chrome / Chromium on Linux (NSS)
+certutil -d sql:$HOME/.pki/nssdb -A -t "CT,," -n "fifony Local CA" -i .fifony/tls/ca.pem
+```
+
+Restart Chrome after running `certutil`. After both steps, `.local` domains resolve and display the green padlock with no warnings.
+
+**macOS**
+
+Port 443 requires a `pf` redirect (no sysctl equivalent on macOS). Create `/etc/pf.anchors/fifony`:
+
+```
+rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port 4433
+```
+
+Load it (survives reboots when added to `/etc/pf.conf`):
+
+```bash
+# One-time load
+echo "rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port 4433" | sudo pfctl -ef -
+
+# Permanent — add to /etc/pf.conf then:
+sudo pfctl -f /etc/pf.conf
+```
+
+Trust the CA via Keychain (Chrome uses the system keychain on macOS — no certutil needed):
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  .fifony/tls/ca.pem
+```
+
 <div align="center">
 <img src="docs/ss-04.webp" alt="Agents cockpit" width="720" />
 <br><sub>Agents cockpit — live output, worker slots, token usage</sub>

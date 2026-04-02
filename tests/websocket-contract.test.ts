@@ -9,6 +9,8 @@ describe("websocket contract", () => {
     wsModule.resetWsTelemetry();
     wsModule.wsClients.clear();
     wsModule.setServicesSnapshotProvider(() => null);
+    wsModule.setMeshSnapshotProvider(() => null);
+    wsModule.setReverseProxySnapshotProvider(() => null);
     wsModule.makeWebSocketConfig({
       issues: [],
       events: [],
@@ -120,8 +122,16 @@ describe("websocket contract", () => {
   it("sends services snapshot on connection when provider exists", () => {
     const socketId = "sock-services-connection";
     const sent = [];
-    wsModule.setServicesSnapshotProvider(() => ({ services: [{ id: "svc-1", name: "api", running: true }] }));
+    wsModule.setServicesSnapshotProvider(() => ({
+      services: [{ id: "svc-1", name: "api", running: true }],
+      runtimeServices: [{ id: "reverse-proxy", name: "HTTPS Reverse Proxy", running: true }],
+    }));
     wsModule.setMeshSnapshotProvider(() => ({ graph: {}, nativeGraph: {}, traffic: [] }));
+    wsModule.setReverseProxySnapshotProvider(() => ({
+      running: true,
+      stats: { requests: 12 },
+      snapshot: { routes: [{ id: "dashboard" }] },
+    }));
 
     const config = wsModule.makeWebSocketConfig({
       issues: [],
@@ -131,18 +141,24 @@ describe("websocket contract", () => {
 
     config.onConnection(socketId, (data) => sent.push(data));
 
-    assert.equal(sent.length, 3);
-    const servicesPayload = sent
-      .map((entry) => JSON.parse(entry))
+    assert.equal(sent.length, 4);
+    const payloads = sent.map((entry) => JSON.parse(entry));
+    const servicesPayload = payloads
       .find((payload) => payload.type === "services:snapshot");
-    const meshPayload = sent
-      .map((entry) => JSON.parse(entry))
+    const meshPayload = payloads
       .find((payload) => payload.type === "mesh:snapshot");
+    const reverseProxyPayload = payloads
+      .find((payload) => payload.type === "proxy:reverse:snapshot");
     assert.ok(servicesPayload);
     assert.ok(meshPayload);
+    assert.ok(reverseProxyPayload);
     assert.equal(servicesPayload.type, "services:snapshot");
     assert.equal(servicesPayload.seq, 0);
     assert.equal(servicesPayload.services[0]?.id, "svc-1");
+    assert.equal(servicesPayload.runtimeServices[0]?.id, "reverse-proxy");
+    assert.equal(reverseProxyPayload.running, true);
+    assert.equal(reverseProxyPayload.stats?.requests, 12);
+    assert.equal(reverseProxyPayload.snapshot?.routes[0]?.id, "dashboard");
   });
 
   it("broadcasts services snapshots to all connected clients", () => {
@@ -206,5 +222,31 @@ describe("websocket contract", () => {
     assert.equal(snapshotA2.seq - snapshotA.seq, 1);
     assert.equal(snapshotB.seq, snapshotA.seq);
     assert.equal(wsModule.meshRoomHasSubscribers(), true);
+  });
+
+  it("broadcasts mesh telemetry events to subscribed clients", () => {
+    const sent = [];
+    wsModule.handleWsClientMessage("sock-a", JSON.stringify({ type: "mesh:subscribe" }), () => {});
+    wsModule.wsClients.set("sock-a", (data) => sent.push(JSON.parse(data)));
+
+    wsModule.sendToMeshRoom({
+      type: "mesh:event",
+      event: {
+        type: "edge:update",
+        seq: 42,
+        edge: {
+          id: "svc-a\u0000svc-b\u0000http",
+          source: "svc-a",
+          target: "svc-b",
+          protocol: "http",
+        },
+      },
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.type, "mesh:event");
+    assert.equal(sent[0]?.event?.type, "edge:update");
+    assert.equal(sent[0]?.event?.seq, 42);
+    assert.equal(sent[0]?.event?.edge?.protocol, "http");
   });
 });

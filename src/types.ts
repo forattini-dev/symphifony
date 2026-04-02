@@ -569,6 +569,8 @@ export type ServiceStatus = {
   isRuntimeService?: boolean;
   runtimeServiceKind?: string;
   managedByFifonyRuntime?: boolean;
+  /** Backend-driven health probe result — populated by the server's 30s health checker */
+  health?: { healthy: boolean; latencyMs: number; checkedAt: string } | null;
 };
 
 // ── Mesh (inter-service traffic proxy) ───────────────────────────
@@ -590,6 +592,7 @@ export type TrafficEntry = {
 };
 
 export type ServiceGraphEdge = {
+  id?: string;
   source: string;
   target: string;
   requestCount: number;
@@ -603,13 +606,36 @@ export type ServiceGraphEdge = {
   p99LatencyMs: number;
   lastSeenAt: string;
   topPaths: { path: string; count: number }[];
+  bytesIn?: number;
+  bytesOut?: number;
+  activeFlows?: number;
+  flowsTotal?: number;
+  statusClassCounts?: Record<string, number>;
+  methodCounts?: Record<string, number>;
 };
 
 export type ServiceGraph = {
-  nodes: { id: string; name: string; state: string; port?: number }[];
+  nodes: {
+    id: string;
+    name: string;
+    state: string;
+    port?: number;
+    requestsIn?: number;
+    requestsOut?: number;
+    errorsIn?: number;
+    errorsOut?: number;
+    bytesIn?: number;
+    bytesOut?: number;
+    activeFlows?: number;
+    protocols?: Record<string, number>;
+    lastSeenAt?: string;
+  }[];
   edges: ServiceGraphEdge[];
   capturedSince: string;
   totalRequests: number;
+  windowStart?: string;
+  windowEnd?: string;
+  seq?: number;
 };
 
 export type RuntimeConfig = {
@@ -652,12 +678,6 @@ export type RuntimeConfig = {
   serviceEnv?: Record<string, string>;
   /** Maximum automated review→requeue cycles before escalating to human. Default: 2 */
   maxReviewAutoRetries?: number;
-  /** When true, reviewer gets Playwright MCP access for UI verification (requires @playwright/mcp) */
-  enablePlaywrightReview?: boolean;
-  /** When true, auto-replan when the same error type repeats N times in a row (default: false) */
-  autoReplanOnStall?: boolean;
-  /** How many same-error attempts trigger auto-replan (default: 2) */
-  autoReplanStallThreshold?: number;
   /** Agent output style: 'concise' (default) keeps responses short, 'verbose' adds reasoning and context. */
   agentOutputStyle?: "concise" | "verbose";
   /** Maximum parallel sub-tasks per issue (default: 3, max: 5). */
@@ -678,6 +698,8 @@ export type RuntimeConfig = {
   meshProxyPort?: number;
   /** Max traffic entries kept in the in-memory ring buffer. Default: 1000 */
   meshBufferSize?: number;
+  /** Sliding live window for mesh edge retention in seconds. Default: 900. */
+  meshLiveWindowSeconds?: number;
   /** When true, plans with trivial/low complexity auto-approve and skip PendingApproval. Default: true */
   autoApproveTrivialPlans?: boolean;
   /** Auto-commit dirty TARGET_ROOT before merge/preview so merges aren't blocked. Default: true */
@@ -698,8 +720,8 @@ export type RuntimeConfig = {
 
 export interface ProxyRoute {
   id: string;
-  /** Host to match, e.g. "app.tetis.local" or "*.tetis.local" */
-  host?: string;
+  /** Host to match. Single string or array for multi-host routes, e.g. ["app.tetis.local", "www.tetis.local"] */
+  host?: string | string[];
   /** Path prefix to match, e.g. "/login" */
   pathPrefix?: string;
   /** ID of a configured service — resolved to its port at proxy start */
@@ -1229,6 +1251,7 @@ export type AgentSessionState = {
   issueIdentifier: string;
   attempt: number;
   status: "running" | "done" | "blocked" | "failed";
+  traceDir?: string;
   startedAt: string;
   updatedAt: string;
   maxTurns: number;

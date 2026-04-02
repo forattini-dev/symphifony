@@ -3,7 +3,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   Server, Play, Square, Terminal, Circle, Loader2, X,
   AlertTriangle, ChevronRight, Folder, Scan, Wrench, CheckCircle2,
-  Network, Trash2, ArrowRight, Zap, RotateCcw, ShieldCheck,
+  Network, Trash2, Zap, RotateCcw, ShieldCheck,
+  Globe, ExternalLink, Copy, Check,
 } from "lucide-react";
 import {
   ReactFlow,
@@ -24,7 +25,6 @@ import { CreateIssueDrawer } from "../components/CreateIssueForm.jsx";
 import { useServices, onServiceLog, dispatchServiceLog } from "../hooks/useServices.js";
 import { useServiceLogSparkline } from "../hooks/useServiceLogSparkline.js";
 import { useMesh } from "../hooks/useMesh.js";
-import { useReverseProxy } from "../hooks/useReverseProxy.js";
 import { subscribeServiceLog, unsubscribeServiceLog } from "../hooks.js";
 import { formatDuration } from "../utils.js";
 import {
@@ -141,6 +141,7 @@ function LogViewer({ id, running, state }) {
   const [error, setError] = useState(null);
   const [pollInterval, setPollInterval] = useState(0); // 0 = auto (WS + fallback), >0 = forced poll
   const [showPollControls, setShowPollControls] = useState(false);
+  const [copied, setCopied] = useState(false);
   const logRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const html = useMemo(() => (log ? ansiToHtml(log) : ""), [log]);
@@ -214,21 +215,22 @@ function LogViewer({ id, running, state }) {
     };
   }, [id, fetchFull]);
 
-  // Auto-fallback: only poll when WS is disconnected AND service is running.
-  // When WS is live, the server pushes chunks via fs.watch — no polling needed.
-  // Quiet logs (idle service) must not be mistaken for a broken WS connection.
+  // Safety-net poll: always runs when service is running, regardless of WS state.
+  // WS push is the primary path (zero-latency). HTTP poll is the fallback:
+  // skipped if WS delivered a chunk in the last 5s to avoid redundant requests.
   useEffect(() => {
-    if (!running || !id || pollInterval > 0 || liveMode) return;
+    if (!running || !id || pollInterval > 0) return;
     const checker = setInterval(() => {
       const elapsed = lastChunkAtRef.current ? (Date.now() - lastChunkAtRef.current) / 1000 : null;
       setLastChunkAgo(elapsed);
-      fetchIncremental();
+      const wsRecentlyAlive = wsChunkCountRef.current > 0 && lastChunkAtRef.current && Date.now() - lastChunkAtRef.current < 5_000;
+      if (!wsRecentlyAlive) fetchIncremental();
       if (lastChunkAtRef.current && Date.now() - lastChunkAtRef.current > 15_000) {
         setStatus("stale");
       }
     }, 5_000);
     return () => clearInterval(checker);
-  }, [running, id, pollInterval, liveMode, fetchIncremental]);
+  }, [running, id, pollInterval, fetchIncremental]);
 
   // Explicit polling when user selects an interval
   useEffect(() => {
@@ -302,6 +304,20 @@ function LogViewer({ id, running, state }) {
           >
             ⚙
           </button>
+          {hasLog && (
+            <button
+              className="btn btn-xs btn-ghost opacity-40 hover:opacity-80 px-1.5"
+              title="Copy log"
+              onClick={() => {
+                navigator.clipboard.writeText(log).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+            </button>
+          )}
           <button
             className="btn btn-xs btn-ghost opacity-40 hover:opacity-80 px-1.5"
             onClick={fetchFull}
@@ -329,92 +345,6 @@ function LogViewer({ id, running, state }) {
             : '<span style="opacity:0.2">No output yet. Start the service to see logs here.</span>'),
         }}
       />
-    </div>
-  );
-}
-
-// ── Service Traffic Panel (for drawer) ────────────────────────────────────────
-
-function ServiceTrafficPanel({ serviceId, traffic, graph }) {
-  const entries = useMemo(() => {
-    if (!traffic?.length) return [];
-    return traffic.filter(
-      (e) => e.sourceServiceId === serviceId || e.targetServiceId === serviceId,
-    ).slice(-30);
-  }, [traffic, serviceId]);
-
-  const connections = useMemo(() => {
-    if (!graph?.edges?.length) return { inbound: [], outbound: [] };
-    const inbound = graph.edges.filter((e) => {
-      const tgt = typeof e.target === "object" ? e.target.id : e.target;
-      return tgt === serviceId;
-    });
-    const outbound = graph.edges.filter((e) => {
-      const src = typeof e.source === "object" ? e.source.id : e.source;
-      return src === serviceId;
-    });
-    return { inbound, outbound };
-  }, [graph, serviceId]);
-
-  const hasData = entries.length > 0 || connections.inbound.length > 0 || connections.outbound.length > 0;
-  if (!hasData) return null;
-
-  const statusColor = (code) => {
-    if (code < 300) return "text-success";
-    if (code < 400) return "text-warning";
-    return "text-error";
-  };
-
-  return (
-    <div className="border-t border-base-200/60 shrink-0">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-base-200/30">
-        <Network className="size-3 opacity-30" />
-        <span className="text-[10px] font-medium opacity-50 uppercase tracking-widest">Traffic</span>
-        <span className="flex-1" />
-        <span className="text-[10px] opacity-20 tabular-nums">{entries.length} requests</span>
-      </div>
-
-      {/* Connection summary */}
-      {(connections.inbound.length > 0 || connections.outbound.length > 0) && (
-        <div className="px-3 py-2 border-t border-base-200/40 flex flex-wrap gap-x-4 gap-y-1">
-          {connections.inbound.map((edge) => {
-            const src = typeof edge.source === "object" ? edge.source.id : edge.source;
-            return (
-              <div key={`in-${src}`} className="flex items-center gap-1.5 text-[10px]">
-                <ArrowRight className="size-2.5 opacity-30 rotate-180" />
-                <span className="font-mono opacity-50">{src}</span>
-                <span className="opacity-25">{edge.requestCount}req</span>
-                {edge.errorCount > 0 && <span className="text-error/70">{edge.errorCount}err</span>}
-              </div>
-            );
-          })}
-          {connections.outbound.map((edge) => {
-            const tgt = typeof edge.target === "object" ? edge.target.id : edge.target;
-            return (
-              <div key={`out-${tgt}`} className="flex items-center gap-1.5 text-[10px]">
-                <ArrowRight className="size-2.5 opacity-30" />
-                <span className="font-mono opacity-50">{tgt}</span>
-                <span className="opacity-25">{edge.requestCount}req</span>
-                {edge.errorCount > 0 && <span className="text-error/70">{edge.errorCount}err</span>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Recent requests */}
-      {entries.length > 0 && (
-        <div className="max-h-[140px] overflow-y-auto border-t border-base-200/40">
-          {entries.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-2 px-3 py-0.5 text-[10px] border-b border-base-content/[0.06] hover:bg-base-200/20">
-              <span className="font-mono opacity-40 w-8 shrink-0">{entry.method}</span>
-              <span className="font-mono opacity-35 truncate flex-1">{entry.path}</span>
-              <span className={`font-mono shrink-0 ${statusColor(entry.statusCode)}`}>{entry.statusCode}</span>
-              <span className="font-mono opacity-30 shrink-0 tabular-nums w-10 text-right">{entry.durationMs}ms</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -453,7 +383,7 @@ function DrawerSparkline({ id, running }) {
 // ── ServiceDrawerBody ──────────────────────────────────────────────────────────
 // Pure content — works both as an inline desktop pane and inside a mobile overlay.
 
-function ServiceDrawerBody({ service, onClose, onRefresh, traffic, graph }) {
+function ServiceDrawerBody({ service, onClose, onRefresh, graph, proxyRoutes, localDomain, proxyPort }) {
   const [busy, setBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectResult, setDetectResult] = useState(null); // null | { found, healthcheck } | "error"
@@ -466,6 +396,18 @@ function ServiceDrawerBody({ service, onClose, onRefresh, traffic, graph }) {
   const info = stateInfo(state);
   const canStart = state === "stopped" || state === "crashed";
   const canStop  = state === "running" || state === "starting";
+  const serviceRoutes = useMemo(
+    () => getServiceRouteEntries(service.id, proxyRoutes, localDomain, proxyPort),
+    [service.id, proxyRoutes, localDomain, proxyPort],
+  );
+  const serviceNodeMetrics = useMemo(
+    () => graph?.nodes?.find((node) => node.id === service.id) ?? null,
+    [graph, service.id],
+  );
+  const serviceNodeProtocols = useMemo(
+    () => topNodeProtocols(serviceNodeMetrics?.protocols, 3),
+    [serviceNodeMetrics],
+  );
 
   const handleStart = useCallback(async () => {
     setBusy(true);
@@ -672,8 +614,53 @@ function ServiceDrawerBody({ service, onClose, onRefresh, traffic, graph }) {
         </div>
       </div>
 
-      {/* Traffic for this service */}
-      <ServiceTrafficPanel serviceId={service.id} traffic={traffic} graph={graph} />
+      {/* Proxy routes */}
+      {serviceRoutes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 border-t border-base-200/60 shrink-0">
+          <Globe className="size-3 opacity-20 shrink-0" />
+          {serviceRoutes.map((route) =>
+            route.url ? (
+              <a
+                key={route.id}
+                href={route.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] font-mono text-primary/60 hover:text-primary transition-colors truncate"
+              >
+                {route.url}
+              </a>
+            ) : (
+              <span key={route.id} className="text-[11px] font-mono opacity-35 truncate">{route.label}</span>
+            )
+          )}
+        </div>
+      )}
+
+      {serviceNodeMetrics && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 border-t border-base-200/60 shrink-0 text-[10px] font-mono">
+          <span className="opacity-30">mesh</span>
+          <span className="opacity-50">{serviceNodeMetrics.requestsIn ?? 0} in</span>
+          <span className="opacity-50">{serviceNodeMetrics.requestsOut ?? 0} out</span>
+          {((serviceNodeMetrics.bytesIn ?? 0) > 0 || (serviceNodeMetrics.bytesOut ?? 0) > 0) && (
+            <span className="opacity-45">{formatBytes(serviceNodeMetrics.bytesIn)} in / {formatBytes(serviceNodeMetrics.bytesOut)} out</span>
+          )}
+          {(serviceNodeMetrics.errorsIn ?? 0) > 0 && (
+            <span className="text-error/80">{serviceNodeMetrics.errorsIn} err in</span>
+          )}
+          {(serviceNodeMetrics.errorsOut ?? 0) > 0 && (
+            <span className="text-error/80">{serviceNodeMetrics.errorsOut} err out</span>
+          )}
+          {(serviceNodeMetrics.activeFlows ?? 0) > 0 && (
+            <span className="opacity-50">{serviceNodeMetrics.activeFlows} active</span>
+          )}
+          {serviceNodeMetrics.lastSeenAt && (
+            <span className="opacity-35">{formatRelativeSeenAt(serviceNodeMetrics.lastSeenAt)}</span>
+          )}
+          {serviceNodeProtocols.length > 0 && (
+            <span className="opacity-35">{serviceNodeProtocols.join(" · ")}</span>
+          )}
+        </div>
+      )}
 
       {/* Log volume sparkline — running services only */}
       {service.running && <DrawerSparkline id={service.id} running={service.running} />}
@@ -695,7 +682,7 @@ function ServiceDrawerBody({ service, onClose, onRefresh, traffic, graph }) {
 
 // ── ServiceDrawer (mobile overlay) ────────────────────────────────────────────
 
-function ServiceDrawer({ service, onClose, onRefresh, traffic, graph }) {
+function ServiceDrawer({ service, onClose, onRefresh, graph, proxyRoutes, localDomain, proxyPort }) {
   const [closing, setClosing] = useState(false);
 
   const handleClose = useCallback(() => {
@@ -720,7 +707,15 @@ function ServiceDrawer({ service, onClose, onRefresh, traffic, graph }) {
         width="w-full sm:w-[500px] lg:w-[40vw] lg:min-w-[520px] xl:min-w-[600px]"
         onClick={(e) => e.stopPropagation()}
       >
-        <ServiceDrawerBody service={service} onClose={handleClose} onRefresh={onRefresh} traffic={traffic} graph={graph} />
+        <ServiceDrawerBody
+          service={service}
+          onClose={handleClose}
+          onRefresh={onRefresh}
+          graph={graph}
+          proxyRoutes={proxyRoutes}
+          localDomain={localDomain}
+          proxyPort={proxyPort}
+        />
       </DrawerPanel>
     </>
   );
@@ -733,6 +728,46 @@ function formatLogSize(bytes) {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+// ── Route URL helpers ────────────────────────────────────────────────────────────
+
+function firstHost(host) {
+  if (!host) return undefined;
+  return Array.isArray(host) ? host[0] : host;
+}
+
+function buildRouteUrl(route, localDomain, proxyPort = 4433) {
+  const host = firstHost(route.host) ?? localDomain;
+  if (!host) return route.target ?? null;
+  const path = route.pathPrefix ?? "";
+  const normalizedPort = Number(proxyPort ?? 4433);
+  const origin = normalizedPort === 443
+    ? `https://${host}`
+    : `https://${host}:${normalizedPort}`;
+  return `${origin}${path}`;
+}
+
+function routeDisplayLabel(route) {
+  if (route.host) {
+    const label = Array.isArray(route.host) ? route.host.join(", ") : route.host;
+    return label + (route.pathPrefix ?? "");
+  }
+  if (route.pathPrefix) return route.pathPrefix;
+  return route.target ?? route.id;
+}
+
+function getServiceRouteEntries(serviceId, proxyRoutes, localDomain, proxyPort = 4433) {
+  if (!serviceId) return [];
+  return (proxyRoutes ?? [])
+    .filter((route) => route.serviceId === serviceId)
+    .map((route) => ({
+      id: route.id,
+      label: routeDisplayLabel(route),
+      url: buildRouteUrl(route, localDomain, proxyPort),
+      host: firstHost(route.host) ?? localDomain ?? "",
+      pathPrefix: route.pathPrefix ?? "",
+    }));
 }
 
 // ── LogSparkline ─────────────────────────────────────────────────────────────────
@@ -780,28 +815,12 @@ function LogSparkline({ id, running }) {
 
 function ServiceCard({ service, selected, onSelect, onRefresh }) {
   const [busy, setBusy] = useState(false);
-  const [health, setHealth] = useState(null); // null | { ok, healthy, latencyMs }
   const state = service.state ?? (service.running ? "running" : "stopped");
   const info = stateInfo(state);
   const canStart = state === "stopped" || state === "crashed";
   const canStop = state === "running" || state === "starting";
-
-  // Health check — fetch on mount and every 30s for running services with a port
-  useEffect(() => {
-    if (!service.running || !service.port) { setHealth(null); return; }
-    let cancelled = false;
-    const ping = async () => {
-      try {
-        const res = await api.get(`/services/${encodeURIComponent(service.id)}/health`);
-        if (!cancelled) setHealth(res);
-      } catch {
-        if (!cancelled) setHealth(null);
-      }
-    };
-    ping();
-    const id = setInterval(ping, 30_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [service.id, service.running, service.port]);
+  // Health data comes from the backend health checker via services:snapshot WS push
+  const health = service.health ?? null;
 
   const handleAction = useCallback(async (e, action) => {
     e.stopPropagation();
@@ -836,14 +855,18 @@ function ServiceCard({ service, selected, onSelect, onRefresh }) {
     );
   })();
 
+  const accentColor = state === "running" ? "bg-success/50" : state === "starting" ? "bg-success/30 animate-pulse" : state === "crashed" ? "bg-error/50" : "bg-base-content/10";
+
   return (
     <button
       type="button"
       onClick={() => onSelect(service.id)}
-      className={`group relative text-left rounded-md border border-base-content/[0.08] bg-base-200/40 transition-all duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30
+      className={`group relative text-left rounded-md border border-base-content/[0.08] bg-base-200/40 transition-all duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 overflow-hidden
         ${selected ? "ring-1 ring-primary/30 bg-base-200/70" : "hover:bg-base-200/60"}${state === "crashed" ? " border-error/20" : ""}`}
     >
-      <div className="px-3.5 py-3">
+      {/* Left accent bar */}
+      <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${accentColor} transition-colors duration-300`} />
+      <div className="pl-3.5 pr-3 py-2.5">
         {/* Row 1: dot + name + actions */}
         <div className="flex items-center gap-2">
           <Circle className={`size-1.5 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
@@ -877,11 +900,11 @@ function ServiceCard({ service, selected, onSelect, onRefresh }) {
         </div>
 
         {/* Row 2: command */}
-        <div className="font-mono text-[11px] opacity-35 truncate mt-1.5 leading-none">{service.command}</div>
+        <div className="font-mono text-[11px] opacity-35 truncate mt-1 leading-none">{service.command}</div>
 
         {/* Row 3: stats — only for active services */}
         {(state === "running" || state === "starting" || state === "crashed") && (
-        <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] tabular-nums opacity-40 mt-2 leading-tight">
+        <div className="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap text-[11px] tabular-nums opacity-40 mt-1.5 leading-tight">
           {service.running && service.startedAt && (
             <span className="flex items-center gap-1">
               <span className="opacity-60">up</span>
@@ -916,7 +939,7 @@ function ServiceCard({ service, selected, onSelect, onRefresh }) {
 
         {/* Row 4: log volume sparkline — running services only */}
         {state === "running" && (
-          <div className="mt-2.5" title="Log volume — 5min window, 10s buckets">
+          <div className="mt-1.5" title="Log volume — 5min window, 10s buckets">
             <LogSparkline id={service.id} running={service.running} />
           </div>
         )}
@@ -926,13 +949,67 @@ function ServiceCard({ service, selected, onSelect, onRefresh }) {
   );
 }
 
-function RuntimeServiceCard({ service, onRefresh }) {
+function RuntimeServiceDrawer({ service, onClose, onRefresh }) {
+  const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [showLog, setShowLog] = useState(false);
+  const [statusData, setStatusData] = useState(null);
+  const [graphData, setGraphData] = useState(null);
   const state = service.state ?? (service.running ? "running" : "stopped");
   const info = stateInfo(state);
   const canStart = state === "stopped" || state === "crashed";
   const canStop = state === "running" || state === "starting";
+  const runtimeKind = service.runtimeServiceKind === "mesh" ? "mesh" : "proxy";
+  const runtimeLabel = runtimeKind === "mesh" ? "network runtime · mesh" : "network runtime · ingress";
+
+  const handleClose = useCallback(() => {
+    setClosing(true);
+    setTimeout(() => { setClosing(false); onClose(); }, 250);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") handleClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleClose]);
+
+  useEffect(() => {
+    const statusEndpoint = runtimeKind === "mesh" ? "/mesh/status" : "/proxy/reverse/status";
+    api.get(statusEndpoint).then(setStatusData).catch(() => {});
+    if (runtimeKind === "mesh") {
+      api.get("/mesh").then((res) => setGraphData(res?.graph ?? null)).catch(() => {});
+    }
+  }, [runtimeKind]);
+
+  // Derive rich stats from status + graph
+  const derivedStats = useMemo(() => {
+    if (!statusData) return null;
+    if (runtimeKind === "mesh") {
+      const graph = graphData;
+      const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+      const totalRequests = graph?.totalRequests ?? edges.reduce((s, e) => s + Number(e.requestCount ?? 0), 0);
+      const totalErrors = edges.reduce((s, e) => s + Number(e.errorCount ?? 0), 0);
+      const totalBytesIn = edges.reduce((s, e) => s + Number(e.bytesIn ?? 0), 0);
+      const totalBytesOut = edges.reduce((s, e) => s + Number(e.bytesOut ?? 0), 0);
+      const errorRate = totalRequests > 0 ? totalErrors / totalRequests : 0;
+      return {
+        running: statusData.running,
+        port: statusData.port,
+        totalRequests,
+        totalErrors,
+        errorRate,
+        totalBytesIn,
+        totalBytesOut,
+        activeEdges: edges.length,
+        nodeCount: Array.isArray(graph?.nodes) ? graph.nodes.length : 0,
+      };
+    }
+    return {
+      running: statusData.running,
+      port: statusData.port,
+      routeCount: statusData.routes?.length ?? 0,
+      localDomain: statusData.localDomain ?? null,
+    };
+  }, [statusData, graphData, runtimeKind]);
 
   const handleAction = useCallback(async (action) => {
     setBusy(true);
@@ -945,40 +1022,181 @@ function RuntimeServiceCard({ service, onRefresh }) {
   }, [service.id, onRefresh]);
 
   return (
-    <div className="rounded-md border border-base-content/[0.08] bg-base-200/30 overflow-hidden">
-      <div className="px-3.5 py-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className={`size-3.5 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-sm truncate">{service.name}</span>
-              <span className="badge badge-xs badge-outline opacity-60">runtime</span>
-              {service.port && <span className="text-[10px] font-mono opacity-35">:{service.port}</span>}
+    <>
+      <DrawerBackdrop onClick={handleClose} className={closing ? "animate-fade-out" : "animate-fade-in"} />
+      <DrawerPanel closing={closing} width="w-full sm:w-[560px] lg:w-[42vw] lg:min-w-[540px]" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-base-content/[0.07] shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <ShieldCheck className={`size-4 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm leading-tight truncate">{service.name}</span>
+                <span className="badge badge-xs badge-outline opacity-60">{runtimeLabel}</span>
+                {service.port && <span className="text-[10px] font-mono opacity-40">:{service.port}</span>}
+              </div>
+              {service.command && (
+                <div className="font-mono text-[11px] opacity-35 truncate mt-0.5">{service.command}</div>
+              )}
             </div>
-            <div className="font-mono text-[11px] opacity-35 truncate mt-1">{service.command}</div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => setShowLog((v) => !v)} title="Logs">
-              <Terminal className="size-3.5" />
-            </button>
-            <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => handleAction("restart")} disabled={busy} title="Restart">
-              {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
-            </button>
-            {canStop && (
-              <button className="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100" onClick={() => handleAction("stop")} disabled={busy} title="Stop">
-                {busy ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
-              </button>
-            )}
+          <div className="flex items-center gap-1 shrink-0 ml-3">
             {canStart && (
-              <button className="btn btn-xs btn-ghost text-success opacity-50 hover:opacity-100" onClick={() => handleAction("start")} disabled={busy} title="Start">
+              <button className="btn btn-xs btn-ghost text-success opacity-60 hover:opacity-100" onClick={() => handleAction("start")} disabled={busy} title="Start">
                 {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
               </button>
             )}
+            {canStop && (
+              <button className="btn btn-xs btn-ghost text-error opacity-60 hover:opacity-100" onClick={() => handleAction("stop")} disabled={busy} title="Stop">
+                {busy ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+              </button>
+            )}
+            <button className="btn btn-xs btn-ghost opacity-50 hover:opacity-90" onClick={() => handleAction("restart")} disabled={busy} title="Restart">
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+            </button>
+            <DrawerCloseButton onClick={handleClose} />
+          </div>
+        </div>
+        {/* Stats panel */}
+        {derivedStats && (
+          <div className="px-5 py-3 border-b border-base-content/[0.06] shrink-0">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className={`text-[10px] font-semibold ${derivedStats.running ? "text-success" : "opacity-25"}`}>
+                {derivedStats.running ? "running" : "stopped"}
+              </span>
+              {derivedStats.port && (
+                <span className="text-[10px] font-mono opacity-35">:{derivedStats.port}</span>
+              )}
+            </div>
+            {runtimeKind === "mesh" ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">requests</div>
+                  <div className="text-sm font-semibold font-mono tabular-nums opacity-70">
+                    {derivedStats.totalRequests > 0 ? derivedStats.totalRequests.toLocaleString() : <span className="opacity-30 text-xs">—</span>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">error rate</div>
+                  <div className={`text-sm font-semibold font-mono tabular-nums ${derivedStats.errorRate > 0.05 ? "text-error/80" : "opacity-70"}`}>
+                    {derivedStats.totalRequests > 0
+                      ? `${Math.round(derivedStats.errorRate * 100)}%`
+                      : <span className="opacity-30 text-xs">—</span>
+                    }
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">data in/out</div>
+                  <div className="text-sm font-semibold font-mono tabular-nums opacity-70">
+                    {(derivedStats.totalBytesIn + derivedStats.totalBytesOut) > 0
+                      ? formatBytes(derivedStats.totalBytesIn + derivedStats.totalBytesOut)
+                      : <span className="opacity-30 text-xs">—</span>
+                    }
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">connections</div>
+                  <div className="text-sm font-semibold font-mono tabular-nums opacity-70">
+                    {derivedStats.activeEdges > 0
+                      ? `${derivedStats.activeEdges} paths`
+                      : <span className="opacity-30 text-xs">—</span>
+                    }
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">routes</div>
+                  <div className="text-sm font-semibold font-mono tabular-nums opacity-70">
+                    {derivedStats.routeCount > 0 ? derivedStats.routeCount : <span className="opacity-30 text-xs">—</span>}
+                  </div>
+                </div>
+                {derivedStats.localDomain && (
+                  <div className="col-span-2">
+                    <div className="text-[9px] opacity-30 uppercase tracking-widest mb-0.5">domain</div>
+                    <div className="text-xs font-mono opacity-55 truncate">{derivedStats.localDomain}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {/* Log area — fills remaining height */}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <LogViewer id={service.id} running={service.running} state={state} />
+        </div>
+      </DrawerPanel>
+    </>
+  );
+}
+
+function RuntimeServiceCard({ service, onRefresh }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const state = service.state ?? (service.running ? "running" : "stopped");
+  const info = stateInfo(state);
+  const canStart = state === "stopped" || state === "crashed";
+  const canStop = state === "running" || state === "starting";
+  const runtimeKind = service.runtimeServiceKind === "mesh" ? "mesh" : "proxy";
+  const runtimeLabel = runtimeKind === "mesh" ? "network runtime · mesh" : "network runtime · ingress";
+
+  const handleAction = useCallback(async (action) => {
+    setBusy(true);
+    try {
+      await api.post(`/services/${service.id}/${action}`, {});
+      setTimeout(() => onRefresh?.(), 300);
+    } finally {
+      setBusy(false);
+    }
+  }, [service.id, onRefresh]);
+
+  const runtimeAccent = state === "running" ? "bg-primary/40" : state === "starting" ? "bg-primary/20 animate-pulse" : "bg-base-content/10";
+
+  return (
+    <>
+      <div className="rounded-md border border-base-content/[0.08] bg-base-200/30 overflow-hidden relative">
+        <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${runtimeAccent} transition-colors duration-300`} />
+        <div className="pl-3.5 pr-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className={`size-3.5 shrink-0 ${info.dot}${info.spinning ? " animate-pulse" : ""}`} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-sm truncate">{service.name}</span>
+                <span className="badge badge-xs badge-outline opacity-60">{runtimeLabel}</span>
+                {service.port && <span className="text-[10px] font-mono opacity-35">:{service.port}</span>}
+              </div>
+              <div className="font-mono text-[11px] opacity-35 truncate mt-1">{service.command}</div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => setDrawerOpen(true)} title="Logs">
+                <Terminal className="size-3.5" />
+              </button>
+              <button className="btn btn-xs btn-ghost opacity-45 hover:opacity-90" onClick={() => handleAction("restart")} disabled={busy} title="Restart">
+                {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+              </button>
+              {canStop && (
+                <button className="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100" onClick={() => handleAction("stop")} disabled={busy} title="Stop">
+                  {busy ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                </button>
+              )}
+              {canStart && (
+                <button className="btn btn-xs btn-ghost text-success opacity-50 hover:opacity-100" onClick={() => handleAction("start")} disabled={busy} title="Start">
+                  {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-      {showLog && <div className="h-72 border-t border-base-content/[0.06]"><LogViewer id={service.id} running={service.running} state={state} /></div>}
-    </div>
+      {drawerOpen && (
+        <RuntimeServiceDrawer
+          service={service}
+          onClose={() => setDrawerOpen(false)}
+          onRefresh={onRefresh}
+        />
+      )}
+    </>
   );
 }
 
@@ -1033,27 +1251,157 @@ function formatProtocol(value) {
   return String(value).toUpperCase();
 }
 
-function ServiceNode({ data, style }) {
-  const color = stateColor(data.state);
-  const nodeStyle = {
-    ...style,
-    borderColor: errorRateColor(data.errorRate),
-    borderWidth: `${1 + (data.errorRate ?? 0) * 2}px`,
-    borderStyle: "solid",
-  };
+function formatMeshWindow(windowStart, windowEnd) {
+  if (!windowStart || !windowEnd) return null;
+  const start = Date.parse(windowStart);
+  const end = Date.parse(windowEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  const durationMs = Math.max(0, end - start);
+  if (durationMs < 1_000) return "<1s window";
+  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s window`;
+  const minutes = durationMs / 60_000;
+  if (minutes < 10) return `${minutes.toFixed(1)}m window`;
+  return `${Math.round(minutes)}m window`;
+}
+
+function formatConfiguredMeshWindow(seconds) {
+  const value = Number(seconds ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value < 60) return `${value}s target`;
+  const minutes = value / 60;
+  if (minutes < 10) return `${minutes.toFixed(1)}m target`;
+  return `${Math.round(minutes)}m target`;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0B";
+  if (bytes < 1024) return `${Math.round(bytes)}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function formatRelativeSeenAt(value, nowTs = Date.now()) {
+  const seenAt = Date.parse(value ?? "");
+  if (!Number.isFinite(seenAt)) return null;
+  const ageMs = Math.max(0, nowTs - seenAt);
+  if (ageMs < 1_000) return "just now";
+  if (ageMs < 60_000) return `${Math.round(ageMs / 1_000)}s ago`;
+  const minutes = ageMs / 60_000;
+  if (minutes < 10) return `${minutes.toFixed(1)}m ago`;
+  return `${Math.round(minutes)}m ago`;
+}
+
+function topBreakdownEntries(record, limit = 4) {
+  return Object.entries(record ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, limit);
+}
+
+function topNodeProtocols(protocols, limit = 2) {
+  const entries = Object.entries(protocols ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, limit);
+  return entries.map(([protocol]) => formatProtocol(protocol));
+}
+
+function topPeerSummaries(graph, serviceId, direction, limit = 3) {
+  if (!graph?.edges?.length || !serviceId) return [];
+  const peerMap = new Map();
+  for (const edge of graph.edges) {
+    const src = typeof edge.source === "object" ? edge.source.id : edge.source;
+    const tgt = typeof edge.target === "object" ? edge.target.id : edge.target;
+    const peerId = direction === "inbound"
+      ? (tgt === serviceId ? src : null)
+      : (src === serviceId ? tgt : null);
+    if (!peerId) continue;
+    const current = peerMap.get(peerId) ?? {
+      id: peerId,
+      requestCount: 0,
+      errorCount: 0,
+      bytesIn: 0,
+      bytesOut: 0,
+      lastSeenAt: null,
+      protocols: {},
+    };
+    current.requestCount += Number(edge.requestCount ?? 0);
+    current.errorCount += Number(edge.errorCount ?? 0);
+    current.bytesIn += Number(edge.bytesIn ?? 0);
+    current.bytesOut += Number(edge.bytesOut ?? 0);
+    const protocol = String(edge.dominantProtocol ?? "unknown").toLowerCase();
+    current.protocols[protocol] = Number(current.protocols[protocol] ?? 0) + Number(edge.requestCount ?? 0);
+    if (!current.lastSeenAt || Date.parse(edge.lastSeenAt ?? "") > Date.parse(current.lastSeenAt ?? "")) {
+      current.lastSeenAt = edge.lastSeenAt ?? current.lastSeenAt;
+    }
+    peerMap.set(peerId, current);
+  }
+  return Array.from(peerMap.values())
+    .sort((a, b) => {
+      if (b.requestCount !== a.requestCount) return b.requestCount - a.requestCount;
+      return Date.parse(b.lastSeenAt ?? "") - Date.parse(a.lastSeenAt ?? "");
+    })
+    .slice(0, limit)
+    .map((peer) => ({
+      ...peer,
+      errorRate: peer.requestCount > 0 ? peer.errorCount / peer.requestCount : 0,
+      topProtocols: topNodeProtocols(peer.protocols, 2),
+    }));
+}
+
+function computeRecentActivity(lastSeenAt, nowTs, active = false) {
+  if (active) return 1;
+  const seenAt = Date.parse(lastSeenAt ?? "");
+  if (!Number.isFinite(seenAt)) return 0;
+  const ageMs = Math.max(0, nowTs - seenAt);
+  const fadeWindowMs = 60_000;
+  return Math.max(0, 1 - ageMs / fadeWindowMs);
+}
+
+function ServiceNode({ data }) {
+  const isExternal = data.external === true;
+  const offline = !isExternal && data.state !== "running" && data.state !== "starting";
+  const color = isExternal ? "#6b7280" : stateColor(data.state);
+  const selected = data.selected === true;
+  const relatedToSelection = data.relatedToSelection !== false;
+
+  const borderColor = selected ? "currentColor" : color;
+  const opacity = isExternal ? 0.45 : offline ? 0.4 : relatedToSelection ? 0.85 : 0.3;
 
   return (
-    <div className="relative px-4 py-2.5 rounded-md border bg-base-200/80 text-center"
-      style={nodeStyle}>
+    <div
+      className="px-3 py-2 rounded border bg-base-200/90 text-center min-w-[100px]"
+      style={{
+        borderColor,
+        borderWidth: selected ? 2 : 1,
+        borderStyle: isExternal ? "dashed" : "solid",
+        opacity,
+      }}
+    >
       <Handle type="target" position={Position.Left} className="!bg-base-content/20 !w-1.5 !h-1.5 !border-0" />
       <div className="flex items-center justify-center gap-1.5 mb-0.5">
-        <div className="size-2 rounded-full" style={{ backgroundColor: color }} />
-        <span className="text-xs font-medium opacity-80">{data.name}</span>
+        <div className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        <span className="text-[11px] font-medium leading-tight truncate max-w-[120px]">
+          {data.name}
+        </span>
       </div>
-      {data.port && (
-        <span className="text-[10px] font-mono opacity-30">:{data.port}</span>
+      {!isExternal && (
+        <>
+          {data.port && <div className="text-[9px] font-mono opacity-30">:{data.port}</div>}
+          {(data.incomingRequestCount > 0 || data.errorRate > 0) && (
+            <div className="text-[10px] font-mono mt-0.5 flex items-center justify-center gap-1.5">
+              {data.incomingRequestCount > 0 && (
+                <span className="opacity-50">{data.incomingRequestCount} req</span>
+              )}
+              {data.errorRate > 0 && (
+                <span className="text-error/70">{Math.round(data.errorRate * 100)}% err</span>
+              )}
+            </div>
+          )}
+        </>
       )}
-      <div className="text-[10px] font-mono opacity-40 mt-1">{data.incomingRequestCount ?? 0} req in</div>
+      {isExternal && <div className="text-[9px] opacity-30 mt-0.5">external</div>}
       <Handle type="source" position={Position.Right} className="!bg-base-content/20 !w-1.5 !h-1.5 !border-0" />
     </div>
   );
@@ -1092,7 +1440,82 @@ function MetricEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
 const meshEdgeTypes = { metric: MetricEdge };
 
-function buildFlowElements(graph, selectedEdge) {
+function meshEdgeIdentity(edge) {
+  if (edge?.id) return edge.id;
+  const source = typeof edge?.source === "object" ? edge.source.id : edge?.source;
+  const target = typeof edge?.target === "object" ? edge.target.id : edge?.target;
+  const protocol = edge?.dominantProtocol ?? edge?.protocol ?? "unknown";
+  return `${source ?? "unknown"}\u0000${target ?? "unknown"}\u0000${protocol}`;
+}
+
+function computeRankedLayout(nodes, edges) {
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const inEdges = new Map();
+  const outEdges = new Map();
+
+  for (const node of nodes) {
+    inEdges.set(node.id, new Set());
+    outEdges.set(node.id, new Set());
+  }
+  for (const edge of edges) {
+    const src = typeof edge.source === "object" ? edge.source.id : edge.source;
+    const tgt = typeof edge.target === "object" ? edge.target.id : edge.target;
+    if (nodeIds.has(src) && nodeIds.has(tgt)) {
+      inEdges.get(tgt)?.add(src);
+      outEdges.get(src)?.add(tgt);
+    }
+  }
+
+  // Assign ranks via BFS from roots (nodes with no incoming edges)
+  const ranks = new Map();
+  const queue = [];
+  for (const node of nodes) {
+    if (inEdges.get(node.id).size === 0) {
+      ranks.set(node.id, 0);
+      queue.push(node.id);
+    }
+  }
+  let qi = 0;
+  while (qi < queue.length) {
+    const id = queue[qi++];
+    const rank = ranks.get(id);
+    for (const tgt of (outEdges.get(id) ?? [])) {
+      const currentRank = ranks.get(tgt) ?? -1;
+      if (currentRank < rank + 1) {
+        ranks.set(tgt, rank + 1);
+        queue.push(tgt);
+      }
+    }
+  }
+  // Any unranked nodes (cycles, isolated) get rank 0
+  for (const node of nodes) {
+    if (!ranks.has(node.id)) ranks.set(node.id, 0);
+  }
+
+  // Group by rank, position left-to-right
+  const byRank = new Map();
+  for (const [id, rank] of ranks) {
+    if (!byRank.has(rank)) byRank.set(rank, []);
+    byRank.get(rank).push(id);
+  }
+
+  const H_SPACING = 240;
+  const V_SPACING = 120;
+  const positions = new Map();
+  for (const [rank, ids] of byRank) {
+    const totalH = (ids.length - 1) * V_SPACING;
+    ids.forEach((id, i) => {
+      positions.set(id, {
+        x: rank * H_SPACING + 40,
+        y: i * V_SPACING - totalH / 2 + 200,
+      });
+    });
+  }
+
+  return positions;
+}
+
+function buildFlowElements(graph, selectedEdge, selectedServiceId, proxyRoutes, localDomain, proxyPort, nowTs) {
   if (!graph?.nodes?.length) return { nodes: [], edges: [] };
 
   const maxEdgeRequests = Math.max(...graph.edges.map((edge) => edge.requestCount), 1);
@@ -1106,39 +1529,53 @@ function buildFlowElements(graph, selectedEdge) {
     acc.errorCount += edge.errorCount;
     incoming.set(tgt, acc);
   }
+  const relatedNodeIds = new Set();
+  if (selectedServiceId != null) {
+    relatedNodeIds.add(selectedServiceId);
+    for (const edge of graph.edges) {
+      const src = typeof edge.source === "object" ? edge.source.id : edge.source;
+      const tgt = typeof edge.target === "object" ? edge.target.id : edge.target;
+      if (src === selectedServiceId && tgt) relatedNodeIds.add(tgt);
+      if (tgt === selectedServiceId && src) relatedNodeIds.add(src);
+    }
+  }
 
-  const maxIncoming = Math.max(...incoming.values().map((value) => value.requestCount), 0);
-  const nodeSize = (value) => {
-    if (maxIncoming <= 0 || value <= 0) return 112;
-    const normalized = Math.pow(Math.min(value / maxIncoming, 1), 0.5);
-    return Math.round(112 + normalized * 86);
-  };
   const edgeWidth = (value) => {
     const normalized = Math.log1p(value) / Math.log1p(maxEdgeRequests);
     return Number((1.4 + normalized * 4.2).toFixed(2));
   };
 
-  // Simple grid layout — arrange nodes in a horizontal line with spacing
-  const spacing = 220;
-  const nodes = graph.nodes.map((n, i) => {
-    const inbound = incoming.get(n.id) ?? { requestCount: 0, errorCount: 0 };
-    const size = nodeSize(inbound.requestCount);
-    const errorRate = inbound.requestCount > 0 ? inbound.errorCount / inbound.requestCount : 0;
+  // Topology-aware ranked layout
+  const positions = computeRankedLayout(graph.nodes, graph.edges);
+
+  const nodes = graph.nodes.map((n) => {
+    const isExternal = n.external === true;
+    const derivedInbound = incoming.get(n.id) ?? { requestCount: 0, errorCount: 0 };
+    const incomingRequestCount = isExternal ? 0 : Number(n.requestsIn ?? derivedInbound.requestCount ?? 0);
+    const incomingErrorCount = isExternal ? 0 : Number(n.errorsIn ?? derivedInbound.errorCount ?? 0);
+    const errorRate = incomingRequestCount > 0 ? incomingErrorCount / incomingRequestCount : 0;
+    const routes = isExternal ? [] : getServiceRouteEntries(n.id, proxyRoutes, localDomain, proxyPort);
+    const recentActivity = isExternal ? 0 : computeRecentActivity(n.lastSeenAt, nowTs, Number(n.activeFlows ?? 0) > 0);
+    const pos = positions.get(n.id) ?? { x: 40, y: 200 };
     return {
       id: n.id,
       type: "service",
-      position: { x: (i % 4) * spacing + 40, y: Math.floor(i / 4) * 120 + 40 },
+      position: pos,
       data: {
         name: n.name,
         state: n.state,
         port: n.port,
-        incomingRequestCount: inbound.requestCount,
+        external: isExternal,
+        incomingRequestCount,
         errorRate,
-      },
-      style: {
-        width: `${size}px`,
-        minWidth: `${size}px`,
-        minHeight: `${Math.max(56, Math.round(size * 0.62))}px`,
+        routes,
+        activeFlows: n.activeFlows,
+        protocols: n.protocols,
+        recentActivity,
+        bytesIn: n.bytesIn,
+        lastSeenAt: n.lastSeenAt,
+        selected: selectedServiceId === n.id,
+        relatedToSelection: selectedServiceId == null || relatedNodeIds.has(n.id),
       },
     };
   });
@@ -1146,21 +1583,22 @@ function buildFlowElements(graph, selectedEdge) {
   const edges = graph.edges.map((e, i) => {
     const src = typeof e.source === "object" ? e.source.id : e.source;
     const tgt = typeof e.target === "object" ? e.target.id : e.target;
-    const isSelected = selectedEdge && (
-      (typeof selectedEdge.source === "object" ? selectedEdge.source.id : selectedEdge.source) === src &&
-      (typeof selectedEdge.target === "object" ? selectedEdge.target.id : selectedEdge.target) === tgt
-    );
+    const edgeIdentity = meshEdgeIdentity(e);
+    const isSelected = selectedEdge && meshEdgeIdentity(selectedEdge) === edgeIdentity;
+    const touchesSelectedService = selectedServiceId != null && (src === selectedServiceId || tgt === selectedServiceId);
     const color = protocolColor(e.dominantProtocol);
+    const recentActivity = computeRecentActivity(e.lastSeenAt, nowTs, Number(e.activeFlows ?? 0) > 0);
+    const baseOpacity = 0.2 + recentActivity * 0.55;
     return {
-      id: `e-${i}`,
+      id: edgeIdentity || `e-${i}`,
       type: "metric",
       source: src,
       target: tgt,
-      animated: e.requestCount > 0,
+      animated: Number(e.activeFlows ?? 0) > 0 || recentActivity > 0.8,
       style: {
         stroke: color,
         strokeWidth: edgeWidth(e.requestCount),
-        opacity: isSelected ? 0.9 : 0.5,
+        opacity: isSelected ? 0.95 : selectedServiceId == null ? baseOpacity : touchesSelectedService ? Math.min(0.9, baseOpacity + 0.18) : Math.max(0.1, baseOpacity * 0.45),
       },
       data: e,
     };
@@ -1169,10 +1607,15 @@ function buildFlowElements(graph, selectedEdge) {
   return { nodes, edges };
 }
 
-function MeshGraph({ graph, onSelectEdge, selectedEdge }) {
+function MeshGraph({ graph, onSelectEdge, selectedEdge, selectedServiceId, proxyRoutes, localDomain, proxyPort, onSelectService }) {
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Date.now()), 2_000);
+    return () => clearInterval(timer);
+  }, []);
   const { nodes: flowNodes, edges: flowEdges } = useMemo(
-    () => buildFlowElements(graph, selectedEdge),
-    [graph, selectedEdge],
+    () => buildFlowElements(graph, selectedEdge, selectedServiceId, proxyRoutes, localDomain, proxyPort, nowTs),
+    [graph, selectedEdge, selectedServiceId, proxyRoutes, localDomain, proxyPort, nowTs],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(flowNodes);
@@ -1183,19 +1626,19 @@ function MeshGraph({ graph, onSelectEdge, selectedEdge }) {
   useEffect(() => { setEdges(flowEdges); }, [flowEdges, setEdges]);
 
   const onEdgeClick = useCallback((_event, edge) => {
-    const graphEdge = graph?.edges?.find((e) => {
-      const src = typeof e.source === "object" ? e.source.id : e.source;
-      const tgt = typeof e.target === "object" ? e.target.id : e.target;
-      return src === edge.source && tgt === edge.target;
-    });
+    const graphEdge = graph?.edges?.find((e) => meshEdgeIdentity(e) === edge.id);
     onSelectEdge?.(graphEdge ?? null);
   }, [graph, onSelectEdge]);
+
+  const onNodeClick = useCallback((_event, node) => {
+    if (node?.id) onSelectService?.(node.id);
+  }, [onSelectService]);
 
   if (!graph || !graph.nodes.length) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 opacity-20">
         <Zap className="size-5" />
-        <span className="text-xs">Start services and trigger inter-service HTTP calls to see the mesh</span>
+        <span className="text-xs">Start services and trigger inter-service HTTP(S) traffic to see the mesh</span>
       </div>
     );
   }
@@ -1206,13 +1649,14 @@ function MeshGraph({ graph, onSelectEdge, selectedEdge }) {
       edges={edges}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
       nodeTypes={meshNodeTypes}
       edgeTypes={meshEdgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.3 }}
+      fitViewOptions={{ padding: 0.55, maxZoom: 0.75 }}
       proOptions={{ hideAttribution: true }}
-      className="[&_.react-flow__edge]:cursor-pointer"
+      className="[&_.react-flow__edge]:cursor-pointer [&_.react-flow__node]:cursor-pointer"
     >
       <Background gap={20} size={1} color="currentColor" className="opacity-[0.03]" />
       <MiniMap
@@ -1226,143 +1670,205 @@ function MeshGraph({ graph, onSelectEdge, selectedEdge }) {
   );
 }
 
-// ── MeshNativeStats ────────────────────────────────────────────────────────────
-// Shows per-edge latency percentiles + rates from the native raffel graph snapshot
-
-function fmtMs(seconds) {
-  if (seconds == null) return "—";
-  return `${Math.round(seconds * 1000)}ms`;
-}
-
-function fmtPct(ratio) {
-  if (ratio == null) return "—";
-  const pct = ratio * 100;
-  return pct < 0.1 ? "<0.1%" : `${pct.toFixed(1)}%`;
-}
-
-function MeshNativeStats({ snapshot }) {
-  if (!snapshot?.edges?.length) return null;
-  const edges = [...snapshot.edges].sort((a, b) => b.requestsTotal - a.requestsTotal).slice(0, 8);
-
+function MeshLegend() {
   return (
-    <div className="rounded-md border border-base-content/[0.06] bg-base-200/20 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-base-content/[0.04]">
-        <span className="text-[10px] font-medium opacity-25 uppercase tracking-widest">Edge latency</span>
-        <span className="text-[10px] opacity-15 tabular-nums ml-auto">{snapshot.edges.length} pairs · p{snapshot.percentiles?.join("/p") ?? "50/90/95"}</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-[10px]">
-          <thead>
-            <tr className="border-b border-base-content/[0.04]">
-              <th className="px-3 py-1 text-left font-medium opacity-25">Source</th>
-              <th className="px-3 py-1 text-left font-medium opacity-25">Target</th>
-              <th className="px-3 py-1 text-right font-medium opacity-25 tabular-nums">req/s</th>
-              <th className="px-3 py-1 text-right font-medium opacity-25 tabular-nums">p50</th>
-              <th className="px-3 py-1 text-right font-medium opacity-25 tabular-nums">p90</th>
-              <th className="px-3 py-1 text-right font-medium opacity-25 tabular-nums">p95</th>
-              <th className="px-3 py-1 text-right font-medium opacity-25 tabular-nums">err%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {edges.map((edge) => {
-              const p = edge.latency?.percentiles ?? {};
-              const errPct = edge.rates?.failureRatio;
-              return (
-                <tr key={edge.id} className="border-t border-base-content/[0.03] hover:bg-base-200/30">
-                  <td className="px-3 py-1 font-mono opacity-50 truncate max-w-[120px]">{edge.source}</td>
-                  <td className="px-3 py-1 font-mono opacity-50 truncate max-w-[120px]">{edge.target}</td>
-                  <td className="px-3 py-1 text-right font-mono opacity-40 tabular-nums">
-                    {edge.rates?.requestsPerSecond != null ? edge.rates.requestsPerSecond.toFixed(2) : "—"}
-                  </td>
-                  <td className="px-3 py-1 text-right font-mono opacity-60 tabular-nums">{fmtMs(p["0.5"] ?? p.p50)}</td>
-                  <td className="px-3 py-1 text-right font-mono opacity-40 tabular-nums">{fmtMs(p["0.9"] ?? p.p90)}</td>
-                  <td className="px-3 py-1 text-right font-mono opacity-30 tabular-nums">{fmtMs(p["0.95"] ?? p.p95)}</td>
-                  <td className={`px-3 py-1 text-right font-mono tabular-nums ${errPct > 0.05 ? "text-error" : errPct > 0 ? "text-warning" : "opacity-20"}`}>
-                    {fmtPct(errPct)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <div className="absolute top-2 right-2 z-10 pointer-events-none">
+      <div className="bg-base-200/80 backdrop-blur-sm border border-base-content/[0.06] rounded px-2.5 py-2 text-[10px] space-y-1.5 shadow-sm">
+        <div className="font-semibold opacity-45 uppercase tracking-wider">Graph Legend</div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <div className="h-[2px] w-5 rounded-full bg-success/80" />
+            <div className="h-[2px] w-8 rounded-full bg-success/80" />
+          </div>
+          <span className="opacity-45">width = volume</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <div className="h-[2px] w-6 rounded-full bg-success/80" />
+            <div className="h-[2px] w-6 rounded-full bg-success/25" />
+          </div>
+          <span className="opacity-45">fade = recency</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <div className="h-[2px] w-4 rounded-full" style={{ backgroundColor: protocolColor("http") }} />
+            <div className="h-[2px] w-4 rounded-full" style={{ backgroundColor: protocolColor("https") }} />
+            <div className="h-[2px] w-4 rounded-full" style={{ backgroundColor: protocolColor("ws") }} />
+          </div>
+          <span className="opacity-45">color = protocol</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="size-4 rounded border-2 border-success/70 bg-base-200/80" />
+          <div className="size-4 rounded border-2 border-error/80 bg-base-200/80" />
+          <span className="opacity-45">node border = error</span>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── ReverseProxyPanel ──────────────────────────────────────────────────────────
-// Shows reverse proxy stats + per-route breakdown when the proxy is running
-
-function ReverseProxyPanel({ stats, graph, port }) {
-  if (!stats) return null;
-
-  const edges = graph?.edges ?? [];
-  const topEdges = [...edges].sort((a, b) => b.requestsTotal - a.requestsTotal).slice(0, 6);
-
+function SelectedServiceOverlay({
+  service,
+  nodeMetrics,
+  inboundPeers,
+  outboundPeers,
+  inboundPeerTotal = 0,
+  outboundPeerTotal = 0,
+  onSelectPeer,
+}) {
+  if (!service || !nodeMetrics) return null;
+  const topProtocols = topNodeProtocols(nodeMetrics.protocols, 3);
+  const inboundMoreCount = Math.max(0, Number(inboundPeerTotal ?? 0) - Number(inboundPeers?.length ?? 0));
+  const outboundMoreCount = Math.max(0, Number(outboundPeerTotal ?? 0) - Number(outboundPeers?.length ?? 0));
+  const peerTone = (peer) => {
+    const errorRate = Number(peer?.errorRate ?? 0);
+    if (errorRate >= 0.25) return "text-error";
+    if (errorRate > 0) return "text-warning";
+    return "";
+  };
   return (
-    <section>
-      <div className="flex items-center gap-2.5 mb-2.5">
-        <ShieldCheck className="size-3 opacity-30" />
-        <span className="text-[11px] font-medium opacity-30 uppercase tracking-wider">HTTPS Proxy</span>
-        <div className="flex-1 h-px bg-base-content/5" />
-        <span className="text-[10px] opacity-25 font-mono">:{port}</span>
-      </div>
-
-      <div className="rounded-md border border-base-content/[0.06] bg-base-200/20 overflow-hidden">
-        {/* Stats bar */}
-        <div className="flex items-center gap-4 px-3 py-2 border-b border-base-content/[0.04] flex-wrap">
-          {[
-            { label: "active", value: stats.connectionsActive },
-            { label: "total", value: stats.connectionsTotal },
-            { label: "errors", value: stats.connectionsErrored },
-            { label: "↓", value: stats.bytesFromClient != null ? `${(stats.bytesFromClient / 1024).toFixed(1)}KB` : "—" },
-            { label: "↑", value: stats.bytesToClient != null ? `${(stats.bytesToClient / 1024).toFixed(1)}KB` : "—" },
-          ].map(({ label, value }) => (
-            <div key={label} className="flex items-center gap-1.5">
-              <span className="text-[10px] opacity-25">{label}</span>
-              <span className="text-[11px] font-mono tabular-nums opacity-60">{value}</span>
-            </div>
-          ))}
+    <div className="absolute bottom-2 left-2 z-10">
+      <div className="bg-base-200/88 backdrop-blur-sm border border-base-content/[0.06] rounded px-2.5 py-2 text-[10px] shadow-sm max-w-[320px]">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold opacity-70 truncate">{service.name}</span>
+          {service.port && <span className="font-mono opacity-30">:{service.port}</span>}
+          <span className="flex-1" />
+          {nodeMetrics.lastSeenAt && (
+            <span className="opacity-25">{formatRelativeSeenAt(nodeMetrics.lastSeenAt)}</span>
+          )}
         </div>
-
-        {/* Per-route table */}
-        {topEdges.length > 0 && (
-          <table className="w-full text-[10px]">
-            <thead>
-              <tr className="border-b border-base-content/[0.04]">
-                <th className="px-3 py-1 text-left font-medium opacity-25">Source → Target</th>
-                <th className="px-3 py-1 text-right font-medium opacity-25">reqs</th>
-                <th className="px-3 py-1 text-right font-medium opacity-25">p50</th>
-                <th className="px-3 py-1 text-right font-medium opacity-25">p95</th>
-                <th className="px-3 py-1 text-right font-medium opacity-25">err%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topEdges.map((edge) => {
-                const p = edge.latency?.percentiles ?? {};
-                return (
-                  <tr key={edge.id} className="border-t border-base-content/[0.03] hover:bg-base-200/30">
-                    <td className="px-3 py-1 font-mono opacity-40 truncate max-w-[260px]">
-                      {edge.source} <ArrowRight className="inline size-2.5 opacity-30 mx-0.5" /> {edge.target}
-                    </td>
-                    <td className="px-3 py-1 text-right font-mono opacity-60 tabular-nums">{edge.requestsTotal}</td>
-                    <td className="px-3 py-1 text-right font-mono opacity-50 tabular-nums">{fmtMs(p["0.5"] ?? p.p50)}</td>
-                    <td className="px-3 py-1 text-right font-mono opacity-30 tabular-nums">{fmtMs(p["0.95"] ?? p.p95)}</td>
-                    <td className={`px-3 py-1 text-right font-mono tabular-nums ${(edge.rates?.failureRatio ?? 0) > 0.05 ? "text-error" : "opacity-20"}`}>
-                      {fmtPct(edge.rates?.failureRatio)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 font-mono">
+          <span className="opacity-45">{nodeMetrics.requestsIn ?? 0} in</span>
+          <span className="opacity-45">{nodeMetrics.requestsOut ?? 0} out</span>
+          {((nodeMetrics.bytesIn ?? 0) > 0 || (nodeMetrics.bytesOut ?? 0) > 0) && (
+            <span className="opacity-40">{formatBytes(nodeMetrics.bytesIn)} / {formatBytes(nodeMetrics.bytesOut)}</span>
+          )}
+          {(nodeMetrics.activeFlows ?? 0) > 0 && (
+            <span className="opacity-45">{nodeMetrics.activeFlows} active</span>
+          )}
+          {(nodeMetrics.errorsIn ?? 0) > 0 && (
+            <span className="text-error/80">{nodeMetrics.errorsIn} err in</span>
+          )}
+          {(nodeMetrics.errorsOut ?? 0) > 0 && (
+            <span className="text-error/80">{nodeMetrics.errorsOut} err out</span>
+          )}
+        </div>
+        {topProtocols.length > 0 && (
+          <div className="mt-1 font-mono opacity-35">{topProtocols.join(" · ")}</div>
         )}
-
-        {topEdges.length === 0 && (
-          <p className="px-3 py-2.5 text-[10px] opacity-25">No traffic recorded yet.</p>
+        {(inboundPeers?.length > 0 || outboundPeers?.length > 0) && (
+          <div className="mt-1.5 space-y-1 font-mono">
+            {inboundPeers?.length > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="opacity-25 shrink-0">in</span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                  {inboundPeers.map((peer) => (
+                    <button
+                      key={`in-${peer.id}`}
+                      type="button"
+                      onClick={() => onSelectPeer?.(peer.id)}
+                      className={`pointer-events-auto opacity-40 hover:opacity-75 truncate transition-opacity ${peerTone(peer)}`}
+                      title={peer.errorCount > 0 ? `${peer.errorCount} errors · ${Math.round((peer.errorRate ?? 0) * 100)}% error` : `${peer.requestCount} requests`}
+                    >
+                      {peer.id}
+                      <span className="opacity-30">:{peer.requestCount}</span>
+                      {peer.errorCount > 0 && (
+                        <span className="opacity-45"> !{peer.errorCount}</span>
+                      )}
+                      {peer.topProtocols.length > 0 && (
+                        <span className="opacity-25"> {peer.topProtocols.join("/")}</span>
+                      )}
+                    </button>
+                  ))}
+                  {inboundMoreCount > 0 && (
+                    <span className="opacity-25">+{inboundMoreCount} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {outboundPeers?.length > 0 && (
+              <div className="flex items-start gap-2">
+                <span className="opacity-25 shrink-0">out</span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                  {outboundPeers.map((peer) => (
+                    <button
+                      key={`out-${peer.id}`}
+                      type="button"
+                      onClick={() => onSelectPeer?.(peer.id)}
+                      className={`pointer-events-auto opacity-40 hover:opacity-75 truncate transition-opacity ${peerTone(peer)}`}
+                      title={peer.errorCount > 0 ? `${peer.errorCount} errors · ${Math.round((peer.errorRate ?? 0) * 100)}% error` : `${peer.requestCount} requests`}
+                    >
+                      {peer.id}
+                      <span className="opacity-30">:{peer.requestCount}</span>
+                      {peer.errorCount > 0 && (
+                        <span className="opacity-45"> !{peer.errorCount}</span>
+                      )}
+                      {peer.topProtocols.length > 0 && (
+                        <span className="opacity-25"> {peer.topProtocols.join("/")}</span>
+                      )}
+                    </button>
+                  ))}
+                  {outboundMoreCount > 0 && (
+                    <span className="opacity-25">+{outboundMoreCount} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
-    </section>
+    </div>
+  );
+}
+
+function SelectedEdgeOverlay({ edge }) {
+  if (!edge) return null;
+  const source = typeof edge.source === "object" ? edge.source.id : edge.source;
+  const target = typeof edge.target === "object" ? edge.target.id : edge.target;
+  const protocols = (edge.protocolCounts ?? []).slice(0, 3);
+  const methods = topBreakdownEntries(edge.methodCounts);
+  const statusClasses = topBreakdownEntries(edge.statusClassCounts);
+  return (
+    <div className="absolute bottom-2 left-2 z-10 pointer-events-none">
+      <div className="bg-base-200/90 backdrop-blur-sm border border-base-content/[0.06] rounded px-2.5 py-2 text-[10px] shadow-sm max-w-[320px]">
+        <div className="flex items-center gap-2">
+          <span className="font-mono opacity-65 truncate">{source} → {target}</span>
+          <span className="flex-1" />
+          {edge.lastSeenAt && (
+            <span className="opacity-25">{formatRelativeSeenAt(edge.lastSeenAt)}</span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 font-mono">
+          <span className="opacity-45">{edge.requestCount} req</span>
+          <span className="opacity-45">{edge.avgLatencyMs}ms</span>
+          <span className="opacity-45">{formatProtocol(edge.dominantProtocol)}</span>
+          {(edge.bytesIn > 0 || edge.bytesOut > 0) && (
+            <span className="opacity-40">{formatBytes(edge.bytesIn)} in / {formatBytes(edge.bytesOut)} out</span>
+          )}
+          {(edge.activeFlows ?? 0) > 0 && (
+            <span className="opacity-45">{edge.activeFlows} active</span>
+          )}
+          {(edge.errorCount ?? 0) > 0 && (
+            <span className="text-error/80">{edge.errorCount} err</span>
+          )}
+        </div>
+        {protocols.length > 0 && (
+          <div className="mt-1 font-mono opacity-35">
+            {protocols.map((entry) => `${formatProtocol(entry.protocol)}:${entry.count}`).join(" · ")}
+          </div>
+        )}
+        {methods.length > 0 && (
+          <div className="mt-1 font-mono opacity-35">
+            {methods.map(([method, count]) => `${method}:${count}`).join(" · ")}
+          </div>
+        )}
+        {statusClasses.length > 0 && (
+          <div className="mt-1 font-mono opacity-35">
+            {statusClasses.map(([statusClass, count]) => `${statusClass}:${count}`).join(" · ")}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1371,17 +1877,46 @@ function ReverseProxyPanel({ stats, graph, port }) {
 function ServicesPage() {
   const { liveMode } = useDashboard();
   const { services, runtimeServices, loading, refresh } = useServices({ liveMode, pollInterval: liveMode ? false : 15_000 });
-  const { graph, nativeGraph, traffic, status: meshStatus, clearMesh, toggleMesh } = useMesh({ liveMode });
-  const { stats: reverseStats, graph: reverseGraph, status: reverseStatus } = useReverseProxy();
+  const { graph, nativeGraph, status: meshStatus, clearMesh } = useMesh({ liveMode });
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdge, setSelectedEdge] = useState(null);
-  const meshEnabled = meshStatus?.enabled ?? false;
+  const [proxyStatus, setProxyStatus] = useState({ routes: [], localDomain: null });
+
+  useEffect(() => {
+    api.get("/proxy/reverse/status").then((res) => setProxyStatus(res)).catch(() => {});
+  }, []);
+
+  const proxyRoutes = proxyStatus?.routes ?? [];
+  const localDomain = proxyStatus?.localDomain ?? null;
+  const proxyPort = proxyStatus?.port ?? 4433;
   const meshRunning = meshStatus?.running ?? false;
+  const meshWindowLabel = formatMeshWindow(
+    nativeGraph?.windowStart ?? graph?.windowStart,
+    nativeGraph?.windowEnd ?? graph?.windowEnd,
+  );
+  const meshConfiguredWindowLabel = formatConfiguredMeshWindow(meshStatus?.liveWindowSeconds);
   const servicesRefresh = useCallback(() => {
     return refresh();
   }, [refresh]);
 
   const selectedService = services.find((s) => s.id === selectedId) ?? null;
+  const selectedNodeMetrics = graph?.nodes?.find((node) => node.id === selectedId) ?? null;
+  const selectedInboundPeers = useMemo(
+    () => topPeerSummaries(graph, selectedId, "inbound", 3),
+    [graph, selectedId],
+  );
+  const selectedOutboundPeers = useMemo(
+    () => topPeerSummaries(graph, selectedId, "outbound", 3),
+    [graph, selectedId],
+  );
+  const selectedInboundPeerTotal = useMemo(
+    () => topPeerSummaries(graph, selectedId, "inbound", Number.MAX_SAFE_INTEGER).length,
+    [graph, selectedId],
+  );
+  const selectedOutboundPeerTotal = useMemo(
+    () => topPeerSummaries(graph, selectedId, "outbound", Number.MAX_SAFE_INTEGER).length,
+    [graph, selectedId],
+  );
 
   useEffect(() => {
     if (selectedId && !loading && !selectedService) setSelectedId(null);
@@ -1403,6 +1938,17 @@ function ServicesPage() {
     await servicesRefresh();
   }, [services, servicesRefresh]);
 
+  const [killing, setKilling] = useState(false);
+  const handleKillAll = useCallback(async () => {
+    setKilling(true);
+    try {
+      await api.post("/services/kill-all", {});
+      await servicesRefresh();
+    } finally {
+      setKilling(false);
+    }
+  }, [servicesRefresh]);
+
   const anyRunning   = services.some((s) => s.running);
   const allRunning   = services.length > 0 && services.every((s) => s.running);
   const runningCount = services.filter((s) => s.running).length;
@@ -1414,7 +1960,7 @@ function ServicesPage() {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-base-200 shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-base-200 shrink-0">
         <div className="flex items-center gap-2.5">
           <Server className="size-3.5 opacity-35" />
           <span className="text-xs font-semibold opacity-55 uppercase tracking-widest">Services</span>
@@ -1431,24 +1977,23 @@ function ServicesPage() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* Mesh toggle */}
           {meshStatus && (
-            <label className="flex items-center gap-1.5 mr-2 cursor-pointer" title={meshEnabled ? "Mesh proxy is active — capturing inter-service traffic" : "Enable mesh proxy to capture inter-service traffic"}>
+            <div className="flex items-center gap-1.5 mr-2" title={meshRunning ? "Mesh runtime active" : "Configure mesh in Settings → Services"}>
               <Network className={`size-3 ${meshRunning ? "text-success/70" : "opacity-25"}`} />
-              <span className="text-[10px] opacity-35">Mesh</span>
-              <input
-                type="checkbox"
-                className="toggle toggle-xs toggle-success"
-                checked={meshEnabled}
-                onChange={(e) => toggleMesh(e.target.checked)}
-              />
-            </label>
+              <span className="text-[10px] opacity-35">HTTP mesh</span>
+              {meshConfiguredWindowLabel && (
+                <span className="text-[10px] opacity-20 tabular-nums">{meshConfiguredWindowLabel}</span>
+              )}
+            </div>
           )}
           {meshRunning && (graph?.totalRequests ?? 0) > 0 && (
             <div className="flex items-center gap-1.5 mr-1">
               <span className="text-[10px] opacity-25 tabular-nums">
                 {graph.totalRequests} req · {graph.edges?.length ?? 0} conn
               </span>
+              {meshWindowLabel && (
+                <span className="text-[10px] opacity-20 tabular-nums">{meshWindowLabel}</span>
+              )}
               {selectedEdge && (
                 <button className="btn btn-xs btn-ghost opacity-40 hover:opacity-80 h-4 min-h-0 px-1 text-[10px]"
                   onClick={() => setSelectedEdge(null)}>
@@ -1471,6 +2016,17 @@ function ServicesPage() {
               Stop all
             </button>
           )}
+          {(anyRunning || meshRunning || runtimeServices.some((s) => s.running)) && (
+            <button
+              className="btn btn-xs btn-error opacity-70 hover:opacity-100 gap-1"
+              onClick={handleKillAll}
+              disabled={killing}
+              title="Stop all services, mesh, and proxy"
+            >
+              {killing ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+              Kill all
+            </button>
+          )}
         </div>
       </div>
 
@@ -1478,7 +2034,7 @@ function ServicesPage() {
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
 
         {/* ── Left column: services list ─────────────────────────────── */}
-        <div className="lg:w-[380px] xl:w-[420px] shrink-0 overflow-y-auto border-b lg:border-b-0 lg:border-r border-base-content/[0.06] p-3">
+        <div className="lg:w-[360px] xl:w-[392px] shrink-0 overflow-y-auto border-b lg:border-b-0 lg:border-r border-base-content/[0.06] p-2.5">
 
           {/* Loading */}
           {loading && (
@@ -1489,23 +2045,23 @@ function ServicesPage() {
 
           {/* Empty */}
           {!loading && services.length === 0 && runtimeServices.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-3 px-6 py-16">
-              <Server className="size-8 opacity-10" />
-              <div className="text-center">
-                <p className="text-sm font-medium opacity-60">No services configured</p>
+              <div className="flex flex-col items-center justify-center gap-2 px-5 py-12">
+                <Server className="size-8 opacity-10" />
+                <div className="text-center">
+                  <p className="text-sm font-medium opacity-60">No services configured</p>
                 <p className="text-xs opacity-35 mt-1">Add services in Settings to manage them here.</p>
               </div>
             </div>
           )}
 
           {!loading && runtimeServices.length > 0 && (
-            <section className="mb-5">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-semibold opacity-30 uppercase tracking-widest">Runtime</span>
+            <section className="mb-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[10px] font-semibold opacity-30 uppercase tracking-widest">Network Runtime</span>
                 <div className="flex-1 h-px bg-base-content/5" />
                 <span className="text-[10px] opacity-20 tabular-nums">{runtimeServices.length}</span>
               </div>
-              <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-1.5">
                 {runtimeServices.map((service) => (
                   <RuntimeServiceCard
                     key={service.id}
@@ -1519,13 +2075,14 @@ function ServicesPage() {
 
           {/* Online */}
           {!loading && activeServices.length > 0 && (
-            <section className="mb-5">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-semibold opacity-30 uppercase tracking-widest">Online</span>
-                <div className="flex-1 h-px bg-base-content/5" />
-                <span className="text-[10px] opacity-20 tabular-nums">{activeServices.length}</span>
+            <section className="mb-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-success/60 shrink-0" />
+                <span className="text-[10px] font-semibold text-success/60 uppercase tracking-widest">Online</span>
+                <div className="flex-1 h-px bg-success/[0.06]" />
+                <span className="text-[10px] opacity-25 tabular-nums">{activeServices.length}</span>
               </div>
-              <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-1.5">
                 {activeServices.map((service) => (
                   <ServiceCard
                     key={service.id}
@@ -1542,9 +2099,10 @@ function ServicesPage() {
           {/* Offline */}
           {!loading && idleServices.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-semibold opacity-20 uppercase tracking-widest">Offline</span>
-                <div className="flex-1 h-px bg-base-content/5" />
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-base-content/15 shrink-0" />
+                <span className="text-[10px] font-semibold opacity-25 uppercase tracking-widest">Offline</span>
+                <div className="flex-1 h-px bg-base-content/[0.04]" />
                 <span className="text-[10px] opacity-20 tabular-nums">{idleServices.length}</span>
               </div>
               <div className="grid grid-cols-1 gap-1.5">
@@ -1580,9 +2138,19 @@ function ServicesPage() {
                     <span className="opacity-40 shrink-0 tabular-nums">
                       {selectedEdge.requestCount}req · {selectedEdge.avgLatencyMs}ms
                       {" · "}{formatProtocol(selectedEdge.dominantProtocol)}
+                      {(selectedEdge.bytesIn > 0 || selectedEdge.bytesOut > 0) && (
+                        <span> · {formatBytes(selectedEdge.bytesIn)} in / {formatBytes(selectedEdge.bytesOut)} out</span>
+                      )}
+                      {selectedEdge.activeFlows > 0 && <span> · {selectedEdge.activeFlows} active</span>}
                       {selectedEdge.errorCount > 0 && <span className="text-error"> · {selectedEdge.errorCount}err</span>}
                     </span>
                     <span className="flex-1" />
+                    {selectedEdge.lastSeenAt && (
+                      <span className="opacity-25 shrink-0">{formatRelativeSeenAt(selectedEdge.lastSeenAt)}</span>
+                    )}
+                    {meshWindowLabel && (
+                      <span className="opacity-25 shrink-0">{meshWindowLabel}</span>
+                    )}
                     <button
                       className="pointer-events-auto opacity-40 hover:opacity-80"
                       onClick={() => setSelectedEdge(null)}
@@ -1592,53 +2160,137 @@ function ServicesPage() {
                   </div>
                 )}
 
-                <MeshGraph graph={graph} onSelectEdge={setSelectedEdge} selectedEdge={selectedEdge} />
+                <MeshGraph
+                  graph={graph}
+                  onSelectEdge={setSelectedEdge}
+                  selectedEdge={selectedEdge}
+                  selectedServiceId={selectedId}
+                  proxyRoutes={proxyRoutes}
+                  localDomain={localDomain}
+                  proxyPort={proxyPort}
+                  onSelectService={handleSelect}
+                />
 
-                {/* Edge top paths overlay */}
-                {selectedEdge && selectedEdge.topPaths?.length > 0 && (
-                  <div className="absolute bottom-2 left-2 bg-base-200/90 backdrop-blur-sm rounded border border-base-content/[0.06] px-2.5 py-1.5 text-[10px] pointer-events-none">
-                    <div className="space-y-0.5">
-                      {selectedEdge.protocolCounts?.length > 0 && (
-                        <div className="flex items-center gap-2 opacity-60 font-mono">
-                          <span className="font-medium opacity-90">protocols:</span>
-                          {selectedEdge.protocolCounts.slice(0, 2).map((entry) => (
-                            <span key={entry.protocol}>{entry.protocol}:{entry.count}</span>
+                {!selectedEdge && <MeshLegend />}
+                {!selectedEdge && selectedService && selectedNodeMetrics && (
+                  <SelectedServiceOverlay
+                    service={selectedService}
+                    nodeMetrics={selectedNodeMetrics}
+                    inboundPeers={selectedInboundPeers}
+                    outboundPeers={selectedOutboundPeers}
+                    inboundPeerTotal={selectedInboundPeerTotal}
+                    outboundPeerTotal={selectedOutboundPeerTotal}
+                    onSelectPeer={handleSelect}
+                  />
+                )}
+
+                {selectedEdge && <SelectedEdgeOverlay edge={selectedEdge} />}
+
+                {/* Edge detail overlay — paths + protocols */}
+                {selectedEdge && (
+                  <div className="absolute bottom-2 right-2 bg-base-200/90 backdrop-blur-sm rounded border border-base-content/[0.06] px-2.5 py-2 text-[10px] pointer-events-none max-w-[280px]">
+                    {selectedEdge.protocolCounts?.length > 0 && (
+                      <div className="flex items-center gap-2 mb-1.5 font-mono">
+                        <span className="opacity-40 shrink-0">observed</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {selectedEdge.protocolCounts.slice(0, 3).map((entry) => (
+                            <span key={entry.protocol} className="opacity-60"
+                              style={{ color: protocolColor(entry.protocol) }}>
+                              {entry.protocol}<span className="opacity-40 text-base-content">:{entry.count}</span>
+                            </span>
                           ))}
-                          {selectedEdge.protocolCounts.length > 2 && <span>…</span>}
                         </div>
+                      </div>
+                    )}
+                    {topBreakdownEntries(selectedEdge.methodCounts).length > 0 && (
+                      <div className="flex items-center gap-2 mb-1.5 font-mono">
+                        <span className="opacity-40 shrink-0">methods</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {topBreakdownEntries(selectedEdge.methodCounts).map(([method, count]) => (
+                            <span key={method} className="opacity-60">
+                              {method}<span className="opacity-40 text-base-content">:{count}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {topBreakdownEntries(selectedEdge.statusClassCounts).length > 0 && (
+                      <div className="flex items-center gap-2 mb-1.5 font-mono">
+                        <span className="opacity-40 shrink-0">status</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {topBreakdownEntries(selectedEdge.statusClassCounts).map(([statusClass, count]) => (
+                            <span
+                              key={statusClass}
+                              className={statusClass.startsWith("4") || statusClass.startsWith("5") ? "text-error/80" : "opacity-60"}
+                            >
+                              {statusClass}<span className="opacity-40 text-base-content">:{count}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {selectedEdge.topPaths?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {selectedEdge.topPaths.slice(0, 4).map((p) => (
+                          <div key={p.path} className="flex items-center gap-2 font-mono">
+                            <span className="opacity-35 truncate">{p.path}</span>
+                            <span className="shrink-0 opacity-50 tabular-nums">{p.count}×</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(selectedEdge.bytesIn > 0 || selectedEdge.bytesOut > 0) && (
+                      <div className="flex items-center gap-2 mt-1.5 font-mono">
+                        <span className="opacity-40 shrink-0">bytes</span>
+                        <span className="opacity-60">{formatBytes(selectedEdge.bytesIn)} in</span>
+                        <span className="opacity-60">{formatBytes(selectedEdge.bytesOut)} out</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Mesh summary — bottom-right when no edge selected */}
+                {!selectedEdge && (graph?.totalRequests ?? 0) > 0 && (
+                  <div className="absolute bottom-2 right-2 pointer-events-none">
+                    <div className="flex items-center gap-3 bg-base-200/80 backdrop-blur-sm border border-base-content/[0.06] rounded px-2.5 py-1.5 text-[10px] font-mono tabular-nums">
+                      <span className="opacity-30">{graph.totalRequests} req</span>
+                      <span className="opacity-20">·</span>
+                      <span className="opacity-30">{graph.edges?.length ?? 0} paths</span>
+                      {meshWindowLabel && (
+                        <>
+                          <span className="opacity-20">·</span>
+                          <span className="opacity-30">{meshWindowLabel}</span>
+                        </>
                       )}
-                      {selectedEdge.topPaths.map((p) => (
-                        <div key={p.path} className="flex items-center gap-2 opacity-40 font-mono">
-                          <span className="truncate max-w-[200px]">{p.path}</span>
-                          <span className="shrink-0">{p.count}x</span>
-                        </div>
-                      ))}
+                      {nativeGraph?.edges?.length > 0 && (() => {
+                        const allP50 = nativeGraph.edges
+                          .map((e) => e.latency?.percentiles?.["0.5"] ?? e.latency?.percentiles?.p50)
+                          .filter((v) => v != null);
+                        const avgP50 = allP50.length ? Math.round((allP50.reduce((a, b) => a + b, 0) / allP50.length) * 1000) : null;
+                        return avgP50 != null ? (
+                          <>
+                            <span className="opacity-20">·</span>
+                            <span className={`opacity-40 ${avgP50 > 200 ? "text-warning" : ""}`}>p50 {avgP50}ms</span>
+                          </>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full gap-3">
-                <Network className="size-7 opacity-10" />
+              <div className="flex flex-col items-center justify-center h-full gap-2">
+                <Network className="size-6 opacity-10" />
                 <div className="text-center">
                   <p className="text-sm font-medium opacity-30">Service Mesh</p>
-                  <p className="text-xs opacity-20 mt-1">
-                    {meshStatus ? "Enable Mesh in the toolbar to capture traffic" : "Loading…"}
+                  <p className="text-xs opacity-20 mt-0.5">
+                    {meshStatus ? "Enable and configure mesh in /settings/services to capture traffic" : "Loading…"}
                   </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Stats panel — pinned below the graph */}
-          {(meshRunning || reverseStatus?.running) && (
-            <div className="shrink-0 overflow-y-auto border-t border-base-content/[0.06] p-3 space-y-3 max-h-[260px]">
-              {meshRunning && <MeshNativeStats snapshot={nativeGraph} />}
-              {reverseStatus?.running && (
-                <ReverseProxyPanel stats={reverseStats} graph={reverseGraph} port={reverseStatus.port} />
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -1649,8 +2301,10 @@ function ServicesPage() {
           service={selectedService}
           onClose={handleClose}
           onRefresh={servicesRefresh}
-          traffic={traffic}
           graph={graph}
+          proxyRoutes={proxyRoutes}
+          localDomain={localDomain}
+          proxyPort={proxyPort}
         />
       )}
     </div>

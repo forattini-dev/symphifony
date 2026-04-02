@@ -205,7 +205,7 @@ const SERVICE_STATUS_DOT = {
 };
 const LOCAL_DOMAIN_PORT_SUFFIX = /:\d+$/;
 
-function normalizeLocalDomain(host: string = ""): string {
+function normalizeLocalDomain(host = "") {
   const trimmed = host.trim();
   if (!trimmed) return "";
   const withoutScheme = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
@@ -213,7 +213,28 @@ function normalizeLocalDomain(host: string = ""): string {
   return hostOnly.replace(LOCAL_DOMAIN_PORT_SUFFIX, "").toLowerCase();
 }
 
-function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpdate, onVariableDelete, onVariableAdd, proxyRoutes = [], onProxyRoutesChange }) {
+/** Display: array → "a, b, c" | string → as-is | undefined → "" */
+function hostToDisplay(host) {
+  if (!host) return "";
+  return Array.isArray(host) ? host.join(", ") : host;
+}
+/** Parse: "a, b, c" → ["a","b","c"] | single → "single" | empty → undefined */
+function parseHostInput(raw) {
+  if (!raw || !raw.trim()) return undefined;
+  const parts = raw.split(",").map((h) => h.trim()).filter(Boolean);
+  if (parts.length === 0) return undefined;
+  return parts.length === 1 ? parts[0] : parts;
+}
+
+function formatHttpsOrigin(host, port) {
+  if (!host) return "";
+  const normalizedPort = Number(port ?? 443);
+  return normalizedPort === 443
+    ? `https://${host}`
+    : `https://${host}:${normalizedPort}`;
+}
+
+function ServiceConfigCard({ service, variables, onSave, onDelete, onAssignPort, onVariableUpdate, onVariableDelete, onVariableAdd, proxyRoutes = [], onProxyRoutesChange }) {
   const [editing, setEditing] = useState(false);
   const [varsOpen, setVarsOpen] = useState(false);
   const [routesOpen, setRoutesOpen] = useState(false);
@@ -275,6 +296,15 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
     await onDelete(service.id);
   };
 
+  const handleAssignPort = async () => {
+    setBusy(true);
+    try {
+      await onAssignPort?.(service);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="card bg-base-200">
       <div className="card-body p-4 gap-2">
@@ -294,14 +324,35 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
                   <Heart className="size-2.5" /> healthcheck
                 </span>
               )}
+              {!service.port && (
+                <span className="badge badge-xs badge-warning badge-outline gap-1">
+                  <Info className="size-2.5" /> no port
+                </span>
+              )}
             </div>
             <div className="font-mono text-xs opacity-40 truncate mt-0.5">{service.command}</div>
             {service.cwd && <span className="text-[11px] opacity-25 font-mono">{service.cwd}</span>}
             {service.stopCommand && (
               <p className="text-[11px] opacity-25 mt-0.5">stops with: <span className="font-mono">{service.stopCommand}</span></p>
             )}
+            {!service.port && (
+              <p className="text-[11px] opacity-40 mt-1">
+                Fifony can assign a free port above <span className="font-mono">12000</span> and use it for <span className="font-mono">PORT</span> and reverse-proxy routing.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
+            {!service.port && (
+              <button
+                className="btn btn-xs btn-ghost gap-1 text-warning opacity-70 hover:opacity-100"
+                onClick={handleAssignPort}
+                disabled={busy}
+                title="Assign a managed port"
+              >
+                {busy ? <Loader2 className="size-3 animate-spin" /> : <Network className="size-3" />}
+                Assign port
+              </button>
+            )}
             <button
               className={`btn btn-xs btn-ghost gap-1 ${varsOpen ? "text-primary" : "opacity-50 hover:opacity-100"}`}
               onClick={() => setVarsOpen((v) => !v)}
@@ -334,7 +385,7 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
         {/* Per-service variables */}
         {varsOpen && (
           <div className="pl-5 border-l border-base-content/10 ml-1">
-            <p className="text-xs opacity-40 mb-1.5">These override global variables for this service.</p>
+            <p className="text-xs opacity-40 mb-1.5">These override global variables for this service. Changes take effect on the next restart.</p>
             <VariablesList
               scope={service.id}
               variables={variables}
@@ -362,13 +413,14 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
                     <div key={route.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center py-1.5 border-b border-base-content/5 last:border-0">
                       <input
                         className="input input-xs input-bordered font-mono"
-                        value={route.host ?? ""}
+                        value={hostToDisplay(route.host)}
                         onChange={(e) => {
-                          const updated = { ...route, host: e.target.value || undefined };
+                          const updated = { ...route, host: parseHostInput(e.target.value) };
                           const next = proxyRoutes.map((r, i) => i === globalIdx ? updated : r);
                           onProxyRoutesChange?.(next);
                         }}
                         placeholder="app.myproject.local"
+                        title="Comma-separate for multiple hosts"
                       />
                       <div className="flex items-center gap-1">
                         <input
@@ -454,6 +506,9 @@ function ServiceConfigCard({ service, variables, onSave, onDelete, onVariableUpd
                     min={1}
                     max={65535}
                   />
+                  <div className="label py-0.5">
+                    <span className="label-text-alt text-[11px] opacity-40">If empty, Fifony assigns a free port above 12000 and injects it as <span className="font-mono">PORT</span>.</span>
+                  </div>
                 </label>
               </div>
             </fieldset>
@@ -613,6 +668,9 @@ function AddServiceForm({ onAdd, onCancel }) {
                 min={1}
                 max={65535}
               />
+              <div className="label py-0.5">
+                <span className="label-text-alt text-[11px] opacity-40">If empty, Fifony assigns a free port above 12000 and injects it as <span className="font-mono">PORT</span>.</span>
+              </div>
             </label>
           </div>
         </fieldset>
@@ -688,19 +746,25 @@ function EmptyServicesState({ onAdd, onDetect, detecting }) {
 // ── Proxy route row ───────────────────────────────────────────────────────────
 
 function ProxyRouteRow({ route, services, onChange, onDelete, localDomain }) {
-  const [useService, setUseService] = useState(!!route.serviceId);
+  const [useService, setUseService] = useState(Boolean(route.serviceId));
+
+  useEffect(() => {
+    setUseService(Boolean(route.serviceId));
+  }, [route.serviceId]);
 
   const update = (patch) => onChange({ ...route, ...patch });
   const hostPlaceholder = localDomain ? `app.${localDomain}` : "app.myproject.local";
+  const selectedService = services.find((service) => service.id === route.serviceId);
 
   return (
-    <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 items-center py-1.5 border-b border-base-content/5 last:border-0">
-      {/* Host */}
+    <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 items-start py-1.5 border-b border-base-content/5 last:border-0">
+      {/* Host — comma-separated for multiple */}
       <input
         className="input input-xs input-bordered font-mono"
-        value={route.host ?? ""}
-        onChange={(e) => update({ host: e.target.value || undefined })}
+        value={hostToDisplay(route.host)}
+        onChange={(e) => update({ host: parseHostInput(e.target.value) })}
         placeholder={hostPlaceholder}
+        title="Comma-separate for multiple hosts: app.myproject.local, www.myproject.local"
       />
 
       {/* Path prefix */}
@@ -727,23 +791,39 @@ function ProxyRouteRow({ route, services, onChange, onDelete, localDomain }) {
       {/* Target */}
       <div className="flex items-center gap-1">
         <button
+          type="button"
           className="btn btn-xs btn-ghost font-mono opacity-50 hover:opacity-100 shrink-0"
-          onClick={() => { setUseService((v) => !v); update({ serviceId: undefined, target: undefined }); }}
+          onClick={() => {
+            if (useService) {
+              setUseService(false);
+              update({ serviceId: undefined, target: "" });
+              return;
+            }
+            setUseService(true);
+            update({ serviceId: undefined, target: undefined });
+          }}
           title={useService ? "Switch to custom URL" : "Switch to service"}
         >
           {useService ? "svc" : "url"}
         </button>
         {useService ? (
-          <select
-            className="select select-xs select-bordered flex-1 min-w-0 font-mono text-[11px]"
-            value={route.serviceId ?? ""}
-            onChange={(e) => update({ serviceId: e.target.value || undefined, target: undefined })}
-          >
-            <option value="">— pick service —</option>
-            {services.filter((s) => s.port).map((s) => (
-              <option key={s.id} value={s.id}>{s.name} :{s.port}</option>
-            ))}
-          </select>
+          <div className="flex-1 min-w-0">
+            <select
+              className="select select-xs select-bordered w-full font-mono text-[11px]"
+              value={route.serviceId ?? ""}
+              onChange={(e) => update({ serviceId: e.target.value || undefined, target: undefined })}
+            >
+              <option value="">— pick service —</option>
+              {services.map((s) => (
+                <option key={s.id} value={s.id} disabled={!s.port}>
+                  {s.name}{s.port ? ` :${s.port}` : " (missing port)"}
+                </option>
+              ))}
+            </select>
+            {selectedService && !selectedService.port && (
+              <p className="text-[10px] text-warning mt-1">This service needs a configured port before the proxy can route to it.</p>
+            )}
+          </div>
         ) : (
           <input
             className="input input-xs input-bordered font-mono flex-1 min-w-0"
@@ -762,46 +842,137 @@ function ProxyRouteRow({ route, services, onChange, onDelete, localDomain }) {
   );
 }
 
-// ── Reverse proxy section ─────────────────────────────────────────────────────
+// ── Network runtime section ───────────────────────────────────────────────────
 
 function ReverseProxySection({ services, proxyRoutes, onRoutesChange }) {
   const [status, setStatus] = useState(null);
+  const [meshStatus, setMeshStatus] = useState(null);
+  const [meshOpen, setMeshOpen] = useState(false);
+  const [proxyOpen, setProxyOpen] = useState(true);
   const [portDraft, setPortDraft] = useState("");
   const [domainDraft, setDomainDraft] = useState("");
+  const [meshPortDraft, setMeshPortDraft] = useState("");
+  const [meshBufferDraft, setMeshBufferDraft] = useState("");
+  const [meshWindowDraft, setMeshWindowDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [portSaved, setPortSaved] = useState(false);
   const [domainSaved, setDomainSaved] = useState(false);
+  const [meshPortSaved, setMeshPortSaved] = useState(false);
+  const [meshBufferSaved, setMeshBufferSaved] = useState(false);
+  const [meshWindowSaved, setMeshWindowSaved] = useState(false);
 
   useEffect(() => {
-    api.get("/proxy/reverse/status").then((res) => {
-      if (res) {
-        setStatus(res);
-        setPortDraft(String(res.port ?? 4433));
-        setDomainDraft(res.localDomain ?? "");
+    Promise.all([
+      api.get("/proxy/reverse/status"),
+      api.get("/mesh/status"),
+      api.get(`/settings/${encodeURIComponent("runtime.meshBufferSize")}`).catch(() => null),
+      api.get(`/settings/${encodeURIComponent("runtime.meshLiveWindowSeconds")}`).catch(() => null),
+    ]).then(([reverseRes, meshRes, meshBufferRes, meshWindowRes]) => {
+      if (reverseRes) {
+        setStatus(reverseRes);
+        setPortDraft(String(reverseRes.port ?? 4433));
+        setDomainDraft(reverseRes.localDomain ?? "");
       }
-    }).catch(() => {});
+      if (meshRes) {
+        setMeshStatus(meshRes);
+        setMeshPortDraft(String(meshRes.port ?? ""));
+      }
+      setMeshBufferDraft(String(meshBufferRes?.value ?? 1000));
+      setMeshWindowDraft(String(meshWindowRes?.value ?? 900));
+      setError("");
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to load network runtime status.");
+    });
   }, []);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const [reverseRes, meshRes, meshBufferRes, meshWindowRes] = await Promise.all([
+        api.get("/proxy/reverse/status"),
+        api.get("/mesh/status"),
+        api.get(`/settings/${encodeURIComponent("runtime.meshBufferSize")}`).catch(() => null),
+        api.get(`/settings/${encodeURIComponent("runtime.meshLiveWindowSeconds")}`).catch(() => null),
+      ]);
+      if (reverseRes) {
+        setStatus(reverseRes);
+        setPortDraft(String(reverseRes.port ?? 4433));
+        setDomainDraft(reverseRes.localDomain ?? "");
+      }
+      if (meshRes) {
+        setMeshStatus(meshRes);
+        setMeshPortDraft(String(meshRes.port ?? ""));
+      }
+      setMeshBufferDraft(String(meshBufferRes?.value ?? (meshBufferDraft || 1000)));
+      setMeshWindowDraft(String(meshWindowRes?.value ?? (meshWindowDraft || 900)));
+      setError("");
+      return { reverseRes, meshRes };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh network runtime status.");
+      return null;
+    }
+  }, [meshBufferDraft, meshWindowDraft]);
+
+  const handleMeshToggle = async (enabled) => {
+    setBusy(true);
+    try {
+      const res = await api.post("/mesh/toggle", { enabled });
+      setMeshStatus((prev) => ({ ...prev, enabled, running: res.running, port: res.port }));
+      setError("");
+      await refreshStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${enabled ? "start" : "stop"} service mesh.`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleToggle = async (enabled) => {
     setBusy(true);
     try {
+      if (enabled) {
+        const draftPort = parseInt(portDraft, 10);
+        const portValid = draftPort >= 1 && draftPort <= 65535;
+        const portChanged = portValid && draftPort !== status?.port;
+        if (portChanged) {
+          await api.post(`/settings/${encodeURIComponent("runtime.reverseProxyPort")}`, { value: draftPort, scope: "runtime", source: "user" });
+        }
+        // If already running, restart so the new port takes effect
+        if (status?.running) {
+          await api.post("/services/reverse-proxy/restart", {});
+          await refreshStatus();
+          return;
+        }
+      }
       const res = await api.post("/proxy/reverse/toggle", { enabled });
       setStatus((prev) => ({ ...prev, enabled, running: res.running, port: res.port }));
-    } catch {} finally {
+      setError("");
+      await refreshStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${enabled ? "start" : "stop"} reverse proxy.`);
+    } finally {
       setBusy(false);
     }
   };
 
   const handlePortSave = async () => {
     const p = parseInt(portDraft, 10);
-    if (!p || p < 1024 || p > 65535) return;
+    if (!p || p < 1 || p > 65535) return;
     setBusy(true);
     try {
       await api.post(`/settings/${encodeURIComponent("runtime.reverseProxyPort")}`, { value: p, scope: "runtime", source: "user" });
+      const wasRunning = status?.running;
       setStatus((prev) => ({ ...prev, port: p }));
+      if (wasRunning) {
+        await api.post("/services/reverse-proxy/restart", {});
+      }
+      setError("");
+      await refreshStatus();
       setPortSaved(true);
       setTimeout(() => setPortSaved(false), 1500);
-    } catch {} finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save reverse proxy port.");
+    } finally {
       setBusy(false);
     }
   };
@@ -812,9 +983,76 @@ function ReverseProxySection({ services, proxyRoutes, onRoutesChange }) {
     try {
       await api.put("/proxy/reverse/domain", { localDomain: d });
       setStatus((prev) => ({ ...prev, localDomain: d }));
+      setError("");
+      await refreshStatus();
       setDomainSaved(true);
       setTimeout(() => setDomainSaved(false), 1500);
-    } catch {} finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save reverse proxy domain.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMeshPortSave = async () => {
+    const p = parseInt(meshPortDraft, 10);
+    if (Number.isNaN(p) || p < 0 || p > 65535) return;
+    setBusy(true);
+    try {
+      await api.post(`/settings/${encodeURIComponent("runtime.meshProxyPort")}`, { value: p, scope: "runtime", source: "user" });
+      const wasEnabled = meshStatus?.enabled === true;
+      if (wasEnabled) {
+        await api.post("/mesh/toggle", { enabled: true });
+      }
+      setError("");
+      await refreshStatus();
+      setMeshPortSaved(true);
+      setTimeout(() => setMeshPortSaved(false), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save mesh port.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMeshBufferSave = async () => {
+    const size = parseInt(meshBufferDraft, 10);
+    if (!size || size < 100 || size > 100000) return;
+    setBusy(true);
+    try {
+      await api.post(`/settings/${encodeURIComponent("runtime.meshBufferSize")}`, { value: size, scope: "runtime", source: "user" });
+      const wasEnabled = meshStatus?.enabled === true;
+      if (wasEnabled) {
+        await api.post("/mesh/toggle", { enabled: true });
+      }
+      setError("");
+      await refreshStatus();
+      setMeshBufferSaved(true);
+      setTimeout(() => setMeshBufferSaved(false), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save mesh buffer.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMeshWindowSave = async () => {
+    const seconds = parseInt(meshWindowDraft, 10);
+    if (!seconds || seconds < 30 || seconds > 86400) return;
+    setBusy(true);
+    try {
+      await api.post(`/settings/${encodeURIComponent("runtime.meshLiveWindowSeconds")}`, { value: seconds, scope: "runtime", source: "user" });
+      const wasEnabled = meshStatus?.enabled === true;
+      if (wasEnabled) {
+        await api.post("/mesh/toggle", { enabled: true });
+      }
+      setError("");
+      await refreshStatus();
+      setMeshWindowSaved(true);
+      setTimeout(() => setMeshWindowSaved(false), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save mesh live window.");
+    } finally {
       setBusy(false);
     }
   };
@@ -833,168 +1071,315 @@ function ReverseProxySection({ services, proxyRoutes, onRoutesChange }) {
 
   const enabled = status?.enabled ?? false;
   const running = status?.running ?? false;
+  const meshEnabled = meshStatus?.enabled ?? false;
+  const meshRunning = meshStatus?.running ?? false;
   const proxyPort = status?.port ?? 4433;
   const localDomain = status?.localDomain ?? "";
   const normalizedDomain = normalizeLocalDomain(localDomain);
-  const publicHost = normalizedDomain || "localhost";
-  const httpsUrl = running ? `https://${publicHost}:${proxyPort}` : null;
+  const routeHosts = [...new Set(proxyRoutes.map((r) => normalizeLocalDomain(r.host || "")).filter(Boolean))];
+  const previewRouteHost = routeHosts.find((host) => !host.startsWith("*."));
+  const primaryHost = normalizedDomain || previewRouteHost || "localhost";
+  const httpsUrl = formatHttpsOrigin(primaryHost, proxyPort);
   const certHosts = ["localhost", ...(normalizedDomain ? [normalizedDomain, `*.${normalizedDomain}`] : [])];
   const certPath = status?.certPath ?? null;
   const caCertPath = status?.caCertPath ?? null;
 
   // Collect unique hosts that need /etc/hosts entries
   // Include the localDomain itself if set
-  const hostsFromRoutes = proxyRoutes.map((r) => r.host).filter(Boolean).filter((h) => !h.endsWith("localhost"));
-  const customHosts = [...new Set([...(normalizedDomain ? [normalizedDomain] : []), ...hostsFromRoutes])];
+  const customHosts = [...new Set([...(normalizedDomain ? [normalizedDomain] : []), ...routeHosts.filter((h) => h !== "localhost")])];
 
   return (
     <SettingsSection
-      icon={ShieldCheck}
-      title="HTTPS Reverse Proxy"
-      description="Serve the dashboard over HTTPS with a self-signed certificate. Route services by subdomain or path."
+      icon={Network}
+      title="Local Network Runtime"
+      description="Detached infrastructure process that keeps the service mesh and HTTPS reverse proxy running even when Fifony is offline."
     >
       <div className="space-y-5">
-        {/* Enable + port + domain row */}
-        <div className="flex items-end gap-4 flex-wrap">
-          <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-[14rem]">
-            <input
-              type="checkbox"
-              className="toggle toggle-primary toggle-sm"
-              checked={enabled}
-              disabled={busy || status === null}
-              onChange={(e) => handleToggle(e.target.checked)}
-            />
-            <div>
-              <p className="text-sm font-medium">Enable HTTPS proxy</p>
-              <p className="text-xs opacity-50 mt-0.5">
-                {running
-                  ? <span className="text-success">Running</span>
-                  : enabled ? "Starts on next boot" : "Disabled"}
-              </p>
-            </div>
-          </label>
-
-          <div className="flex items-end gap-1.5">
-            <label className="form-control">
-              <div className="label py-0.5"><span className="label-text text-xs">Local domain</span></div>
-              <input
-                className="input input-bordered input-sm font-mono text-xs w-40"
-                value={domainDraft}
-                onChange={(e) => setDomainDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleDomainSave(); }}
-                placeholder="spark.local"
-              />
-            </label>
-            <button className="btn btn-sm btn-ghost" onClick={handleDomainSave} disabled={busy} title="Save domain">
-              {domainSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
-            </button>
-          </div>
-
-          <div className="flex items-end gap-1.5">
-            <label className="form-control">
-              <div className="label py-0.5"><span className="label-text text-xs">Port</span></div>
-              <input
-                type="number"
-                className="input input-bordered input-sm font-mono text-xs w-24"
-                value={portDraft}
-                min={1024}
-                max={65535}
-                onChange={(e) => setPortDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handlePortSave(); }}
-                placeholder="4433"
-              />
-            </label>
-            <button className="btn btn-sm btn-ghost" onClick={handlePortSave} disabled={busy} title="Save port">
-              {portSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Live HTTPS URL */}
-        {httpsUrl && (
-          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-success/10 border border-success/20">
-            <ShieldCheck className="size-4 text-success shrink-0" />
-            <p className="text-xs font-mono text-success flex-1">{httpsUrl}</p>
-            <a href={httpsUrl} target="_blank" rel="noopener noreferrer" className="btn btn-xs btn-ghost gap-1 text-success">
-              <ExternalLink className="size-3" /> Open
-            </a>
+        {error && (
+          <div className="alert alert-error py-2 text-xs">
+            <span className="font-mono">{error}</span>
           </div>
         )}
 
-        {/* Route table */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold opacity-50 uppercase tracking-wider">Routing rules</p>
-          </div>
-
-          {proxyRoutes.length > 0 && (
+        <div className="rounded-xl border border-base-content/10 bg-base-200/40">
+          <button
+            type="button"
+            className="w-full flex items-start justify-between gap-3 p-4 text-left"
+            onClick={() => setMeshOpen((v) => !v)}
+          >
             <div>
-              {/* Column headers */}
-              <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 px-0 pb-1">
-                <span className="text-[10px] opacity-30 uppercase tracking-wider">Host</span>
-                <span className="text-[10px] opacity-30 uppercase tracking-wider">Path prefix</span>
-                <span className="text-[10px] opacity-30 uppercase tracking-wider">Target</span>
-                <span />
-              </div>
-              {proxyRoutes.map((route, idx) => (
-                <ProxyRouteRow
-                  key={route.id}
-                  route={route}
-                  services={services}
-                  localDomain={normalizedDomain}
-                  onChange={(updated) => handleRouteChange(idx, updated)}
-                  onDelete={() => handleRouteDelete(idx)}
-                />
-              ))}
+              <p className="text-sm font-semibold">Service Mesh</p>
+              <p className="text-xs opacity-50 mt-0.5">Captures service-to-service HTTP(S) proxy traffic for the graph, observed protocol mix, request volume, and error rate.</p>
             </div>
-          )}
-
-          <button className="btn btn-xs btn-ghost gap-1 opacity-50 hover:opacity-100" onClick={handleRouteAdd}>
-            <Plus className="size-3" /> Add rule
+            <div className="flex items-center gap-3 shrink-0">
+              <div>
+                <p className="text-sm font-medium">Enable mesh</p>
+                <p className="text-xs opacity-50 mt-0.5">
+                  {meshRunning
+                    ? <span className="text-success">Running</span>
+                    : meshEnabled ? "Enabled in the shared network runtime" : "Disabled"}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                className="toggle toggle-primary toggle-sm"
+                checked={meshEnabled}
+                disabled={busy || meshStatus === null}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleMeshToggle(e.target.checked);
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <ChevronDown className={`size-4 opacity-40 transition-transform ${meshOpen ? "rotate-180" : ""}`} />
+            </div>
           </button>
 
-          {proxyRoutes.length === 0 && (
-            <p className="text-xs opacity-30">
-              No custom rules — all traffic goes to the dashboard. Add rules to route by subdomain or path.
-            </p>
+          {meshOpen && (
+            <div className="px-4 pb-4 pt-0 border-t border-base-content/5">
+              <div className="flex items-end gap-4 flex-wrap">
+                <div className="flex items-end gap-1.5">
+                  <label className="form-control">
+                    <div className="label py-0.5"><span className="label-text text-xs">Mesh port</span></div>
+                    <input
+                      type="number"
+                      className="input input-bordered input-sm font-mono text-xs w-24"
+                      value={meshPortDraft}
+                      min={0}
+                      max={65535}
+                      onChange={(e) => setMeshPortDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleMeshPortSave(); }}
+                      placeholder="0"
+                    />
+                  </label>
+                  <button className="btn btn-sm btn-ghost" onClick={handleMeshPortSave} disabled={busy} title="Save mesh port">
+                    {meshPortSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+                  </button>
+                </div>
+
+                <div className="flex items-end gap-1.5">
+                  <label className="form-control">
+                    <div className="label py-0.5"><span className="label-text text-xs">Traffic buffer</span></div>
+                    <input
+                      type="number"
+                      className="input input-bordered input-sm font-mono text-xs w-28"
+                      value={meshBufferDraft}
+                      min={100}
+                      max={100000}
+                      onChange={(e) => setMeshBufferDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleMeshBufferSave(); }}
+                      placeholder="1000"
+                    />
+                  </label>
+                  <button className="btn btn-sm btn-ghost" onClick={handleMeshBufferSave} disabled={busy} title="Save traffic buffer">
+                    {meshBufferSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+                  </button>
+                </div>
+
+                <div className="flex items-end gap-1.5">
+                  <label className="form-control">
+                    <div className="label py-0.5"><span className="label-text text-xs">Live window (s)</span></div>
+                    <input
+                      type="number"
+                      className="input input-bordered input-sm font-mono text-xs w-28"
+                      value={meshWindowDraft}
+                      min={30}
+                      max={86400}
+                      onChange={(e) => setMeshWindowDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleMeshWindowSave(); }}
+                      placeholder="900"
+                    />
+                  </label>
+                  <button className="btn btn-sm btn-ghost" onClick={handleMeshWindowSave} disabled={busy} title="Save live window">
+                    {meshWindowSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
-        {/* /etc/hosts helper */}
-        {customHosts.length > 0 && (
-          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-warning/10 border border-warning/20">
-            <Info className="size-3.5 shrink-0 mt-0.5 text-warning" />
-            <div className="space-y-1.5 flex-1 min-w-0">
-              <p className="text-xs font-medium">Add to <span className="font-mono">/etc/hosts</span></p>
-              <pre className="text-[11px] font-mono bg-base-300/60 rounded p-2 select-all leading-relaxed">
-                {customHosts.map((h) => `127.0.0.1  ${h}`).join("\n")}
-              </pre>
-              <p className="text-[11px] opacity-50">Required for custom domains to resolve locally. Run <span className="font-mono">sudo nano /etc/hosts</span>.</p>
+        <div className="rounded-xl border border-base-content/10 bg-base-200/40">
+          <button
+            type="button"
+            className="w-full flex items-start justify-between gap-3 p-4 text-left"
+            onClick={() => setProxyOpen((v) => !v)}
+          >
+            <div>
+              <p className="text-sm font-semibold">HTTPS Reverse Proxy</p>
+              <p className="text-xs opacity-50 mt-0.5">Serve the dashboard over HTTPS with a self-signed certificate and route services by subdomain or path.</p>
             </div>
-          </div>
-        )}
-
-        {/* Cert info */}
-        {enabled && certPath && (
-          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-base-300/50">
-            <Info className="size-3.5 shrink-0 mt-0.5 opacity-40" />
-            <div className="text-xs opacity-50 space-y-1">
-              <p>
-                Cert covers: {certHosts.map((host, idx) => (
-                  <span key={host} className="font-mono">
-                    {idx === 0 ? "" : ", "}{host}
-                  </span>
-                ))}
-              </p>
-              {caCertPath && (
-                <p>
-                  To trust in browser/OS: import the CA cert at <span className="font-mono select-all">{caCertPath}</span>
+            <div className="flex items-center gap-3 shrink-0">
+              <div>
+                <p className="text-sm font-medium">Enable HTTPS proxy</p>
+                <p className="text-xs opacity-50 mt-0.5">
+                  {running
+                    ? <span className="text-success">Running</span>
+                    : enabled ? "Enabled in the shared network runtime" : "Disabled"}
                 </p>
-              )}
-              <p>Or open the HTTPS URL in Chrome and proceed past the warning.</p>
+              </div>
+              <input
+                type="checkbox"
+                className="toggle toggle-primary toggle-sm"
+                checked={enabled}
+                disabled={busy || status === null}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleToggle(e.target.checked);
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <ChevronDown className={`size-4 opacity-40 transition-transform ${proxyOpen ? "rotate-180" : ""}`} />
+            </div>
+          </button>
+
+          {proxyOpen && (
+            <div className="px-4 pb-4 pt-0 border-t border-base-content/5 space-y-5">
+          {/* Enable + port + domain row */}
+          <div className="flex items-end gap-4 flex-wrap">
+            <div className="flex items-end gap-1.5">
+              <label className="form-control">
+                <div className="label py-0.5"><span className="label-text text-xs">Local domain</span></div>
+                <input
+                  className="input input-bordered input-sm font-mono text-xs w-40"
+                  value={domainDraft}
+                  onChange={(e) => setDomainDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleDomainSave(); }}
+                  placeholder="spark.local"
+                />
+              </label>
+              <button className="btn btn-sm btn-ghost" onClick={handleDomainSave} disabled={busy} title="Save domain">
+                {domainSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+              </button>
+            </div>
+
+            <div className="flex items-end gap-1.5">
+              <label className="form-control">
+                <div className="label py-0.5"><span className="label-text text-xs">Port</span></div>
+                <input
+                  type="number"
+                  className="input input-bordered input-sm font-mono text-xs w-24"
+                  value={portDraft}
+                  min={1}
+                  max={65535}
+                  onChange={(e) => setPortDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handlePortSave(); }}
+                  placeholder="4433"
+                />
+              </label>
+              <button className="btn btn-sm btn-ghost" onClick={handlePortSave} disabled={busy} title="Save port">
+                {portSaved ? <Check className="size-3.5 text-success" /> : <Check className="size-3.5" />}
+              </button>
             </div>
           </div>
-        )}
+
+          <p className="text-[11px] opacity-45 -mt-2">
+            Port <span className="font-mono">443</span> is valid. On Linux, binding privileged ports may require elevated privileges or <span className="font-mono">CAP_NET_BIND_SERVICE</span>.
+          </p>
+
+          {/* Live HTTPS URL */}
+          {enabled && (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-success/10 border border-success/20">
+              <ShieldCheck className={`size-4 shrink-0 ${running ? "text-success" : "opacity-40"}`} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-mono ${running ? "text-success" : "opacity-60"}`}>{httpsUrl}</p>
+                <p className="text-[11px] opacity-45 mt-0.5">
+                  {running ? "Dashboard entrypoint over TLS" : "Configured entrypoint. Start the proxy to serve this address."}
+                </p>
+              </div>
+              {running && (
+                <a href={httpsUrl} target="_blank" rel="noopener noreferrer" className="btn btn-xs btn-ghost gap-1 text-success">
+                  <ExternalLink className="size-3" /> Open
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Route table */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold opacity-50 uppercase tracking-wider">Routing rules</p>
+            </div>
+
+            {proxyRoutes.length > 0 && (
+              <div>
+                <div className="grid grid-cols-[1fr_1fr_1.5fr_auto] gap-2 px-0 pb-1">
+                  <span className="text-[10px] opacity-30 uppercase tracking-wider">Host</span>
+                  <span className="text-[10px] opacity-30 uppercase tracking-wider">Path prefix</span>
+                  <span className="text-[10px] opacity-30 uppercase tracking-wider">Target</span>
+                  <span />
+                </div>
+                {proxyRoutes.map((route, idx) => (
+                  <ProxyRouteRow
+                    key={route.id}
+                    route={route}
+                    services={services}
+                    localDomain={normalizedDomain}
+                    onChange={(updated) => handleRouteChange(idx, updated)}
+                    onDelete={() => handleRouteDelete(idx)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <button className="btn btn-xs btn-ghost gap-1 opacity-50 hover:opacity-100" onClick={handleRouteAdd}>
+              <Plus className="size-3" /> Add rule
+            </button>
+
+            {proxyRoutes.length === 0 && (
+              <p className="text-xs opacity-30">
+                No custom rules — all traffic goes to the dashboard. Add rules to route by subdomain or path.
+              </p>
+            )}
+          </div>
+
+          {/* /etc/hosts helper */}
+          {customHosts.length > 0 && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-warning/10 border border-warning/20">
+              <Info className="size-3.5 shrink-0 mt-0.5 text-warning" />
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <p className="text-xs font-medium">Add to <span className="font-mono">/etc/hosts</span></p>
+                <pre className="text-[11px] font-mono bg-base-300/60 rounded p-2 select-all leading-relaxed">
+                  {customHosts.map((h) => `127.0.0.1  ${h}`).join("\n")}
+                </pre>
+                <p className="text-[11px] opacity-50">Required for custom domains to resolve locally. Run <span className="font-mono">sudo nano /etc/hosts</span>.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Cert info */}
+          {enabled && certPath && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-base-300/50">
+              <Info className="size-3.5 shrink-0 mt-0.5 opacity-40" />
+              <div className="text-xs opacity-50 space-y-1">
+                <p>
+                  Cert covers: {certHosts.map((host, idx) => (
+                    <span key={host} className="font-mono">
+                      {idx === 0 ? "" : ", "}{host}
+                    </span>
+                  ))}
+                </p>
+                {caCertPath && (
+                  <p>
+                    To trust in browser/OS: import the CA cert at <span className="font-mono select-all">{caCertPath}</span>
+                  </p>
+                )}
+                <p>Or open the HTTPS URL in Chrome and proceed past the warning.</p>
+              </div>
+            </div>
+          )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-base-300/40">
+          <Info className="size-3.5 shrink-0 mt-0.5 opacity-40" />
+          <div className="text-xs opacity-50 space-y-1">
+            <p>The mesh and HTTPS proxy share one detached network runtime process.</p>
+            <p>Stopping Fifony does not stop this runtime. When Fifony comes back, it reconciles the runtime state, port, and log automatically.</p>
+            <p>Logs are available in <span className="font-mono">/services</span> under the runtime services.</p>
+          </div>
+        </div>
       </div>
     </SettingsSection>
   );
@@ -1008,10 +1393,7 @@ function ServicesSettings() {
   const variablesQuery = useVariables();
   const variables = getVariablesList(variablesQuery.data);
   const { upsert, remove } = useVariableMutations();
-  const servicesRefresh = useCallback(() => {
-    if (liveMode) return Promise.resolve();
-    return refresh();
-  }, [liveMode, refresh]);
+  const servicesRefresh = useCallback(() => refresh(), [refresh]);
   const [addingNew, setAddingNew] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectedSuggestions, setDetectedSuggestions] = useState([]);
@@ -1038,6 +1420,11 @@ function ServicesSettings() {
 
   const handleServiceSave = useCallback(async (entry) => {
     await api.put(`/services/${entry.id}`, entry);
+    await servicesRefresh();
+  }, [servicesRefresh]);
+
+  const handleServiceAssignPort = useCallback(async (entry) => {
+    await api.post(`/services/${entry.id}/assign-port`, {});
     await servicesRefresh();
   }, [servicesRefresh]);
 
@@ -1075,7 +1462,7 @@ function ServicesSettings() {
       <SettingsSection
         icon={Globe}
         title="Global variables"
-        description="Environment variables injected into every service on start. Per-service variables below take precedence."
+        description="Environment variables injected into every service on start. Per-service variables below take precedence. Changes take effect on the next restart."
       >
         {variablesQuery.isLoading ? (
           <div className="flex items-center gap-2 opacity-40"><Loader2 className="size-3 animate-spin" /><span className="text-xs">Loading...</span></div>
@@ -1149,6 +1536,7 @@ function ServicesSettings() {
                 variables={variables}
                 onSave={handleServiceSave}
                 onDelete={handleServiceDelete}
+                onAssignPort={handleServiceAssignPort}
                 onVariableUpdate={handleVariableUpdate}
                 onVariableDelete={remove}
                 onVariableAdd={upsert}

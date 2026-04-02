@@ -422,7 +422,7 @@ describe("operation: re-execute — learning from previous failures", () => {
     assert.match(context, /PATCH \/api\/items still returns 500/i);
   });
 
-  it("truncates very long retry context to ~8000 chars", () => {
+  it("truncates very long retry context to ~10000 chars", () => {
     const longOutput = "x".repeat(5000);
     const issue = makeIssue({
       previousAttemptSummaries: [
@@ -432,8 +432,76 @@ describe("operation: re-execute — learning from previous failures", () => {
     });
 
     const context = buildRetryContext(issue);
-    assert.ok(context.length <= 8100, "should be truncated to ~8000 chars");
+    assert.ok(context.length <= 10_100, "should be truncated to ~10000 chars");
     assert.ok(context.includes("[...truncated]"), "should have truncation marker");
+  });
+
+  it("injects trace references and cross-attempt summary when artifacts exist", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "fifony-retry-context-"));
+    try {
+      mkdirSync(join(workspace, "traces", "v1a1", "turns"), { recursive: true });
+      mkdirSync(join(workspace, "traces", "v1a2"), { recursive: true });
+      writeFileSync(join(workspace, "traces", "v1a1", "attempt.json"), JSON.stringify({ outcome: "failure" }, null, 2), "utf8");
+      writeFileSync(join(workspace, "traces", "v1a1", "diff.patch"), "diff --git a/src/app.ts b/src/app.ts\n", "utf8");
+      writeFileSync(join(workspace, "traces", "v1a1", "turns", "01.directive.json"), JSON.stringify({ status: "failed" }, null, 2), "utf8");
+      writeFileSync(join(workspace, "traces", "v1a2", "cross-attempt.json"), JSON.stringify({
+        generatedAt: "2026-04-02T00:00:00.000Z",
+        repeatedFailureTypes: ["typescript"],
+        changedFileOverlap: ["src/app.ts"],
+        outcomeTransitions: [{ attempt: 1, outcome: "failure", nextIssueState: "Blocked" }],
+        summary: ["Repeated failure types: typescript."],
+      }, null, 2), "utf8");
+
+      const issue = makeIssue({
+        attempts: 2,
+        executeAttempt: 2,
+        previousAttemptSummaries: [{
+          planVersion: 1,
+          executeAttempt: 1,
+          error: "TypeScript failure",
+          timestamp: "2026-04-02T00:00:00.000Z",
+          insight: {
+            errorType: "typescript",
+            rootCause: "TypeScript failure",
+            filesInvolved: ["src/app.ts"],
+            suggestion: "Inspect previous trace files",
+          },
+        }],
+      });
+
+      const context = buildRetryContext(issue, workspace);
+      assert.match(context, /Cross-Attempt Patterns/);
+      assert.match(context, /traces\/v1a1\/attempt\.json/);
+      assert.match(context, /traces\/v1a1\/turns\/01\.directive\.json/);
+      assert.match(context, /traces\/v1a1\/diff\.patch/);
+      assert.match(context, /Repeated failure types: typescript/);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to summary-only format when trace artifacts are missing", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "fifony-retry-fallback-"));
+    try {
+      const issue = makeIssue({
+        attempts: 1,
+        executeAttempt: 2,
+        previousAttemptSummaries: [{
+          planVersion: 1,
+          executeAttempt: 1,
+          error: "Legacy failure",
+          outputTail: "legacy stacktrace",
+          timestamp: "2026-04-02T00:00:00.000Z",
+        }],
+      });
+
+      const context = buildRetryContext(issue, workspace);
+      assert.match(context, /This context is self-contained/);
+      assert.match(context, /Legacy failure/);
+      assert.doesNotMatch(context, /Trace files to inspect selectively/);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it("re-execute uses same compiled command as original execute", async () => {

@@ -1,4 +1,4 @@
-import type { RuntimeState } from "../types.ts";
+import type { RuntimeState, ServiceEntry } from "../types.ts";
 import type { RouteRegistrar } from "./http.ts";
 import { STATE_ROOT, TARGET_ROOT } from "../concerns/constants.ts";
 import { logger } from "../concerns/logger.ts";
@@ -10,7 +10,12 @@ import {
   readServiceLogTail,
   getManagedServiceLogPath,
 } from "../domains/services.ts";
+import { assignServicePort, collectReservedPorts } from "../domains/service-port.ts";
 import {
+  applyNetworkRuntimeConfig,
+  getMeshRuntimeLogPath,
+  getMeshRuntimeSnapshotStatus,
+  getMeshRuntimeState,
   getReverseProxyRuntimeLogPath,
   getReverseProxyRuntimeSnapshotStatus,
   getReverseProxyRuntimeState,
@@ -154,49 +159,114 @@ function detectServices(targetRoot: string): DetectedService[] {
   return suggestions;
 }
 
+// ── Backend health checker ────────────────────────────────────────────────────
+// Probes all running services with ports every 30s. Results are merged into the
+// services:snapshot WS push — no per-client HTTP polling needed.
+
+type HealthResult = { healthy: boolean; latencyMs: number; checkedAt: string };
+const serviceHealthCache = new Map<string, HealthResult | null>();
+
+async function probeServiceHealth(entry: ServiceEntry, fifonyDir: string): Promise<HealthResult | null> {
+  const status = getServiceRuntimeStatus(entry, fifonyDir);
+  if (!status.running || !entry.port) return null;
+  const url = entry.healthcheck?.endpoint ?? `http://localhost:${entry.port}`;
+  const start = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+    return { healthy: res.ok, latencyMs: Date.now() - start, checkedAt: new Date().toISOString() };
+  } catch {
+    return { healthy: false, latencyMs: Date.now() - start, checkedAt: new Date().toISOString() };
+  }
+}
+
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerServiceRoutes(
   app: RouteRegistrar,
   state: RuntimeState,
 ): void {
+  const buildNetworkRuntimeOptions = () => ({
+    dashPort: Number(state.config.dashboardPort ?? 4000),
+    services: state.config.services ?? [],
+    routes: state.config.proxyRoutes ?? [],
+    localDomain: state.config.localDomain,
+    reverseProxyEnabled: state.config.reverseProxyEnabled ?? false,
+    port: state.config.reverseProxyPort ?? 4433,
+    meshEnabled: state.config.meshEnabled ?? false,
+    meshPort: state.config.meshProxyPort ?? 0,
+    meshBufferSize: state.config.meshBufferSize ?? 1000,
+    meshLiveWindowSeconds: state.config.meshLiveWindowSeconds ?? 900,
+  });
+
+  const syncNetworkRuntime = async () => {
+    const options = buildNetworkRuntimeOptions();
+    if (!options.reverseProxyEnabled && !options.meshEnabled) return;
+    await applyNetworkRuntimeConfig(options);
+  };
+
   const listRuntimeServices = (): ServiceStatus[] => {
     const reverseProxy = getReverseProxyRuntimeSnapshotStatus({
       enabled: state.config.reverseProxyEnabled ?? false,
       localDomain: state.config.localDomain,
       configuredPort: state.config.reverseProxyPort ?? 4433,
     }) as ServiceStatus;
+    const mesh = getMeshRuntimeSnapshotStatus({
+      enabled: state.config.meshEnabled ?? false,
+      configuredPort: state.config.meshProxyPort ?? 0,
+    }) as ServiceStatus;
+    const runtimeServices: ServiceStatus[] = [];
 
     if (
       state.config.reverseProxyEnabled ||
       reverseProxy.running ||
       reverseProxy.logSize > 0
     ) {
-      return [reverseProxy];
+      runtimeServices.push(reverseProxy);
     }
 
-    return [];
+    if (
+      state.config.meshEnabled ||
+      mesh.running ||
+      mesh.logSize > 0
+    ) {
+      runtimeServices.push(mesh);
+    }
+
+    return runtimeServices;
   };
 
   const findManagedService = (id: string) => (state.config.services ?? []).find((e) => e.id === id);
-  const isReverseProxyRuntimeService = (id: string) => id === "reverse-proxy";
-  const getReverseProxyRuntimeOptions = () => ({
-    port: state.config.reverseProxyPort ?? 4433,
-    dashPort: Number(state.config.dashboardPort ?? 4000),
-    routes: state.config.proxyRoutes ?? [],
-    services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
-    localDomain: state.config.localDomain,
-  });
+  const ensureManagedServicePort = async (entry: ServiceStatus | any) => {
+    if (entry.port && entry.port > 0) return entry;
+    const reservedPorts = collectReservedPorts(
+      state.config,
+      (state.config.services ?? []).filter((service) => service.id !== entry.id),
+    );
+    const nextEntry = await assignServicePort(entry, reservedPorts);
+    const { replacePersistedService } = await import("../persistence/store.ts");
+    await replacePersistedService(nextEntry);
+    const entries = state.config.services ?? [];
+    const idx = entries.findIndex((service) => service.id === entry.id);
+    if (idx >= 0) entries[idx] = nextEntry;
+    else entries.push(nextEntry);
+    state.config.services = entries;
+    return nextEntry;
+  };
+  const isRuntimeService = (id: string) => id === "reverse-proxy" || id === "mesh";
+  const getRuntimeLogPath = (id: string) => id === "mesh" ? getMeshRuntimeLogPath() : getReverseProxyRuntimeLogPath();
+
+  const withHealth = (services: ReturnType<typeof listServiceStatuses>) =>
+    services.map((s) => ({ ...s, health: serviceHealthCache.get(s.id) ?? null }));
 
   setServicesSnapshotProvider(() => ({
-    services: listServiceStatuses(state.config.services ?? [], STATE_ROOT),
+    services: withHealth(listServiceStatuses(state.config.services ?? [], STATE_ROOT)),
     runtimeServices: listRuntimeServices(),
   }));
 
   // GET /api/services — list all entries with status
   app.get("/api/services", (c) => {
     const entries = state.config.services ?? [];
-    const services = listServiceStatuses(entries, STATE_ROOT);
+    const services = withHealth(listServiceStatuses(entries, STATE_ROOT));
     return c.json({ ok: true, services, runtimeServices: listRuntimeServices() });
   });
 
@@ -212,13 +282,13 @@ export function registerServiceRoutes(
   });
 
   // GET /api/services/:id/status
-  app.get("/api/services/:id/status", (c) => {
+  app.get("/api/services/:id/status", async (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
     if (entry) {
       return c.json({ ok: true, ...getServiceRuntimeStatus(entry, STATE_ROOT) });
     }
-    if (isReverseProxyRuntimeService(id)) {
+    if (id === "reverse-proxy") {
       const runtime = await getReverseProxyRuntimeState();
       return c.json({
         ok: true,
@@ -233,6 +303,19 @@ export function registerServiceRoutes(
         port: runtime.proxyPort ?? state.config.reverseProxyPort ?? 4433,
       });
     }
+    if (id === "mesh") {
+      const runtime = await getMeshRuntimeState();
+      return c.json({
+        ok: true,
+        ...getMeshRuntimeSnapshotStatus({
+          enabled: state.config.meshEnabled ?? false,
+          configuredPort: state.config.meshProxyPort ?? 0,
+        }),
+        running: runtime.running,
+        pid: runtime.running ? getMeshRuntimeSnapshotStatus().pid : null,
+        port: runtime.port ?? state.config.meshProxyPort ?? 0,
+      });
+    }
     return c.json({ ok: false, error: "Service not found." }, 404);
   });
 
@@ -240,25 +323,41 @@ export function registerServiceRoutes(
   app.post("/api/services/:id/start", async (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
-    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    if (!entry && !isRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
       if (entry) {
+        const nextEntry = await ensureManagedServicePort(entry);
         await startManagedService(id);
-        const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+        const status = getServiceRuntimeStatus(nextEntry, STATE_ROOT);
         return c.json({ ok: true, pid: status.pid, state: status.state });
       }
 
-      const port = await startReverseProxyRuntime(getReverseProxyRuntimeOptions());
-      const runtime = await getReverseProxyRuntimeState();
+      if (id === "reverse-proxy") {
+        const port = await startReverseProxyRuntime({ ...buildNetworkRuntimeOptions(), reverseProxyEnabled: true });
+        const runtime = await getReverseProxyRuntimeState();
+        broadcastToWebSocketClients({
+          type: "service",
+          id,
+          state: runtime.running ? "running" : "stopped",
+          running: runtime.running,
+          pid: runtime.pid,
+        });
+        notifyServicesSnapshot();
+        return c.json({ ok: true, pid: runtime.pid, state: "running", port });
+      }
+
+      state.config.meshEnabled = true;
+      await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      const runtime = await getMeshRuntimeState();
       broadcastToWebSocketClients({
         type: "service",
         id,
         state: runtime.running ? "running" : "stopped",
         running: runtime.running,
-        pid: runtime.pid,
+        pid: getMeshRuntimeSnapshotStatus().pid,
       });
       notifyServicesSnapshot();
-      return c.json({ ok: true, pid: runtime.pid, state: "running", port });
+      return c.json({ ok: true, pid: getMeshRuntimeSnapshotStatus().pid, state: "running", port: runtime.port });
     } catch (err) {
       logger.error({ err }, `[Service] Failed to start ${id}`);
       return c.json({ ok: false, error: String(err) }, 500);
@@ -269,26 +368,41 @@ export function registerServiceRoutes(
   app.post("/api/services/:id/restart", async (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
-    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    if (!entry && !isRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
       if (entry) {
+        const nextEntry = await ensureManagedServicePort(entry);
         try { await stopManagedService(id); } catch {}
         await startManagedService(id);
-        const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+        const status = getServiceRuntimeStatus(nextEntry, STATE_ROOT);
         return c.json({ ok: true, pid: status.pid, state: status.state });
       }
 
-      const port = await restartReverseProxyRuntime(getReverseProxyRuntimeOptions());
-      const runtime = await getReverseProxyRuntimeState();
+      if (id === "reverse-proxy") {
+        const port = await restartReverseProxyRuntime({ ...buildNetworkRuntimeOptions(), reverseProxyEnabled: true });
+        const runtime = await getReverseProxyRuntimeState();
+        broadcastToWebSocketClients({
+          type: "service",
+          id,
+          state: runtime.running ? "running" : "stopped",
+          running: runtime.running,
+          pid: runtime.pid,
+        });
+        notifyServicesSnapshot();
+        return c.json({ ok: true, pid: runtime.pid, state: "running", port });
+      }
+
+      await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      const runtime = await getMeshRuntimeState();
       broadcastToWebSocketClients({
         type: "service",
         id,
         state: runtime.running ? "running" : "stopped",
         running: runtime.running,
-        pid: runtime.pid,
+        pid: getMeshRuntimeSnapshotStatus().pid,
       });
       notifyServicesSnapshot();
-      return c.json({ ok: true, pid: runtime.pid, state: "running", port });
+      return c.json({ ok: true, pid: getMeshRuntimeSnapshotStatus().pid, state: runtime.running ? "running" : "stopped", port: runtime.port });
     } catch (err) {
       logger.error({ err }, `[Service] Failed to restart ${id}`);
       return c.json({ ok: false, error: String(err) }, 500);
@@ -299,12 +413,18 @@ export function registerServiceRoutes(
   app.post("/api/services/:id/stop", async (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
-    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    if (!entry && !isRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
     try {
       if (entry) {
         await stopManagedService(id);
+      } else if (id === "reverse-proxy") {
+        state.config.reverseProxyEnabled = false;
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
       } else {
-        await stopReverseProxyRuntime();
+        state.config.meshEnabled = false;
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      }
+      if (!entry) {
         broadcastToWebSocketClients({
           type: "service",
           id,
@@ -356,8 +476,8 @@ export function registerServiceRoutes(
   app.get("/api/services/:id/log", (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
-    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
-    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getReverseProxyRuntimeLogPath();
+    if (!entry && !isRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getRuntimeLogPath(id);
     let logSize = 0;
     if (existsSync(logFile)) {
       try { logSize = statSync(logFile).size; } catch {}
@@ -378,7 +498,7 @@ export function registerServiceRoutes(
       }
     }
     // Full tail: last 16KB
-    const logTail = readServiceLogTail(id, STATE_ROOT, 16_384);
+    const logTail = entry ? readServiceLogTail(id, STATE_ROOT, 16_384) : readServiceLogTail("reverse-proxy", STATE_ROOT, 16_384);
     const truncated = logSize > 16_384;
     return c.json({ ok: true, logTail, logSize, truncated });
   });
@@ -387,9 +507,9 @@ export function registerServiceRoutes(
   app.get("/api/services/:id/stream", (c) => {
     const id = c.req.param("id");
     const entry = findManagedService(id);
-    if (!entry && !isReverseProxyRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
+    if (!entry && !isRuntimeService(id)) return c.json({ ok: false, error: "Service not found." }, 404);
 
-    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getReverseProxyRuntimeLogPath();
+    const logFile = entry ? getManagedServiceLogPath(id, STATE_ROOT) : getRuntimeLogPath(id);
 
     const enc = new TextEncoder();
     const sseMsg = (data: unknown) => enc.encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -461,7 +581,8 @@ export function registerServiceRoutes(
             }
             return;
           }
-          getReverseProxyRuntimeState().then((status) => {
+          const runtimeStatePromise = id === "mesh" ? getMeshRuntimeState() : getReverseProxyRuntimeState();
+          runtimeStatePromise.then((status) => {
             if (!status.running) {
               try { ctrl.enqueue(sseMsg({ type: "status", running: false })); } catch {}
             }
@@ -487,6 +608,45 @@ export function registerServiceRoutes(
     });
   });
 
+  // POST /api/services/kill-all — stop all managed services + mesh + reverse proxy
+  app.post("/api/services/kill-all", async (c) => {
+    const services = state.config.services ?? [];
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+
+    // Stop all managed services in parallel
+    await Promise.allSettled(
+      services.map(async (entry) => {
+        try {
+          await stopManagedService(entry.id);
+          results.push({ id: entry.id, ok: true });
+        } catch (err) {
+          results.push({ id: entry.id, ok: false, error: String(err) });
+        }
+      }),
+    );
+
+    // Stop network runtimes
+    if (state.config.meshEnabled) {
+      try {
+        state.config.meshEnabled = false;
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      } catch { /* already stopped */ }
+    }
+    if (state.config.reverseProxyEnabled) {
+      try {
+        state.config.reverseProxyEnabled = false;
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      } catch { /* already stopped */ }
+    }
+
+    broadcastToWebSocketClients({ type: "service", id: "mesh", state: "stopped", running: false, pid: null });
+    broadcastToWebSocketClients({ type: "service", id: "reverse-proxy", state: "stopped", running: false, pid: null });
+    notifyServicesSnapshot();
+
+    logger.info({ stopped: results.length }, "kill-all: stopped all services and runtimes");
+    return c.json({ ok: true, stopped: results });
+  });
+
   // POST /api/services/config — save the services array
   app.post("/api/services/config", async (c) => {
     const response = await replaceServiceConfigs(c, {
@@ -498,6 +658,7 @@ export function registerServiceRoutes(
       deletePersistedService: async () => {},
     });
     if (response.status < 400) {
+      await syncNetworkRuntime();
       notifyServicesSnapshot();
     }
     return response;
@@ -518,6 +679,7 @@ export function registerServiceRoutes(
       replaceAllServices: async () => {},
     });
     if (response.status < 400) {
+      await syncNetworkRuntime();
       notifyServicesSnapshot();
     }
     return response;
@@ -534,9 +696,25 @@ export function registerServiceRoutes(
       replaceAllServices: async () => {},
     });
     if (response.status < 400) {
+      await syncNetworkRuntime();
       notifyServicesSnapshot();
     }
     return response;
+  });
+
+  app.post("/api/services/:id/assign-port", async (c) => {
+    const id = c.req.param("id");
+    const entry = findManagedService(id);
+    if (!entry) return c.json({ ok: false, error: "Service not found." }, 404);
+
+    try {
+      const nextEntry = await ensureManagedServicePort(entry);
+      await syncNetworkRuntime();
+      notifyServicesSnapshot();
+      return c.json({ ok: true, service: nextEntry });
+    } catch (error) {
+      return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
   });
 
   // POST /api/services/:id/detect-healthcheck — AI reads log and detects host/port
@@ -626,4 +804,22 @@ export function registerServiceRoutes(
       return c.json({ ok: false, error: String(err) }, 500);
     }
   });
+
+  // ── Backend health check loop ──────────────────────────────────────────────
+  // Probes all running services with ports every 30s. Results flow to the
+  // frontend via the existing services:snapshot WS push — no client polling.
+  setInterval(async () => {
+    const entries = (state.config.services ?? []).filter((e) => e.port);
+    if (!entries.length) return;
+
+    let changed = false;
+    await Promise.allSettled(entries.map(async (entry) => {
+      const prev = serviceHealthCache.get(entry.id);
+      const result = await probeServiceHealth(entry, STATE_ROOT);
+      serviceHealthCache.set(entry.id, result);
+      if (!changed && JSON.stringify(prev) !== JSON.stringify(result)) changed = true;
+    }));
+
+    if (changed) notifyServicesSnapshot();
+  }, 30_000);
 }

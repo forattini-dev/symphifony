@@ -143,9 +143,6 @@ export const DEFAULT_MAX_TURNS_BY_MODE: Record<string, number> = {
   contractual: 30,
 };
 
-/** Default number of same-error attempts before triggering auto-replan */
-export const DEFAULT_AUTO_REPLAN_STALL_THRESHOLD = 2;
-
 /** Default number of planner↔reviewer negotiation rounds before failing the contract gate */
 export const DEFAULT_MAX_CONTRACT_NEGOTIATION_ROUNDS = 2;
 

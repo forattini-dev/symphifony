@@ -1,21 +1,18 @@
-import type { RuntimeState } from "../types.ts";
+import type { JsonRecord, RuntimeState } from "../types.ts";
 import type { RouteRegistrar } from "./http.ts";
 import { STATE_ROOT } from "../concerns/constants.ts";
 import { logger } from "../concerns/logger.ts";
 import { listServiceStatuses, getServiceRuntimeStatus } from "../domains/services.ts";
 import {
-  getTrafficBuffer,
-  getServiceGraph,
-  getTrafficProxyPort,
-  getTrafficProxyStats,
-  getMeshMetrics,
-  getMeshGraphSnapshot,
-  isTrafficProxyRunning,
-  startTrafficProxy,
-  stopTrafficProxy,
-  setServicesAccessor,
-} from "../persistence/plugins/traffic-proxy-server.ts";
-import {
+  applyNetworkRuntimeConfig,
+  clearMeshRuntimeTraffic,
+  getMeshRuntimeEvents,
+  getMeshRuntimeGraph,
+  getMeshRuntimeMetrics,
+  getMeshRuntimeSnapshotStatus,
+  getMeshRuntimeState,
+  getMeshRuntimeStats,
+  getMeshRuntimeTraffic,
   getReverseProxyRuntimeGraphSnapshot,
   getReverseProxyRuntimeSnapshotStatus,
   getReverseProxyRuntimeState,
@@ -29,10 +26,10 @@ import {
 import type { ProxyRoute } from "../types.ts";
 import {
   setMeshSnapshotProvider,
-  sendToMeshRoom,
   notifyMeshSnapshot,
   notifyServicesSnapshot,
   meshRoomHasSubscribers,
+  sendToMeshRoom,
   setReverseProxySnapshotProvider,
   notifyReverseProxySnapshot,
   reverseProxyRoomHasSubscribers,
@@ -41,6 +38,8 @@ import {
 const MESH_VAR_KEYS = ["HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"];
 const MESH_TRAFFIC_LIMIT = 500;
 const MESH_WS_SNAPSHOT_DEBOUNCE_MS = 500;
+const MESH_SNAPSHOT_RESYNC_INTERVAL_MS = 10_000;
+const MESH_EVENT_PUSH_INTERVAL_MS = 400;
 const LOCAL_DOMAIN_PORT_SUFFIX = /:\d+$/;
 
 function normalizeLocalDomain(value: string | undefined): string {
@@ -53,7 +52,37 @@ function normalizeLocalDomain(value: string | undefined): string {
   return hostOnly.replace(LOCAL_DOMAIN_PORT_SUFFIX, "").toLowerCase();
 }
 
+function normalizePathPrefix(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function normalizeProxyRoutes(routes: ProxyRoute[]): ProxyRoute[] {
+  return routes.map((route) => ({
+    ...route,
+    host: Array.isArray(route.host)
+      ? route.host.map((h) => normalizeLocalDomain(h)).filter(Boolean)
+      : normalizeLocalDomain(route.host),
+    pathPrefix: normalizePathPrefix(route.pathPrefix),
+    serviceId: typeof route.serviceId === "string" && route.serviceId.trim()
+      ? route.serviceId.trim()
+      : undefined,
+    target: typeof route.target === "string" && route.target.trim()
+      ? route.target.trim()
+      : undefined,
+  }));
+}
+
 let meshSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+let meshPushTimer: ReturnType<typeof setInterval> | null = null;
+let meshEventPushTimer: ReturnType<typeof setInterval> | null = null;
+let lastMeshEventSeq = 0;
+let cachedMeshGraph: JsonRecord | null = null;
+let cachedMeshNativeGraph: JsonRecord | null = null;
+let cachedMeshTraffic: JsonRecord[] = [];
+let cachedMeshStatus: JsonRecord | null = null;
 
 function scheduleMeshSnapshot() {
   if (!meshRoomHasSubscribers()) return;
@@ -72,14 +101,116 @@ function clearMeshSnapshotTimer() {
   meshSnapshotTimer = null;
 }
 
+let meshWatchdogBusy = false;
+
+async function pushMeshSnapshot(state: RuntimeState) {
+  if (!meshRoomHasSubscribers()) return;
+  const [status, graphPayload, traffic] = await Promise.all([
+    getMeshRuntimeState(),
+    getMeshRuntimeGraph(),
+    getMeshRuntimeTraffic(MESH_TRAFFIC_LIMIT),
+  ]);
+
+  // Watchdog: if mesh should be running but the sidecar is dead, restart it automatically.
+  if (state.config.meshEnabled && !status.running && !meshWatchdogBusy) {
+    meshWatchdogBusy = true;
+    logger.warn("[Mesh] Sidecar is down but mesh is enabled — attempting auto-restart");
+    applyNetworkRuntimeConfig({
+      dashPort: Number(state.config.dashboardPort ?? 4000),
+      services: state.config.services ?? [],
+      routes: state.config.proxyRoutes ?? [],
+      localDomain: normalizeLocalDomain(state.config.localDomain),
+      reverseProxyEnabled: state.config.reverseProxyEnabled ?? false,
+      port: state.config.reverseProxyPort ?? 4433,
+      meshEnabled: true,
+      meshPort: state.config.meshProxyPort ?? 0,
+      meshBufferSize: state.config.meshBufferSize ?? 1000,
+      meshLiveWindowSeconds: state.config.meshLiveWindowSeconds ?? 900,
+    }).then(() => {
+      logger.info("[Mesh] Auto-restart complete");
+    }).catch((err: unknown) => {
+      logger.error({ err }, "[Mesh] Auto-restart failed");
+    }).finally(() => {
+      meshWatchdogBusy = false;
+    });
+  }
+
+  const services = listServiceStatuses(state.config.services ?? [], STATE_ROOT);
+  const graphNodes = Array.isArray(graphPayload?.graph?.nodes) ? graphPayload.graph.nodes as JsonRecord[] : [];
+  const nodeMap = new Map(graphNodes.map((node) => [String(node.id), node]));
+  cachedMeshGraph = graphPayload?.graph
+    ? {
+      ...graphPayload.graph,
+      nodes: services.map((service) => ({
+        ...(nodeMap.get(service.id) ?? {}),
+        id: service.id,
+        name: service.name,
+        state: service.state,
+        port: service.port,
+      })),
+    }
+    : null;
+  cachedMeshNativeGraph = graphPayload?.nativeGraph ?? null;
+  cachedMeshTraffic = traffic ?? [];
+  cachedMeshStatus = {
+    enabled: state.config.meshEnabled ?? false,
+    running: status.running,
+    port: status.port,
+  };
+  notifyMeshSnapshot();
+}
+
+async function pushMeshEvents() {
+  if (!meshRoomHasSubscribers()) return;
+  const payload = await getMeshRuntimeEvents(lastMeshEventSeq, 200);
+  if (!payload) return;
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  for (const event of events) {
+    const seq = typeof event?.seq === "number" ? event.seq : null;
+    if (seq != null && seq <= lastMeshEventSeq) continue;
+    if (seq != null) lastMeshEventSeq = seq;
+    sendToMeshRoom({
+      type: "mesh:event",
+      event,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  if (typeof payload.currentSeq === "number" && payload.currentSeq > lastMeshEventSeq) {
+    lastMeshEventSeq = payload.currentSeq;
+  }
+}
+
+function startMeshPushTimer(state: RuntimeState) {
+  if (meshPushTimer) return;
+  meshPushTimer = setInterval(() => { void pushMeshSnapshot(state); }, MESH_SNAPSHOT_RESYNC_INTERVAL_MS);
+  if (!meshEventPushTimer) {
+    meshEventPushTimer = setInterval(() => { void pushMeshEvents(); }, MESH_EVENT_PUSH_INTERVAL_MS);
+  }
+}
+
+function stopMeshPushTimer() {
+  if (!meshPushTimer) return;
+  clearInterval(meshPushTimer);
+  meshPushTimer = null;
+  if (meshEventPushTimer) {
+    clearInterval(meshEventPushTimer);
+    meshEventPushTimer = null;
+  }
+  lastMeshEventSeq = 0;
+  cachedMeshGraph = null;
+  cachedMeshNativeGraph = null;
+  cachedMeshTraffic = [];
+  cachedMeshStatus = null;
+}
+
 // ── Reverse proxy push timer ──────────────────────────────────────────────────
 // Fetches stats + graph and pushes to subscribed clients every 3s when running.
 // Stats/graph are async; we cache the last fetch so the sync provider can serve them.
 
 const REVERSE_PROXY_PUSH_INTERVAL_MS = 3_000;
 let reverseProxyPushTimer: ReturnType<typeof setInterval> | null = null;
-let cachedReverseProxyStats: unknown = null;
-let cachedReverseProxySnapshot: unknown = null;
+let cachedReverseProxyStats: JsonRecord | null = null;
+let cachedReverseProxySnapshot: JsonRecord | null = null;
 
 async function pushReverseProxySnapshot() {
   if (!reverseProxyRoomHasSubscribers()) return;
@@ -87,8 +218,8 @@ async function pushReverseProxySnapshot() {
     getReverseProxyRuntimeStats(),
     getReverseProxyRuntimeGraphSnapshot(),
   ]);
-  cachedReverseProxyStats = stats;
-  cachedReverseProxySnapshot = snapshot;
+  cachedReverseProxyStats = stats as JsonRecord | null;
+  cachedReverseProxySnapshot = snapshot as JsonRecord | null;
   if (!stats && !snapshot) return;
   notifyReverseProxySnapshot();
 }
@@ -110,18 +241,28 @@ export function registerTrafficRoutes(
   collector: RouteRegistrar,
   state: RuntimeState,
 ): void {
+  const buildNetworkRuntimeOptions = () => ({
+    dashPort: Number(state.config.dashboardPort ?? 4000),
+    services: state.config.services ?? [],
+    routes: state.config.proxyRoutes ?? [],
+    localDomain: normalizeLocalDomain(state.config.localDomain),
+    reverseProxyEnabled: state.config.reverseProxyEnabled ?? false,
+    port: state.config.reverseProxyPort ?? 4433,
+    meshEnabled: state.config.meshEnabled ?? false,
+    meshPort: state.config.meshProxyPort ?? 0,
+    meshBufferSize: state.config.meshBufferSize ?? 1000,
+    meshLiveWindowSeconds: state.config.meshLiveWindowSeconds ?? 900,
+  });
+
   setMeshSnapshotProvider(() => {
-    const graph = getServiceGraph();
-    const trafficBuffer = getTrafficBuffer();
-    const services = listServiceStatuses(state.config.services ?? [], STATE_ROOT);
     return {
-      graph: graph ? graph.getGraph(services) : null,
-      nativeGraph: getMeshGraphSnapshot(),
-      traffic: trafficBuffer?.getRecent(MESH_TRAFFIC_LIMIT) ?? [],
-      status: {
+      graph: cachedMeshGraph,
+      nativeGraph: cachedMeshNativeGraph,
+      traffic: cachedMeshTraffic,
+      status: cachedMeshStatus ?? {
         enabled: state.config.meshEnabled ?? false,
-        running: isTrafficProxyRunning(),
-        port: getTrafficProxyPort(),
+        running: false,
+        port: null,
       },
     };
   });
@@ -136,59 +277,80 @@ export function registerTrafficRoutes(
     };
   });
 
-  // If proxy was already running at boot, start the push timer immediately
+  // If proxies were already running at boot, start the push timers immediately
+  if (getMeshRuntimeSnapshotStatus().running) {
+    startMeshPushTimer(state);
+    void pushMeshSnapshot(state);
+  }
   if (getReverseProxyRuntimeSnapshotStatus().running) {
     startReverseProxyPushTimer();
+    void pushReverseProxySnapshot();
   }
 
   // ── GET /api/mesh ──────────────────────────────────────────────
   // Returns the full service graph (nodes + edges)
-  collector.get("/api/mesh", (c) => {
-    const graph = getServiceGraph();
-    if (!graph) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
-    const entries = state.config.services ?? [];
-    const services = listServiceStatuses(entries, STATE_ROOT);
-    return c.json({ ok: true, graph: graph.getGraph(services) });
+  collector.get("/api/mesh", async (c) => {
+    const payload = await getMeshRuntimeGraph();
+    if (!payload?.graph) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
+    const services = listServiceStatuses(state.config.services ?? [], STATE_ROOT);
+    const graphNodes = Array.isArray(payload.graph.nodes) ? payload.graph.nodes as JsonRecord[] : [];
+    const nodeMap = new Map(graphNodes.map((node) => [String(node.id), node]));
+    return c.json({
+      ok: true,
+      graph: {
+        ...payload.graph,
+        nodes: services.map((service) => ({
+          ...(nodeMap.get(service.id) ?? { id: service.id }),
+          id: service.id,
+          name: service.name,
+          state: service.state,
+          port: service.port,
+        })),
+      },
+    });
   });
 
   // ── GET /api/mesh/traffic ──────────────────────────────────────
   // Returns recent traffic entries from the ring buffer
-  collector.get("/api/mesh/traffic", (c) => {
-    const buf = getTrafficBuffer();
-    if (!buf) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
+  collector.get("/api/mesh/traffic", async (c) => {
     const limit = Number(c.req.query("limit") ?? 100);
-    return c.json({ ok: true, entries: buf.getRecent(limit) });
+    const entries = await getMeshRuntimeTraffic(limit);
+    if (!entries) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
+    return c.json({ ok: true, entries });
   });
 
   // ── GET /api/mesh/stats ────────────────────────────────────────
   // Returns proxy stats (connections, bytes, errors)
-  collector.get("/api/mesh/stats", (c) => {
-    const stats = getTrafficProxyStats();
+  collector.get("/api/mesh/stats", async (c) => {
+    const stats = await getMeshRuntimeStats();
     if (!stats) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
     return c.json({ ok: true, stats });
   });
 
   // ── POST /api/mesh/clear ───────────────────────────────────────
   // Resets the ring buffer and graph accumulator
-  collector.post("/api/mesh/clear", (c) => {
-    getTrafficBuffer()?.clear();
-    getServiceGraph()?.reset();
+  collector.post("/api/mesh/clear", async (c) => {
+    await clearMeshRuntimeTraffic();
+    cachedMeshTraffic = [];
+    cachedMeshGraph = null;
+    cachedMeshNativeGraph = null;
+    notifyMeshSnapshot();
     return c.json({ ok: true });
   });
 
   // ── GET /api/mesh/graph/native ────────────────────────────────
   // Returns the native raffel graph snapshot: per-edge latency, rates, flow counts
-  collector.get("/api/mesh/graph/native", (c) => {
-    const snapshot = getMeshGraphSnapshot();
-    if (!snapshot) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
-    return c.json({ ok: true, snapshot });
+  collector.get("/api/mesh/graph/native", async (c) => {
+    const payload = await getMeshRuntimeGraph();
+    if (!payload?.nativeGraph) return c.json({ ok: false, error: "Mesh proxy not running" }, 503);
+    return c.json({ ok: true, snapshot: payload.nativeGraph });
   });
 
   // ── GET /api/mesh/metrics ──────────────────────────────────────
   // Returns native raffel proxy metrics in Prometheus text format
-  collector.get("/api/mesh/metrics", (c) => {
+  collector.get("/api/mesh/metrics", async (c) => {
     const format = (c.req.query("format") as "prometheus" | "json" | undefined) ?? "prometheus";
-    const metrics = getMeshMetrics(format === "json" ? "json" : "prometheus");
+    const metrics = await getMeshRuntimeMetrics(format === "json" ? "json" : "prometheus");
     if (!metrics) return c.json({ ok: false, error: "Mesh proxy not running or metrics not available" }, 503);
     const contentType = format === "json" ? "application/json" : "text/plain; version=0.0.4; charset=utf-8";
     return new Response(metrics, { headers: { "content-type": contentType } });
@@ -196,12 +358,14 @@ export function registerTrafficRoutes(
 
   // ── GET /api/mesh/status ───────────────────────────────────────
   // Returns mesh proxy status
-  collector.get("/api/mesh/status", (c) => {
+  collector.get("/api/mesh/status", async (c) => {
+    const mesh = await getMeshRuntimeState();
     return c.json({
       ok: true,
       enabled: state.config.meshEnabled ?? false,
-      running: isTrafficProxyRunning(),
-      port: getTrafficProxyPort(),
+      running: mesh.running,
+      port: mesh.port,
+      liveWindowSeconds: state.config.meshLiveWindowSeconds ?? 900,
     });
   });
 
@@ -216,17 +380,11 @@ export function registerTrafficRoutes(
     await persistSetting("runtime.meshEnabled", enabled, { scope: "runtime", source: "user" });
     state.config.meshEnabled = enabled;
 
-    if (enabled && !isTrafficProxyRunning()) {
+    if (enabled) {
       try {
-        setServicesAccessor(() => listServiceStatuses(state.config.services ?? [], STATE_ROOT));
-        const port = await startTrafficProxy({
-          port: state.config.meshProxyPort ?? 0,
-          bufferSize: state.config.meshBufferSize ?? 1000,
-          onEntry: (entry) => {
-            sendToMeshRoom({ type: "mesh:entry", entry });
-            scheduleMeshSnapshot();
-          },
-        });
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+        const meshState = await getMeshRuntimeState();
+        const port = meshState.port;
         // Inject HTTP_PROXY as global env vars so all services pick it up automatically
         const dashPort = Number(state.config.dashboardPort ?? 4000);
         // NO_PROXY must only exclude the dashboard — NOT service ports.
@@ -250,6 +408,8 @@ export function registerTrafficRoutes(
         }
         state.variables = vars;
         logger.info({ port }, "[Mesh] Proxy started + global env vars injected");
+        startMeshPushTimer(state);
+        void pushMeshSnapshot(state);
         // Restart all running services so they pick up the proxy env vars
         const runningServices = (state.config.services ?? []).filter((s) => {
           const status = getServiceRuntimeStatus(s, STATE_ROOT);
@@ -273,9 +433,10 @@ export function registerTrafficRoutes(
       }
     }
 
-    if (!enabled && isTrafficProxyRunning()) {
+    if (!enabled) {
       clearMeshSnapshotTimer();
-      await stopTrafficProxy();
+      stopMeshPushTimer();
+      await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
       // Remove mesh-related global env vars
       state.variables = (state.variables ?? []).filter(
         (v) => v.scope !== "global" || !MESH_VAR_KEYS.includes(v.key),
@@ -299,7 +460,8 @@ export function registerTrafficRoutes(
       }
     }
 
-    return c.json({ ok: true, running: isTrafficProxyRunning(), port: getTrafficProxyPort() });
+    const mesh = await getMeshRuntimeState();
+    return c.json({ ok: true, running: mesh.running, port: mesh.port });
   });
 
   // ── GET /api/proxy/reverse/status ─────────────────────────────
@@ -340,13 +502,17 @@ export function registerTrafficRoutes(
       port: state.config.reverseProxyPort ?? 4433,
       dashPort,
       routes: state.config.proxyRoutes ?? [],
-      services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
+      services: state.config.services ?? [],
       localDomain: normalizeLocalDomain(state.config.localDomain),
     };
 
     if (enabled && !getReverseProxyRuntimeSnapshotStatus().running) {
       try {
-        const proxyPort = await startReverseProxyRuntime(proxyOpts);
+        const proxyPort = await startReverseProxyRuntime({
+          ...buildNetworkRuntimeOptions(),
+          ...proxyOpts,
+          reverseProxyEnabled: true,
+        });
         notifyServicesSnapshot();
         void pushReverseProxySnapshot();
         startReverseProxyPushTimer();
@@ -359,7 +525,7 @@ export function registerTrafficRoutes(
 
     if (!enabled && getReverseProxyRuntimeSnapshotStatus().running) {
       stopReverseProxyPushTimer();
-      await stopReverseProxyRuntime();
+      await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
       notifyServicesSnapshot();
     }
 
@@ -371,7 +537,7 @@ export function registerTrafficRoutes(
   // Save custom routing rules and restart the proxy if it's running.
   collector.put("/api/proxy/reverse/routes", async (c) => {
     const body = await c.req.json() as { routes: ProxyRoute[] };
-    const routes = Array.isArray(body.routes) ? body.routes : [];
+    const routes = normalizeProxyRoutes(Array.isArray(body.routes) ? body.routes : []);
 
     const { persistSetting } = await import("../persistence/settings.js");
     await persistSetting("runtime.proxyRoutes", routes, { scope: "runtime", source: "user" });
@@ -380,13 +546,7 @@ export function registerTrafficRoutes(
     if (getReverseProxyRuntimeSnapshotStatus().running) {
       try {
         const dashPort = Number(state.config.dashboardPort ?? 4000);
-        await restartReverseProxyRuntime({
-          port: state.config.reverseProxyPort ?? 4433,
-          dashPort,
-          routes,
-          services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
-          localDomain: normalizeLocalDomain(state.config.localDomain),
-        });
+        await restartReverseProxyRuntime({ ...buildNetworkRuntimeOptions(), port: state.config.reverseProxyPort ?? 4433, dashPort, routes });
         notifyServicesSnapshot();
         void pushReverseProxySnapshot();
       } catch (err) {
@@ -415,10 +575,10 @@ export function registerTrafficRoutes(
       try {
         const dashPort = Number(state.config.dashboardPort ?? 4000);
         await restartReverseProxyRuntime({
+          ...buildNetworkRuntimeOptions(),
           port: state.config.reverseProxyPort ?? 4433,
           dashPort,
           routes: state.config.proxyRoutes ?? [],
-          services: (state.config.services ?? []).map((s) => ({ id: s.id, port: s.port })),
           localDomain: domain || undefined,
         });
         notifyServicesSnapshot();

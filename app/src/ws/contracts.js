@@ -12,6 +12,7 @@ export const WS_MESSAGE_TYPES = Object.freeze({
   ISSUE_SUBTASKS: "issue:subtasks",
   ISSUE_TRANSITION: "issue:transition",
   MESH_ENTRY: "mesh:entry",
+  MESH_EVENT: "mesh:event",
   MESH_SNAPSHOT: "mesh:snapshot",
   SERVICES_SNAPSHOT: "services:snapshot",
   REVERSE_PROXY_SNAPSHOT: "proxy:reverse:snapshot",

@@ -224,8 +224,9 @@ export default function ServicePanel() {
         <div className="mb-3">
           <div className="flex items-center gap-2 mb-2">
             <Server className="size-3.5 opacity-40" />
-            <span className="text-xs font-semibold uppercase tracking-widest opacity-50">Runtime</span>
+            <span className="text-xs font-semibold uppercase tracking-widest opacity-50">Network Runtime</span>
           </div>
+          <p className="text-[11px] opacity-35 mb-2">Mesh and reverse proxy run in one detached infrastructure process.</p>
           <div className="flex flex-col gap-2">
             {runtimeServices.map((service) => (
               <ServiceCard key={service.id} service={service} onRefresh={refreshServices} />

@@ -1,9 +1,14 @@
+import { existsSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import type {
   AgentProviderDefinition,
   IssueEntry,
 } from "../types.ts";
 import { renderPrompt } from "./prompting.ts";
 import { buildRecurringFailureContext } from "./review-failure-history.ts";
+import { loadCrossAttemptAnalysis } from "../domains/cross-attempt-analysis.ts";
+import { traceDir } from "../domains/trace-bundle.ts";
+import { findSimilarIssueTraces, persistSimilarTraceSelection, type SimilarTraceHit } from "../domains/trace-retrieval.ts";
 
 /** Build retry context from previous failed attempts for injection into prompts. */
 /** Render a single attempt summary in full detail. */
@@ -49,20 +54,166 @@ function renderAttemptCompressed(s: NonNullable<IssueEntry["previousAttemptSumma
   return `- **Attempt ${index + 1}** (${phaseLabel}, v${s.planVersion}a${s.executeAttempt}): ${errorType} — ${rootCause}${suggestion ? ` → ${suggestion}` : ""}`;
 }
 
-export function buildRetryContext(issue: IssueEntry): string {
+const DEFAULT_RETRY_CONTEXT_MAX_CHARS = 10_000;
+const TRACE_REFERENCE_ATTEMPTS = 2;
+
+function hasTraceArtifacts(issue: IssueEntry, worktreePath: string): boolean {
+  return (issue.previousAttemptSummaries ?? []).some((summary) =>
+    existsSync(traceDir(worktreePath, summary.planVersion, summary.executeAttempt)),
+  );
+}
+
+function findLastDirectiveRelativePath(worktreePath: string, attemptTraceDir: string): string | null {
+  const turnsDir = join(attemptTraceDir, "turns");
+  if (!existsSync(turnsDir)) return null;
+  try {
+    const directives = readdirSync(turnsDir)
+      .filter((entry) => entry.endsWith(".directive.json"))
+      .sort((left, right) => left.localeCompare(right));
+    if (directives.length === 0) return null;
+    return relative(worktreePath, join(turnsDir, directives[directives.length - 1]!));
+  } catch {
+    return null;
+  }
+}
+
+function renderTraceAttempt(
+  worktreePath: string,
+  summary: NonNullable<IssueEntry["previousAttemptSummaries"]>[number],
+  index: number,
+): string {
+  const tracePath = traceDir(worktreePath, summary.planVersion, summary.executeAttempt);
+  if (!existsSync(tracePath)) {
+    return renderAttemptFull(summary, index);
+  }
+
+  const handoffPath = relative(worktreePath, join(tracePath, "handoff.md"));
+  const checkpointPath = relative(worktreePath, join(tracePath, "checkpoint.json"));
+  const railsPath = relative(worktreePath, join(tracePath, "rails.json"));
+  const manifestPath = relative(worktreePath, join(tracePath, "attempt.json"));
+  const diffPatchPath = relative(worktreePath, join(tracePath, "diff.patch"));
+  const lastDirectivePath = findLastDirectiveRelativePath(worktreePath, tracePath);
+  const lines = [
+    renderAttemptFull(summary, index).trimEnd(),
+    "**Trace files to inspect selectively:**",
+  ];
+  if (existsSync(join(tracePath, "handoff.md"))) {
+    lines.push(`- \`${handoffPath}\` *(start here for the concise resume summary)*`);
+  }
+  if (existsSync(join(tracePath, "checkpoint.json"))) {
+    lines.push(`- \`${checkpointPath}\``);
+  }
+  if (existsSync(join(tracePath, "rails.json"))) {
+    lines.push(`- \`${railsPath}\` *(active harness rails, budgets, and policy decisions)*`);
+  }
+  lines.push(`- \`${manifestPath}\``);
+  if (lastDirectivePath) {
+    lines.push(`- \`${lastDirectivePath}\``);
+  }
+  if (existsSync(join(tracePath, "diff.patch"))) {
+    lines.push(`- \`${diffPatchPath}\``);
+  }
+  lines.push("*Start with the handoff/checkpoint artifacts, then inspect raw artifacts only if they matter for the failure mode before retrying the same path.*");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderCrossAttemptContext(issue: IssueEntry, worktreePath: string): string {
+  const currentTraceDir = traceDir(worktreePath, issue.planVersion ?? 1, issue.executeAttempt ?? 1);
+  const analysis = loadCrossAttemptAnalysis(currentTraceDir);
+  if (!analysis) return "";
+
+  const analysisPath = relative(worktreePath, join(currentTraceDir, "cross-attempt.json"));
+  const lines = [
+    "## Cross-Attempt Patterns\n",
+    `Read \`${analysisPath}\` if you need the full deterministic comparison.`,
+    ...analysis.summary.map((entry) => `- ${entry}`),
+    "",
+  ];
+  return lines.join("\n");
+}
+
+function renderSimilarIssueTraceContext(
+  worktreePath: string,
+  currentTraceDir: string,
+  hits: SimilarTraceHit[],
+): string {
+  if (hits.length === 0) return "";
+
+  const selectionArtifactPath = relative(worktreePath, join(currentTraceDir, "similar-traces.json"));
+
+  const lines = [
+    "## Similar Prior Failures Across Issues\n",
+    "These traces come from other issues with overlapping failure signals. Reuse them only if the match is real, and start with the handoff/checkpoint artifacts before opening raw diffs.\n",
+    `Read \`${selectionArtifactPath}\` if you need the full ranked selection and scoring rationale.`,
+  ];
+
+  for (const hit of hits) {
+    lines.push(`- **${hit.issueIdentifier}** (score ${hit.score}): ${hit.reasons.join("; ")}`);
+    if (hit.files.handoff) {
+      lines.push(`  - \`${hit.files.handoff}\``);
+    }
+    if (hit.files.checkpoint) {
+      lines.push(`  - \`${hit.files.checkpoint}\``);
+    }
+    lines.push(`  - \`${hit.files.attempt}\``);
+    if (hit.files.diffPatch) {
+      lines.push(`  - \`${hit.files.diffPatch}\``);
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+export function buildRetryContext(
+  issue: IssueEntry,
+  worktreePath?: string,
+  options: { maxChars?: number } = {},
+): string {
   const summaries = issue.previousAttemptSummaries;
   const recurringFailureContext = buildRecurringFailureContext(issue);
   if ((!summaries || summaries.length === 0) && !recurringFailureContext) return "";
 
   const lines: string[] = [];
+  const maxChars = options.maxChars ?? DEFAULT_RETRY_CONTEXT_MAX_CHARS;
+  const canUseTraceRefs = Boolean(worktreePath && hasTraceArtifacts(issue, worktreePath));
+  const currentTraceDir = worktreePath ? traceDir(worktreePath, issue.planVersion ?? 1, issue.executeAttempt ?? 1) : "";
+  const crossAttemptContext = worktreePath ? renderCrossAttemptContext(issue, worktreePath) : "";
+  const similarIssueTraceHits = worktreePath ? findSimilarIssueTraces(issue, worktreePath, { maxResults: 2 }) : [];
+  if (worktreePath && currentTraceDir && similarIssueTraceHits.length > 0) {
+    persistSimilarTraceSelection(currentTraceDir, issue, similarIssueTraceHits);
+  }
+  const similarIssueTraceContext = worktreePath
+    ? renderSimilarIssueTraceContext(worktreePath, currentTraceDir, similarIssueTraceHits)
+    : "";
 
   if (summaries && summaries.length > 0) {
     lines.push("## Previous Attempts\n");
     lines.push("The following previous attempts FAILED. Do NOT repeat the same approach. Try a fundamentally different strategy.\n");
-    lines.push("**This context is self-contained** — all evidence you need is below. Do not assume prior knowledge. Read the specific errors, file paths, and suggestions carefully before starting.\n");
+    if (canUseTraceRefs) {
+      lines.push("This context is not fully self-contained. Read the referenced trace files selectively before repeating the same implementation path.\n");
+    } else {
+      lines.push("**This context is self-contained** — all evidence you need is below. Do not assume prior knowledge. Read the specific errors, file paths, and suggestions carefully before starting.\n");
+    }
   }
 
-  if (summaries && summaries.length >= 5) {
+  if (crossAttemptContext) {
+    lines.push(crossAttemptContext);
+  }
+
+  if (similarIssueTraceContext) {
+    lines.push(similarIssueTraceContext);
+  }
+
+  if (canUseTraceRefs && summaries && summaries.length > 0) {
+    const recentAttempts = summaries.slice(-TRACE_REFERENCE_ATTEMPTS);
+    lines.push("### Most Relevant Prior Attempts\n");
+    for (let i = 0; i < recentAttempts.length; i++) {
+      const absoluteIndex = summaries.length - recentAttempts.length + i;
+      lines.push(renderTraceAttempt(worktreePath!, recentAttempts[i], absoluteIndex));
+    }
+  } else if (summaries && summaries.length >= 5) {
     // Smart context selection for 5+ attempts: cluster by error type, deduplicate,
     // show pattern summary + latest 2 in full. Prevents context saturation.
     // Inspired by Claude Code's memory relevance selection via side-query.
@@ -137,9 +288,9 @@ export function buildRetryContext(issue: IssueEntry): string {
     lines.push(recurringFailureContext);
   }
 
-  // Hard limit to ~2000 tokens (~8000 chars)
+  // Hard limit to keep retry prompts bounded even with trace references.
   const full = lines.join("\n");
-  return full.length > 8000 ? full.slice(0, 8000) + "\n[...truncated]" : full;
+  return full.length > maxChars ? full.slice(0, maxChars) + "\n[...truncated]" : full;
 }
 
 export async function buildPrompt(issue: IssueEntry, _workflowDefinition: null): Promise<string> {

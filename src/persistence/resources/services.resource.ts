@@ -1,6 +1,7 @@
 import { S3DB_SERVICES_RESOURCE } from "../../concerns/constants.ts";
 import type { ServiceEntry, RuntimeState } from "../../types.ts";
 import { normalizeServiceEnvironment } from "../../domains/service-env.ts";
+import { assignServicePort, collectReservedPorts } from "../../domains/service-port.ts";
 import { getApiRuntimeContextOrThrow } from "../plugins/api-runtime-context.ts";
 
 type ServiceApiDeps = {
@@ -97,12 +98,13 @@ export async function replaceServiceConfigs(
 
     const entries = body.services as ServiceEntry[];
     const normalizedEntries: ServiceEntry[] = [];
+    const reservedPorts = collectReservedPorts(state.config, []);
     for (const entry of entries) {
       const normalized = normalizeServiceEntry(entry);
       if (!normalized.entry) {
         return respond(c, { ok: false, error: normalized.error ?? "Invalid service entry" }, 400);
       }
-      normalizedEntries.push(normalized.entry);
+      normalizedEntries.push(await assignServicePort(normalized.entry, reservedPorts));
     }
     await apiDeps.replaceAllServices(normalizedEntries);
     state.config.services = normalizedEntries;
@@ -127,10 +129,14 @@ export async function upsertServiceConfig(
     if (!normalized.entry) {
       return respond(c, { ok: false, error: normalized.error ?? "Invalid service entry" }, 400);
     }
-    const entry = normalized.entry;
+    const existing = state.config.services ?? [];
+    const reservedPorts = collectReservedPorts(
+      state.config,
+      existing.filter((service) => service.id !== id),
+    );
+    const entry = await assignServicePort(normalized.entry, reservedPorts);
 
     await apiDeps.replacePersistedService(entry);
-    const existing = state.config.services ?? [];
     const idx = existing.findIndex((service) => service.id === id);
     if (idx >= 0) existing[idx] = entry;
     else existing.push(entry);

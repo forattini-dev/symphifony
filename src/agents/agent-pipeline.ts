@@ -15,6 +15,14 @@ import { logger } from "../concerns/logger.ts";
 import { getExecutionProviders } from "./providers.ts";
 import { addEvent } from "../domains/issues.ts";
 import { compileExecution, persistCompilationArtifacts } from "./adapters/index.ts";
+import {
+  buildInitialAttemptManifest,
+  ensureTraceDir,
+  writeAttemptManifest,
+  finalizeAttemptManifest,
+} from "../domains/trace-bundle.ts";
+import { gatherEnvironmentSnapshot } from "../domains/env-bootstrap.ts";
+import { computeCrossAttemptAnalysis, persistCrossAttemptAnalysis } from "../domains/cross-attempt-analysis.ts";
 import { discoverSkills, buildSkillContext, discoverAgents, discoverCommands, buildCapabilitiesManifest } from "../agents/skills.ts";
 import {
   loadAgentSessionState,
@@ -78,6 +86,22 @@ export async function runAgentSession(
   let lastCode: number | null = session.lastCode;
   let lastOutput = session.lastOutput;
   const resultFile = join(workspacePath, `result-${provider.role}-${provider.provider}.json`);
+  const shouldTraceAttempt = provider.role === "executor";
+  let traceDirectory = session.traceDir ?? null;
+
+  if (shouldTraceAttempt) {
+    traceDirectory = session.traceDir ?? ensureTraceDir(workspacePath, issue.planVersion ?? 1, issue.executeAttempt ?? attempt);
+    if (traceDirectory) {
+      session.traceDir = traceDirectory;
+      if (session.turns.length === 0) {
+        try {
+          writeAttemptManifest(traceDirectory, buildInitialAttemptManifest(issue, provider.provider, provider.role));
+        } catch (traceInitErr) {
+          logger.warn({ err: String(traceInitErr), issueId: issue.id, issueIdentifier: issue.identifier }, "[TraceBundle] Failed to initialize attempt trace manifest");
+        }
+      }
+    }
+  }
 
   if (session.status === "done" && session.turns.length > 0) {
     logger.debug({ issueId: issue.id, identifier: issue.identifier, provider: provider.provider, role: provider.role }, "[Agent] Session already completed, returning cached result");
@@ -129,7 +153,26 @@ export async function runAgentSession(
   const effectiveBasePrompt = contextResult.markdown
     ? `${contextResult.markdown}\n\n${basePromptText}`
     : basePromptText;
-  const turnPrompt = await buildTurnPrompt(issue, effectiveBasePrompt, compactedOutput, turnIndex, maxTurns, nextPrompt);
+  let environmentSnapshot = "";
+  if (shouldTraceAttempt && turnIndex === 1) {
+    try {
+      environmentSnapshot = gatherEnvironmentSnapshot(workspacePath);
+    } catch (error) {
+      logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[EnvBootstrap] Failed to gather environment snapshot");
+    }
+    if (traceDirectory && environmentSnapshot) {
+      try {
+        writeFileSync(join(traceDirectory, "bootstrap.md"), `${environmentSnapshot}\n`, "utf8");
+        finalizeAttemptManifest(traceDirectory, { files: { bootstrap: "bootstrap.md" } });
+      } catch (error) {
+        logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[EnvBootstrap] Failed to persist bootstrap snapshot");
+      }
+    }
+  }
+  const promptBaseWithBootstrap = environmentSnapshot
+    ? `${effectiveBasePrompt}\n\n[Environment Snapshot]\n${environmentSnapshot}`
+    : effectiveBasePrompt;
+  const turnPrompt = await buildTurnPrompt(issue, promptBaseWithBootstrap, compactedOutput, turnIndex, maxTurns, nextPrompt);
   const turnPromptFile = turnIndex === 1
     ? basePromptFile
     : join(workspacePath, `turn-${String(turnIndex).padStart(2, "0")}.md`);
@@ -223,6 +266,51 @@ export async function runAgentSession(
   lastOutput = turnResult.output;
   previousOutput = turnResult.output;
   nextPrompt = directive.nextPrompt;
+
+  const rawOutputRelative = `outputs/${outputFileName}`;
+  if (traceDirectory) {
+    const turnPrefix = String(turnIndex).padStart(2, "0");
+    const turnDir = join(traceDirectory, "turns");
+    const promptArtifact = join(turnDir, `${turnPrefix}.prompt.md`);
+    const directiveArtifact = join(turnDir, `${turnPrefix}.directive.json`);
+    const contextArtifact = join(turnDir, `${turnPrefix}.context.md`);
+    try {
+      writeFileSync(promptArtifact, `${turnPrompt}\n`, "utf8");
+    } catch (error) {
+      logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[TraceBundle] Failed to write turn prompt artifact");
+    }
+    try {
+      if (contextResult.markdown) {
+        writeFileSync(contextArtifact, `${contextResult.markdown}\n`, "utf8");
+      }
+    } catch (error) {
+      logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[TraceBundle] Failed to write turn context artifact");
+    }
+    try {
+      writeFileSync(directiveArtifact, JSON.stringify({
+        turn: turnIndex,
+        role: provider.role,
+        provider: provider.provider,
+        rawOutput: rawOutputRelative,
+        directiveStatus: directive.status,
+        directiveSummary: directive.summary,
+        nextPrompt: directive.nextPrompt,
+        tokenUsage: directive.tokenUsage,
+        toolsUsed: directive.toolsUsed,
+        skillsUsed: directive.skillsUsed,
+        agentsUsed: directive.agentsUsed,
+        commandsRun: directive.commandsRun,
+      }, null, 2) + "\n", "utf8");
+    } catch (error) {
+      logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[TraceBundle] Failed to write turn directive artifact");
+    }
+    try {
+      finalizeAttemptManifest(traceDirectory, { rawOutputs: [rawOutputRelative] });
+    } catch (error) {
+      logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[TraceBundle] Failed to record raw output in attempt manifest");
+    }
+  }
+
   if (!directive.tokenUsage) {
     logger.warn({ issueId: issue.id, identifier: issue.identifier, turn: turnIndex, role: provider.role, outputBytes: turnResult.output.length }, "[Agent] Token extraction failed — no usage data in CLI output");
   }
@@ -476,8 +564,25 @@ export async function runAgentPipeline(
   }
 
   // Inject retry context from previous failed attempts
+  if (effectiveProvider.role === "executor" && (issue.executeAttempt ?? 1) > 1) {
+    const retryTraceDir = ensureTraceDir(workspacePath, issue.planVersion ?? 1, issue.executeAttempt ?? 1);
+    if (retryTraceDir) {
+      try {
+        const crossAttempt = computeCrossAttemptAnalysis(
+          workspacePath,
+          issue.planVersion ?? 1,
+          issue.executeAttempt ?? 1,
+          issue.previousAttemptSummaries,
+        );
+        persistCrossAttemptAnalysis(retryTraceDir, crossAttempt);
+      } catch (error) {
+        logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[CrossAttempt] Failed to compute cross-attempt analysis");
+      }
+    }
+  }
+
   if (issue.attempts > 0) {
-    const retryCtx = buildRetryContext(issue);
+    const retryCtx = buildRetryContext(issue, workspacePath);
     if (retryCtx) {
       providerPrompt = `${providerPrompt}\n\n${retryCtx}`;
     }

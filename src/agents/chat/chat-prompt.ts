@@ -20,7 +20,7 @@ export function buildGlobalChatPrompt(state: RuntimeState): string {
     ? `## Services\n| Name | Port |\n|---|---|\n${serviceRows.join("\n")}`
     : "## Services\nNo services configured.";
 
-  return `You are Spark, the AI operator console for the project "${projectName}".
+  return `You are Fifony, the AI operator console for the project "${projectName}".
 You help the user manage issues, services, and codebase operations through conversation.
 
 ## Your Role

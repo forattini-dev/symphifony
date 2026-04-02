@@ -3,7 +3,7 @@ import { logger } from "../concerns/logger.ts";
 import { computeMetrics } from "../domains/metrics.ts";
 import { STATE_ROOT } from "../concerns/constants.ts";
 import { startServiceLogBroadcasting } from "../persistence/plugins/service-log-broadcaster.ts";
-import type { RuntimeState } from "../types.ts";
+import type { JsonRecord, RuntimeState, ServiceStatus } from "../types.ts";
 
 // ── WebSocket broadcast (same port via listeners) ────────────────────────────
 // s3db.js 21.2.7 WebSocket contract: handlers receive (socketId, send, req)
@@ -28,8 +28,8 @@ type WsClientMessageType =
   | "proxy:reverse:unsubscribe";
 
 type ReverseProxySnapshotPayload = {
-  stats: unknown;
-  snapshot: unknown;
+  stats: JsonRecord | null;
+  snapshot: JsonRecord | null;
   running: boolean;
 };
 
@@ -44,7 +44,7 @@ type MeshSnapshotPayload = {
 
 type ServicesSnapshotPayload = {
   services: unknown;
-  runtimeServices?: unknown;
+  runtimeServices?: ServiceStatus[];
 };
 
 type MeshSnapshotProvider = (() => MeshSnapshotPayload | null) | null;
@@ -699,6 +699,16 @@ export function makeWebSocketConfig(state: RuntimeState) {
             type: "mesh:snapshot",
             ...meshSnapshot,
             seq: meshSnapshotSeq,
+            timestamp: now(),
+          });
+        }
+
+        const reverseProxySnapshot = reverseProxySnapshotProvider?.();
+        if (reverseProxySnapshot) {
+          sendToSocket(socketId, {
+            type: "proxy:reverse:snapshot",
+            ...reverseProxySnapshot,
+            seq: reverseProxySnapshotSeq,
             timestamp: now(),
           });
         }

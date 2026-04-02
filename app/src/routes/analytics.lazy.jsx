@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { useTokenAnalytics, useCodeChurnAnalytics, useKpiAnalytics } from "../hooks.js";
+import { useTokenAnalytics, useCodeChurnAnalytics, useKpiAnalytics, useStageQualityAnalytics, useStageQualityTraceDetail } from "../hooks.js";
 import { fillDailyGaps } from "../utils.js";
 import { Zap, TrendingUp, Layers, Cpu, Clock, Activity, GitMerge, Timer, GitPullRequestArrow, ClipboardCheck, ShieldAlert } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
@@ -544,6 +544,11 @@ function fmtFloat(n) {
   return n.toFixed(1);
 }
 
+function fmtUsd(n) {
+  if (n == null || !Number.isFinite(n) || n <= 0) return "–";
+  return `$${n.toFixed(2)}`;
+}
+
 function KpiCard({ icon: Icon, iconClass, title, avg, median, n, formatValue, unit }) {
   return (
     <div className="stat bg-base-200 rounded-box">
@@ -964,6 +969,383 @@ function KpiSection() {
   );
 }
 
+const STAGE_LABELS = {
+  planner: "Plan",
+  executor: "Execute",
+  reviewer: "Review",
+};
+
+function StageQualitySection() {
+  const { data } = useStageQualityAnalytics();
+  const [selectedStage, setSelectedStage] = useState("executor");
+  const [selectedIssueId, setSelectedIssueId] = useState("");
+  const [selectedDetailKind, setSelectedDetailKind] = useState("rails");
+  const roles = data?.ok ? data.roles || [] : [];
+  const selected = roles.find((entry) => entry.role === selectedStage) || roles[0] || null;
+  const {
+    data: traceDetail,
+    error: traceDetailError,
+    isLoading: traceDetailLoading,
+  } = useStageQualityTraceDetail(selectedIssueId, selectedDetailKind);
+
+  if (!data) return <SectionSkeleton h="h-56" />;
+  if (roles.length === 0) return null;
+
+  return (
+    <section className="bg-base-200 rounded-box p-5">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <Layers className="size-4 text-accent" />
+          Stage Quality
+        </h2>
+        <div className="text-xs opacity-45">
+          {data.issueCount || 0} issue{(data.issueCount || 0) === 1 ? "" : "s"} with per-stage usage
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {roles.map((role) => {
+          const active = selected?.role === role.role;
+          const topGroup = role.byProviderModel?.[0];
+          return (
+            <button
+              key={role.role}
+              type="button"
+              onClick={() => {
+                setSelectedStage(role.role);
+                setSelectedIssueId("");
+              }}
+              className={`text-left rounded-box border px-4 py-4 transition-colors ${
+                active ? "border-accent bg-base-100" : "border-base-300 hover:border-base-content/20"
+              }`}
+            >
+              <div className="text-xs uppercase tracking-[0.18em] opacity-45 mb-2">{STAGE_LABELS[role.role] || role.role}</div>
+              <div className="text-2xl font-semibold">{formatTokens(role.totalTokens)}</div>
+              <div className="text-sm opacity-65 mt-1">avg/issue {formatTokens(Math.round(role.avgTokensPerIssue || 0))}</div>
+              <div className="text-sm opacity-65">success {fmtPercent(role.successRate)}</div>
+              <div className="text-xs opacity-45 mt-2">
+                {topGroup ? `${topGroup.provider}/${topGroup.model}` : "provider/model unavailable"}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {selected && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mt-5">
+          <div className="space-y-3">
+            <div className="text-xs uppercase tracking-[0.18em] opacity-45">Selected stage</div>
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="stat bg-base-100 rounded-box">
+                <div className="stat-title">Total cost</div>
+                <div className="stat-value text-xl">{fmtUsd(selected.costUsdSum)}</div>
+                <div className="stat-desc">avg/issue {fmtUsd(selected.avgCostUsd)}</div>
+              </div>
+              <div className="stat bg-base-100 rounded-box">
+                <div className="stat-title">Outcomes</div>
+                <div className="stat-value text-xl">{selected.issueCount}</div>
+                <div className="stat-desc">
+                  A {selected.outcomes.Approved || 0} · M {selected.outcomes.Merged || 0} · B {selected.outcomes.Blocked || 0}
+                </div>
+              </div>
+              <div className="stat bg-base-100 rounded-box">
+                <div className="stat-title">Context resets</div>
+                <div className="stat-value text-xl">{selected.rails?.issuesWithContextResets || 0}</div>
+                <div className="stat-desc">avg/issue {(selected.rails?.avgContextResets || 0).toFixed(1)}</div>
+              </div>
+              <div className="stat bg-base-100 rounded-box">
+                <div className="stat-title">Retry pressure</div>
+                <div className="stat-value text-xl">{selected.rails?.issuesNearRetryBudget || 0}</div>
+                <div className="stat-desc">
+                  policy changes {selected.rails?.issuesWithPolicyChanges || 0}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              <div className="overflow-x-auto">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Provider / Model</th>
+                      <th className="text-right">Issues</th>
+                      <th className="text-right">Tokens</th>
+                      <th className="text-right">Avg</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.byProviderModel.map((entry) => (
+                      <tr key={`${entry.provider}:${entry.model}`}>
+                        <td className="font-medium">{entry.provider} / {entry.model}</td>
+                        <td className="text-right font-mono">{entry.issueCount}</td>
+                        <td className="text-right font-mono">{formatTokensFull(entry.totalTokens)}</td>
+                        <td className="text-right font-mono">{formatTokens(Math.round(entry.avgTokensPerIssue || 0))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-base-100 rounded-box p-3">
+                  <div className="text-xs uppercase tracking-[0.18em] opacity-45 mb-2">Harness modes</div>
+                  <div className="space-y-2">
+                    {(selected.rails?.harnessModes || []).map((entry) => (
+                      <div key={entry.name} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium">{entry.name}</span>
+                        <span className="font-mono opacity-70">{entry.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-base-100 rounded-box p-3">
+                  <div className="text-xs uppercase tracking-[0.18em] opacity-45 mb-2">Checkpoint policy</div>
+                  <div className="space-y-2">
+                    {(selected.rails?.checkpointPolicies || []).map((entry) => (
+                      <div key={entry.name} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium">{entry.name}</span>
+                        <span className="font-mono opacity-70">{entry.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs opacity-50 mt-3">
+                    checkpoint failures {selected.rails?.issuesWithCheckpointFailures || 0}
+                    {" · "}
+                    contract blockers {selected.rails?.issuesWithContractBlockers || 0}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-xs uppercase tracking-[0.18em] opacity-45">Top issues by token usage</div>
+            <div className="overflow-x-auto">
+              <table className="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Issue</th>
+                    <th className="text-right">Outcome</th>
+                    <th className="text-right">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selected.topIssues.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>
+                        <div className="font-medium">{entry.identifier}</div>
+                        <div className="text-xs opacity-50 truncate max-w-[20rem]">{entry.title}</div>
+                        <div className="text-[11px] opacity-45 mt-1">
+                          {entry.harnessMode} · {entry.checkpointPolicy} · resets {entry.contextResetCount}
+                          {" · "}retry left {entry.retryBudgetRemaining}/{entry.retryBudgetMax}
+                          {" · "}policy changes {entry.policyDecisionCount}
+                        </div>
+                        {entry.railsPath && (
+                          <div className="text-[11px] font-mono opacity-40 truncate max-w-[20rem] mt-1">
+                            {entry.railsPath}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${selectedIssueId === entry.id && selectedDetailKind === "rails" ? "btn-accent" : "btn-ghost"}`}
+                            onClick={() => {
+                              setSelectedIssueId(entry.id);
+                              setSelectedDetailKind("rails");
+                            }}
+                            disabled={!entry.railsPath}
+                          >
+                            rails
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${selectedIssueId === entry.id && selectedDetailKind === "similar" ? "btn-accent" : "btn-ghost"}`}
+                            onClick={() => {
+                              setSelectedIssueId(entry.id);
+                              setSelectedDetailKind("similar");
+                            }}
+                            disabled={!entry.similarTracesPath}
+                          >
+                            similar
+                          </button>
+                        </div>
+                      </td>
+                      <td className="text-right font-mono">{entry.outcome}</td>
+                      <td className="text-right font-mono">{formatTokensFull(entry.totalTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {selectedIssueId && (
+              <div className="bg-base-100 rounded-box p-3">
+                <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                  <div className="text-xs uppercase tracking-[0.18em] opacity-45">
+                    Trace detail · {selectedDetailKind}
+                  </div>
+                  <div className="text-[11px] font-mono opacity-45">
+                    {traceDetail?.path || ""}
+                  </div>
+                </div>
+                <TraceDetailPanel
+                  kind={selectedDetailKind}
+                  traceDetail={traceDetail?.ok === false ? null : traceDetail}
+                  traceDetailError={traceDetail?.ok === false ? { message: traceDetail.error || "Artifact unavailable." } : traceDetailError}
+                  traceDetailLoading={traceDetailLoading}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TraceDetailPanel({ kind, traceDetail, traceDetailError, traceDetailLoading }) {
+  if (traceDetailLoading) {
+    return <div className="text-sm opacity-50">Loading trace detail…</div>;
+  }
+
+  if (traceDetailError) {
+    return <div className="text-sm opacity-50">{traceDetailError.message || "Artifact unavailable."}</div>;
+  }
+
+  if (!traceDetail?.data) {
+    return <div className="text-sm opacity-50">Artifact unavailable.</div>;
+  }
+
+  const payload = traceDetail.data;
+
+  if (kind === "rails") {
+    const harness = payload.harness || {};
+    const budget = payload.budget || {};
+    const retryBudget = budget.retryBudget || {};
+    const runtimeRails = payload.runtimeRails || {};
+    const policyDecisions = Array.isArray(payload.policyDecisions) ? payload.policyDecisions : [];
+
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Harness mode</div>
+            <div className="stat-value text-lg">{harness.mode || "—"}</div>
+            <div className="stat-desc">{harness.checkpointPolicy || "—"}</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Retry budget</div>
+            <div className="stat-value text-lg">{retryBudget.remaining ?? 0}</div>
+            <div className="stat-desc">remaining of {retryBudget.max ?? 0}</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Context resets</div>
+            <div className="stat-value text-lg">{runtimeRails.contextResetCount ?? 0}</div>
+            <div className="stat-desc">{runtimeRails.lastFailedPhase || "no failed phase"}</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Policy changes</div>
+            <div className="stat-value text-lg">{policyDecisions.length}</div>
+            <div className="stat-desc">{harness.contractNegotiationStatus || harness.checkpointStatus || "no blockers"}</div>
+          </div>
+        </div>
+        {policyDecisions.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead>
+                <tr>
+                  <th>Decision</th>
+                  <th>Basis</th>
+                  <th>Transition</th>
+                  <th>Rationale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {policyDecisions.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="font-medium">{entry.kind}</td>
+                    <td className="font-mono text-xs">{entry.basis}</td>
+                    <td className="font-mono text-xs">{entry.from ? `${entry.from} → ${entry.to}` : entry.to}</td>
+                    <td className="text-xs opacity-70">{entry.rationale}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (kind === "similar") {
+    const hits = Array.isArray(payload.hits) ? payload.hits : [];
+    const analysis = payload.postAttemptAnalysis || {};
+    const likely = analysis.likelyFollowedHit || null;
+
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Retrieved hits</div>
+            <div className="stat-value text-lg">{hits.length}</div>
+            <div className="stat-desc">candidate prior failures</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Likely followed</div>
+            <div className="stat-value text-lg">{likely?.issueIdentifier || "—"}</div>
+            <div className="stat-desc">{likely ? `score ${likely.score}` : "no overlap detected"}</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Changed files</div>
+            <div className="stat-value text-lg">{(analysis.attemptChangedFiles || []).length}</div>
+            <div className="stat-desc">in the completed attempt</div>
+          </div>
+          <div className="stat bg-base-200 rounded-box">
+            <div className="stat-title">Outcome</div>
+            <div className="stat-value text-lg">{analysis.attemptOutcome || "—"}</div>
+            <div className="stat-desc">post-attempt analysis</div>
+          </div>
+        </div>
+        {likely && (
+          <div className="bg-base-200 rounded-box p-3">
+            <div className="text-xs uppercase tracking-[0.18em] opacity-45 mb-2">Likely followed hit</div>
+            <div className="font-medium">{likely.issueIdentifier}</div>
+            <div className="text-xs opacity-70 mt-1">{(likely.reasons || []).join(" · ")}</div>
+            <div className="text-xs font-mono opacity-50 mt-2">
+              overlap {(likely.overlapFiles || []).join(", ") || "none"}
+            </div>
+          </div>
+        )}
+        {hits.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th className="text-right">Score</th>
+                  <th>Reasons</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hits.map((entry) => (
+                  <tr key={`${entry.issueId}-${entry.issueIdentifier}`}>
+                    <td className="font-medium">{entry.issueIdentifier}</td>
+                    <td className="text-right font-mono">{entry.score}</td>
+                    <td className="text-xs opacity-70">{(entry.reasons || []).join(" · ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words bg-base-200 rounded-box p-3">
+      {JSON.stringify(payload, null, 2)}
+    </pre>
+  );
+}
+
 function QualityGateSection() {
   const { data: kpiData } = useKpiAnalytics();
   const kpis = kpiData?.ok ? kpiData : null;
@@ -1126,6 +1508,7 @@ function AnalyticsPage() {
         <OverviewSection />
         <DailyActivitySection />
         <KpiSection />
+        <StageQualitySection />
         <QualityGateSection />
         <TopIssuesSection />
         <ModelBreakdownSection />

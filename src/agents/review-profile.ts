@@ -160,7 +160,6 @@ export function deriveReviewProfile(issue: IssueEntry): ReviewProfile {
       evidencePriorities: [
         "Navigate the affected UI and describe what users can and cannot do",
         "Verify mobile-width and edge-state behavior, not just the happy path",
-        "Use Playwright evidence when visible behavior is part of the contract",
       ],
       severityBias: "Treat usability breaks and visually misleading states as blocking defects, not polish nits.",
     },

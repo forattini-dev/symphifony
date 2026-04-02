@@ -489,6 +489,31 @@ export function useKpiAnalytics() {
   });
 }
 
+export function useStageQualityAnalytics(params = {}) {
+  const query = new URLSearchParams();
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+
+  return useQuery({
+    queryKey: ["analytics-stage-quality", params.from || "", params.to || ""],
+    queryFn: () => api.get(`/analytics/stage-quality${query.size ? `?${query}` : ""}`),
+    staleTime: 60_000,
+  });
+}
+
+export function useStageQualityTraceDetail(issueId, kind = "rails") {
+  const query = new URLSearchParams();
+  if (issueId) query.set("issueId", issueId);
+  if (kind) query.set("kind", kind);
+
+  return useQuery({
+    queryKey: ["analytics-stage-quality-trace-detail", issueId || "", kind || ""],
+    queryFn: () => api.get(`/analytics/stage-quality/trace-detail?${query}`),
+    staleTime: 60_000,
+    enabled: Boolean(issueId),
+  });
+}
+
 /** Hourly sparkline data (tokens/hour + events/hour) — initial fetch + WS push. */
 export function useHourlyAnalytics(hours = 24) {
   useEffect(() => {

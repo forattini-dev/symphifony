@@ -89,7 +89,6 @@ export async function compileReview(
   workspacePath: string,
   diffSummary: string,
   config?: RuntimeConfig,
-  playwrightMcpConfigPath?: string,
   scope: ReviewScope = "final",
 ): Promise<CompiledReview> {
   const plan = issue.plan;
@@ -97,8 +96,6 @@ export async function compileReview(
   const executionContract = plan ? deriveExecutionContract(plan) : null;
   const reviewProfile = deriveReviewProfile(issue);
   const scopeConfig = buildReviewScopeConfig(scope);
-
-  const hasFrontendChanges = !!playwrightMcpConfigPath;
 
   // Light review: skip adversarial persona, grading_report, and heavy structured
   // output for trivial/low complexity solo issues. Just a pass/fail check.
@@ -125,21 +122,15 @@ export async function compileReview(
     reviewScopeInstructions: scopeConfig.instructions.map((value) => ({ value })),
     ...buildReviewerTemplateVars(reviewer, reviewProfile),
     diffSummary,
-    hasFrontendChanges,
     images: issue.images?.length ? issue.images : undefined,
     preReviewValidation: issue.preReviewValidation ?? null,
     lightReview,
   });
 
   const adapter = ADAPTERS[reviewer.provider];
-  let command = adapter
+  const command = adapter
     ? adapter.buildReviewCommand(reviewer, config)
     : reviewer.command;
-
-  if (playwrightMcpConfigPath) {
-    // Inject Playwright MCP before the stdin redirect
-    command = command.replace(/ < "\$FIFONY_PROMPT_FILE"$/, ` --mcp-config "${playwrightMcpConfigPath}" < "$FIFONY_PROMPT_FILE"`);
-  }
 
   return {
     prompt,

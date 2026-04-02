@@ -176,18 +176,6 @@ The harness ran `{{preReviewValidation.command}}` immediately after execution co
 ```
 {{/if}}
 
-{{#if hasFrontendChanges}}
-# Browser Verification (Playwright MCP available)
-
-You have access to browser automation tools via Playwright MCP. Use them to verify UI changes:
-1. Navigate to the running app: use `mcp__playwright__navigate` with `http://localhost:5173`
-2. Take a screenshot to confirm rendering: `mcp__playwright__screenshot`
-3. Click affected elements and verify interactions work correctly
-4. Check for JS errors: `mcp__playwright__evaluate` with `() => window.__playwright_errors ?? []`
-
-Use these tools for any criterion that involves visible UI output or user interactions.
-{{/if}}
-
 {{#unless lightReview}}
 # Structured Context
 If `execution-payload.json` exists in the workspace, read it for the canonical structured task data.

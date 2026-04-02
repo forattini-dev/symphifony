@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { execSync } from "node:child_process";
 import type {
   IssueEntry,
+  IssueState,
   RuntimeState,
   WorkflowConfig,
 } from "../types.ts";
@@ -23,12 +24,49 @@ import { addTokenUsage } from "./directive-parser.ts";
 import { runAgentSession, runAgentPipeline } from "./agent-pipeline.ts";
 import { computeDiffStats } from "../domains/workspace.ts";
 import { runValidationGate } from "../domains/validation.ts";
+import { AttemptOutcome, finalizeAttemptForIssue } from "../domains/trace-bundle.ts";
 import { ensureWorktreeCommitted, hydrateIssuePathsFromWorkspace } from "../domains/workspace.ts";
 import { prepareWorkspace } from "../domains/workspace.ts";
 import { getWorkflowConfig, loadRuntimeSettings } from "../persistence/settings.ts";
 import { getContainer } from "../persistence/container.ts";
 import { transitionIssueCommand } from "../commands/transition-issue.command.ts";
 import { requestReworkCommand } from "../commands/request-rework.command.ts";
+
+const TIMEOUT_MARKERS = [
+  "execution timeout after",
+  "no output for 30 minutes",
+  "process died unexpectedly",
+  "stopped unexpectedly",
+];
+
+function inferAttemptOutcome(
+  code: number | null,
+  output: string,
+  success: boolean,
+): AttemptOutcome {
+  const normalized = output.toLowerCase();
+  if (TIMEOUT_MARKERS.some((entry) => normalized.includes(entry))) {
+    return "timeout";
+  }
+  return success ? "success" : "failure";
+}
+
+function finalizeExecutionAttemptTrace(
+  workspacePath: string,
+  issue: IssueEntry,
+  patch: { outcome?: AttemptOutcome; nextIssueState?: IssueState; error?: string; exitCode?: number | null; endedAt?: string },
+): void {
+  if (!workspacePath) return;
+  try {
+    finalizeAttemptForIssue(workspacePath, issue, {
+      outcome: patch.outcome ?? "failure",
+      ...patch,
+      endedAt: patch.endedAt ?? now(),
+    });
+  } catch (error) {
+    logger.warn({ err: String(error), issueId: issue.id, issueIdentifier: issue.identifier }, "[AttemptTrace] Failed to finalize attempt bundle");
+  }
+}
 
 /**
  * Run a planning job for an issue in the Planning state within a worker slot.
@@ -256,6 +294,12 @@ async function handleExecutionStage(
   issue.commandOutputTail = runResult.output;
 
   if (runResult.success) {
+    finalizeExecutionAttemptTrace(workspacePath, issue, {
+      outcome: "success",
+      nextIssueState: "Reviewing",
+      exitCode: runResult.code,
+    });
+
     ensureWorktreeCommitted(issue);
 
     computeDiffStats(issue);
@@ -299,6 +343,12 @@ async function handleExecutionStage(
     issue.history.push(`[${issue.updatedAt}] Agent requested another turn (${runResult.turns}/${state.config.maxTurns}).`);
     container.eventStore.addEvent(issue.id, "runner", `Issue ${issue.identifier} queued for next turn.`);
   } else {
+    finalizeExecutionAttemptTrace(workspacePath, issue, {
+      outcome: inferAttemptOutcome(runResult.code, runResult.output, runResult.success),
+      nextIssueState: "Blocked",
+      exitCode: runResult.code,
+      error: runResult.output,
+    });
     issue.lastError = runResult.output;
     issue.lastFailedPhase = "execute";
     issue.attempts += 1;
@@ -334,6 +384,7 @@ export async function runIssueOnce(
   issue.startedAt = issue.startedAt ?? now();
 
   let workflowConfig: WorkflowConfig | null = null;
+  let workspacePath: string | undefined;
   try {
     const settings = await loadRuntimeSettings();
     workflowConfig = getWorkflowConfig(settings);
@@ -361,7 +412,9 @@ export async function runIssueOnce(
   try {
     hydrateIssuePathsFromWorkspace(issue);
 
-    const { workspacePath, promptText, promptFile } = await prepareWorkspace(issue, state, state.config.defaultBranch);
+    const prepared = await prepareWorkspace(issue, state, state.config.defaultBranch);
+    workspacePath = prepared.workspacePath;
+    const { promptText, promptFile } = prepared;
     container.issueRepository.markDirty(issue.id);
     // Persist workspace fields via resource.patch so they survive restarts
     try {
@@ -387,6 +440,13 @@ export async function runIssueOnce(
 
     await handleExecutionStage(state, issue, workspacePath, promptText, promptFile, workflowConfig, startTs, routedProviders);
   } catch (error) {
+    finalizeExecutionAttemptTrace(workspacePath ?? issue.workspacePath ?? "", issue, {
+      outcome: "crash",
+      nextIssueState: "Blocked",
+      error: error instanceof Error ? error.message : String(error),
+      exitCode: issue.commandExitCode ?? null,
+      endedAt: now(),
+    });
     issue.attempts += 1;
     issue.lastError = String(error);
     issue.lastFailedPhase = issue.lastFailedPhase ?? "execute";

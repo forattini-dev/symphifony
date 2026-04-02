@@ -16,13 +16,20 @@ export function useReverseProxy() {
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState(null);
   const [graph, setGraph] = useState(null);
+  const [error, setError] = useState(null);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await api.get("/proxy/reverse/status");
-      if (res) setStatus(res);
+      if (res) {
+        setStatus(res);
+        setError(null);
+      }
       return res;
-    } catch {}
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load reverse proxy status.");
+      return null;
+    }
   }, []);
 
   // Initial status fetch on mount
@@ -41,6 +48,7 @@ export function useReverseProxy() {
       if (payload.running !== undefined) {
         setStatus((prev) => (prev ? { ...prev, running: payload.running } : prev));
       }
+      setError(null);
     };
 
     reverseProxySnapshotSubs.add(handler);
@@ -54,12 +62,18 @@ export function useReverseProxy() {
     try {
       const res = await api.post("/proxy/reverse/toggle", { enabled });
       setStatus((prev) => ({ ...prev, enabled, running: res.running, port: res.port }));
+      setError(null);
       if (!enabled) {
         setStats(null);
         setGraph(null);
       }
-    } catch {}
+      return res;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update reverse proxy state.";
+      setError(message);
+      throw err;
+    }
   }, []);
 
-  return { status, stats, graph, toggle, refresh: fetchStatus };
+  return { status, stats, graph, error, toggle, refresh: fetchStatus };
 }
