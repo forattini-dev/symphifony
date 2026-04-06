@@ -2259,9 +2259,9 @@ function ServicesPage() {
   const handleClose = useCallback(() => setSelectedId(null), []);
 
   const handleStartAll = useCallback(async () => {
-    await Promise.all(services.filter((s) => !s.running).map((s) => api.post(`/services/${s.id}/start`, {})));
+    await api.post("/services/start-all", {});
     await servicesRefresh();
-  }, [services, servicesRefresh]);
+  }, [servicesRefresh]);
 
   const handleStopAll = useCallback(async () => {
     await Promise.all(services.filter((s) => s.running).map((s) => api.post(`/services/${s.id}/stop`, {})));

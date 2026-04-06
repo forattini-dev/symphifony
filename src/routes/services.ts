@@ -638,6 +638,39 @@ export function registerServiceRoutes(
     });
   });
 
+  // POST /api/services/start-all — start all managed services + network runtimes
+  app.post("/api/services/start-all", async (c) => {
+    const services = state.config.services ?? [];
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+
+    // Start all managed services in parallel
+    await Promise.allSettled(
+      services.map(async (entry) => {
+        try {
+          const status = getServiceRuntimeStatus(entry, STATE_ROOT);
+          if (status.running) { results.push({ id: entry.id, ok: true }); return; }
+          await startManagedService(entry.id);
+          results.push({ id: entry.id, ok: true });
+        } catch (err) {
+          results.push({ id: entry.id, ok: false, error: String(err) });
+        }
+      }),
+    );
+
+    // Start network runtimes if enabled in config
+    if (state.config.reverseProxyEnabled || state.config.meshEnabled) {
+      try {
+        await applyNetworkRuntimeConfig(buildNetworkRuntimeOptions());
+      } catch (err) {
+        logger.warn({ err }, "start-all: network runtime start failed");
+      }
+    }
+
+    notifyServicesSnapshot();
+    logger.info({ started: results.length }, "start-all: started all services and runtimes");
+    return c.json({ ok: true, started: results });
+  });
+
   // POST /api/services/kill-all — stop all managed services + mesh + reverse proxy
   app.post("/api/services/kill-all", async (c) => {
     const services = state.config.services ?? [];
