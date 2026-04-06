@@ -344,6 +344,8 @@ export function reconcileServiceStates(entries: ServiceEntry[], fifonyDir: strin
     if (!info) continue;
     if (info.state === "stopped") continue;
     if (!isProcessAlive(info.pid)) {
+      // Process is dead but port may still be held by orphaned children
+      if (entry.port) killProcessesOnPort(entry.port);
       const crashCount = (info.crashCount ?? 0) + 1;
       writePidInfo(fifonyDir, entry.id, {
         ...info,
@@ -351,7 +353,7 @@ export function reconcileServiceStates(entries: ServiceEntry[], fifonyDir: strin
         crashCount,
         lastCrashAt: now(),
       });
-      logger.info({ id: entry.id, crashCount }, "[Service] Boot: process dead → crashed");
+      logger.info({ id: entry.id, crashCount }, "[Service] Boot: process dead → crashed (port cleaned)");
     }
   }
 }
@@ -887,6 +889,7 @@ function tickOne(
     }
     case "stopping": {
       if (!alive) {
+        if (entry.port) killProcessesOnPort(entry.port);
         removePidInfo(fifonyDir, entry.id);
         return { id: entry.id, from: "stopping", to: "stopped", reason: "process exited", pid: null };
       }
