@@ -257,7 +257,7 @@ export async function enhanceIssueField(
   const images = Array.isArray(payload.images) ? payload.images.filter((p): p is string => typeof p === "string") : undefined;
 
   // Use enhance-specific config, falling back to plan stage config
-  const { provider: selectedProvider, model: selectedModel } = await resolveEnhanceStageConfig(config);
+  const { provider: selectedProvider, model: selectedModel, effort: selectedEffort } = await resolveEnhanceStageConfig(config);
 
   const providers = detectAvailableProviders();
   const isAvailable = providers.some((p) => p.name === selectedProvider && p.available);
@@ -285,6 +285,7 @@ export async function enhanceIssueField(
 
   const command = adapter.buildCommand({
     model: selectedModel,
+    effort: selectedEffort ?? "low",
     imagePaths: capabilities.imageInput === "cli-flag" ? images : undefined,
     jsonSchema: capabilities.structuredOutput.mode === "json-schema" ? ENHANCE_JSON_SCHEMA : undefined,
     noToolAccess: capabilities.structuredOutput.requiresToolDisable && capabilities.readOnlyExecution === "none",
