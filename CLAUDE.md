@@ -70,7 +70,7 @@ Planning → PendingApproval → Queued → Running → Reviewing → PendingDec
   (AI)       (Human)          (queue)   (AI)      (AI)         (Human)          (Human)
 ```
 
-10 states. Defined in `src/persistence/plugins/fsm-issue.ts`. Transitions dispatched via s3db StateMachinePlugin. Entry actions enqueue jobs via lazy imports to break circular deps. Terminal states: `Merged`, `Cancelled`. Legacy state names (`Planned`, `Reviewed`, `Done`) auto-migrated via `parseIssueState()`. Diff stats are synced at approval time (PendingDecision → Approved) via `syncIssueDiffStatsToStore()`, not at merge time.
+10 states. Defined in `src/persistence/plugins/fsm-issue.ts`. Transitions dispatched via s3db StateMachinePlugin using `afterEnter` hooks (not legacy `entry` actions). Hooks enqueue jobs via lazy imports to break circular deps. Terminal states: `Merged`, `Cancelled`. Legacy state names (`Planned`, `Reviewed`, `Done`) auto-migrated via `parseIssueState()`. Diff stats are synced at approval time (PendingDecision → Approved) via `syncIssueDiffStatsToStore()`, not at merge time.
 
 **States by actor:**
 
@@ -189,7 +189,7 @@ Shortcuts are context-aware: kanban/issues shortcuts auto-disable when drawer is
 
 ### Persistence (s3db.js)
 
-SQLite at `.fifony/fifony.sqlite`. Resources: `issues`, `events`, `runtime_state`, `settings`, `agent_sessions`, `agent_pipelines`. Plugins: StateMachinePlugin (FSM), S3QueuePlugin (job queue), ApiPlugin (HTTP+WS). In-memory dirty tracking — only modified issues flush to disk.
+SQLite at `.fifony/fifony.sqlite`. Resources: `issues`, `events`, `runtime_state`, `settings`, `agent_sessions`, `agent_pipelines`. Plugins: 3 StateMachinePlugins (Issue FSM `state-machine`, Service FSM `service-state-machine`, Agent FSM `agent-state-machine`), S3QueuePlugin (job queue), ApiPlugin (HTTP+WS), EventualConsistencyPlugin (analytics). All FSMs use `afterEnter` hooks and function triggers — no manual watchers. In-memory dirty tracking — only modified issues flush to disk.
 
 ### Unified Work Queue
 
@@ -241,9 +241,22 @@ Lightweight process isolation alternative to Docker for agent execution.
 Service lifecycle is managed via a declarative s3db StateMachinePlugin in `src/persistence/plugins/fsm-service.ts`.
 
 - **States**: `stopped` → `starting` → `running` → `stopping` → `crashed`
-- **Plugin**: Function triggers replace manual watcher polling. Named guards and actions. Persisted transition history.
-- **Service dashboard** (`app/src/routes/services.jsx`): Quick restart button (atomic stop+start), error counter (scans logs for ERROR/Exception/FATAL), health check ping (per-service port polling), compact grid cards with dense stats.
-- **Log viewer**: `src/persistence/plugins/service-log-broadcaster.ts` — WS-based real-time log streaming with auto-fallback to HTTP poll when WS stale. Re-subscribes on WS reconnect.
+- **Hooks**: `afterEnter` hooks on all 5 states (spawnService, sendSigterm, recordCrash, onEnterStopped, onEnterRunning). Machine-level `afterTransition` hook handles WS broadcast + log broadcaster lifecycle.
+- **Triggers**: Function triggers (5s interval) handle all automatic transitions: process death detection, startup grace period (3s), SIGKILL timeout (5s), auto-restart with exponential backoff. **No manual watcher** — all driven by s3db.js plugin.
+- **Process cleanup**: `cleanupServiceProcesses(pid, port)` kills entire process tree + discovers all bound ports via `lsof`. Runs on every path to "stopped" state.
+- **Service dashboard** (`app/src/routes/services.lazy.jsx`): Quick restart button (atomic stop+start), error counter (scans logs for ERROR/Exception/FATAL), health check ping (per-service port polling), compact grid cards with dense stats.
+- **Log viewer**: `src/persistence/plugins/service-log-broadcaster.ts` — uses `@logdna/tail-file` for robust file tailing (inode-aware rotation, truncation handling, 250ms poll). Buffers chunks when no WS subscribers. Auto-cleanup on service stop.
+- **Log rotation**: Last 3 executions preserved (`.log`, `.log.1`, `.log.2`). API: `GET /log/generations`, `GET /log/history/:gen`. UI: tabbed viewer in service drawer.
+
+### Agent FSM (s3db StateMachinePlugin)
+
+Agent process lifecycle managed via s3db StateMachinePlugin in `src/persistence/plugins/fsm-agent.ts`.
+
+- **States**: `idle` → `preparing` → `running` → `done`/`failed`/`crashed`
+- **Hooks**: `afterEnter` hooks on crashed (update job file), done/failed (cleanup job file + stop log broadcaster). Machine-level `afterTransition` broadcasts WS state.
+- **Triggers**: Function trigger on "running" (5s) checks if agent PID is alive → fires CRASH on death.
+- **Job files**: `agent-{safeId}.job.json` persists agent state across fifony restarts. Boot reconciliation marks dead agents as "crashed".
+- **Relationship**: Each Issue FSM phase (plan/execute/review) spawns an Agent FSM instance. Agent completion drives Issue FSM transitions.
 
 ### Mesh Traffic Proxy (Experimental)
 
@@ -278,7 +291,7 @@ Uses Node.js native `node:test` module with `assert/strict`. Tests in `tests/`. 
 
 - **Logger**: `import { logger } from "../concerns/logger.ts"` — Pino singleton. Always `logger.error({ err }, "msg")` with the error object.
 - **Dirty tracking**: Call `markIssueDirty(id)` after mutating an issue in-memory.
-- **Circular deps**: FSM entry actions use lazy `await import()` for queue-workers.
+- **Circular deps**: FSM `afterEnter` hooks use lazy `await import()` for queue-workers.
 - **Route registration**: Export `register*Routes(collector, state)`, call from `api-server.ts`.
 - **Domain purity**: `src/domains/` must not import from `src/persistence/` or do I/O.
 - **State transitions**: Go through the state machine (`send()`), never mutate `issue.state` directly.
@@ -298,7 +311,9 @@ Uses Node.js native `node:test` module with `assert/strict`. Tests in `tests/`. 
 - **Sandbox wrapping**: Use `wrapWithSandbox()` from `src/domains/sandbox.ts`. Never shell out to ai-jail directly. The domain handles binary download, platform detection, and bwrap path injection.
 - **WS broadcast on transitions**: Use `broadcastIssueTransition()` in `fsm-issue.ts` for real-time push. Never rely solely on HTTP polling for state updates — WS push is the primary channel.
 - **Pipeline stages**: 6 stages (enhance/chat/plan/execute/review/services). Each has its own `PipelineStageConfig` in `WorkflowConfig`. Use `AgentProviderRole` type for stage roles. Never hard-code the old 3-stage assumption.
-- **Service FSM**: Service state transitions go through the s3db StateMachinePlugin in `fsm-service.ts`. Never mutate service state directly. Legacy watcher polling is deleted.
+- **Service FSM**: Service state transitions go through the s3db StateMachinePlugin `afterEnter` hooks in `fsm-service.ts`. Never mutate service state directly. No manual watcher — function triggers handle all automatic transitions.
+- **Agent FSM**: Agent process lifecycle via s3db StateMachinePlugin in `fsm-agent.ts`. Function trigger detects PID death. `afterEnter` hooks handle crash/done/failed cleanup. No manual watcher.
+- **FSM hooks**: All 3 FSMs (Issue, Service, Agent) use `afterEnter` hooks instead of legacy `entry` actions. Use `afterTransition` machine-level hooks for cross-cutting concerns (WS broadcast, log broadcaster).
 - **Mesh proxy**: Traffic proxy is opt-in. Services restart when proxy is toggled. Always include all service ports in `NO_PROXY` to prevent proxy loops.
 
 ## Git Operations
