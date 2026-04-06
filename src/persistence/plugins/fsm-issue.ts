@@ -137,20 +137,20 @@ export const issueStateMachineConfig = {
         Planning: {
           on: { PLANNED: "PendingApproval", CANCEL: "Cancelled" },
           guards: { PLANNED: "requireReadyExecutionPlan" },
-          entry: "onEnterPlanning",
+          afterEnter: "onEnterPlanning",
         },
         PendingApproval: {
           on: { QUEUE: "Queued", REPLAN: "Planning", CANCEL: "Cancelled" },
           guards: { QUEUE: "requireReadyExecutionPlan" },
-          entry: "onEnterPendingApproval",
+          afterEnter: "onEnterPendingApproval",
         },
         Queued: {
           on: { RUN: "Running" },
-          entry: "onEnterQueued",
+          afterEnter: "onEnterQueued",
         },
         Running: {
           on: { REVIEW: "Reviewing", REQUEUE: "Queued", BLOCK: "Blocked" },
-          entry: "onEnterRunning",
+          afterEnter: "onEnterRunning",
           guards: { BLOCK: "requireBlockReason" },
           triggers: [{
             type: "cron" as const,
@@ -161,7 +161,7 @@ export const issueStateMachineConfig = {
         },
         Reviewing: {
           on: { REVIEWED: "PendingDecision", REQUEUE: "Queued", BLOCK: "Blocked" },
-          entry: "onEnterReviewing",
+          afterEnter: "onEnterReviewing",
           guards: { BLOCK: "requireBlockReason" },
           triggers: [{
             type: "cron" as const,
@@ -175,26 +175,26 @@ export const issueStateMachineConfig = {
         },
         Blocked: {
           on: { UNBLOCK: "Queued", REVIEW: "Reviewing", REPLAN: "Planning", CANCEL: "Cancelled" },
-          entry: "onEnterBlocked",
+          afterEnter: "onEnterBlocked",
         },
         Approved: {
           on: { MERGE: "Merged", BLOCK: "Blocked", REOPEN: "Planning" },
-          entry: "onEnterApproved",
+          afterEnter: "onEnterApproved",
         },
         Merged: {
           on: { ARCHIVE: "Archived", REOPEN: "Planning" },
           type: "final" as const,
-          entry: "onEnterMerged",
+          afterEnter: "onEnterMerged",
         },
         Cancelled: {
           on: { ARCHIVE: "Archived", REOPEN: "Planning" },
           type: "final" as const,
-          entry: "onEnterCancelled",
+          afterEnter: "onEnterCancelled",
         },
         Archived: {
           on: {},
           type: "final" as const,
-          entry: "onEnterArchived",
+          afterEnter: "onEnterArchived",
         },
       },
     },
@@ -684,8 +684,9 @@ export async function executeTransition(
 
     const targetDef = issueStateMachineConfig.stateMachines[ISSUE_STATE_MACHINE_ID]
       .states[targetState as keyof typeof issueStateMachineConfig.stateMachines[typeof ISSUE_STATE_MACHINE_ID]["states"]];
-    if (targetDef && "entry" in targetDef && typeof (targetDef as any).entry === "string") {
-      const actionName = (targetDef as any).entry as string;
+    const fallbackActionName = (targetDef as any)?.afterEnter ?? (targetDef as any)?.entry;
+    if (typeof fallbackActionName === "string") {
+      const actionName = fallbackActionName;
       const actionFn = (issueStateMachineConfig.actions as Record<string, (ctx: any, evt: any, m: any) => Promise<void>>)[actionName];
       if (actionFn) {
         await actionFn(sendContext, event, { database: null, machineId: ISSUE_STATE_MACHINE_ID, entityId: issue.id });
