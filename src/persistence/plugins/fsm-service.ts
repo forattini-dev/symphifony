@@ -736,12 +736,9 @@ export const serviceStateMachineConfig = {
         ? { ...entry, env: { ...serviceVaulterEnv, ...(entry.env ?? {}) } }
         : entry;
 
-      // Kill existing process if any (idempotent)
+      // Kill existing process tree + clean all ports (idempotent)
       const existing = readPidInfo(fifonyDir, entry.id);
-      if (existing && isProcessAlive(existing.pid)) {
-        try { process.kill(-existing.pid, "SIGKILL"); } catch {}
-        try { process.kill(existing.pid, "SIGKILL"); } catch {}
-      }
+      cleanupServiceProcesses(existing?.pid ?? null, entry.port);
 
       const spawned = spawnProcess(effectiveEntry, targetRoot, fifonyDir, globalEnv);
 
