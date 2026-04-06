@@ -48,7 +48,6 @@ import {
 } from "./routes/websocket.ts";
 import {
   startServiceLogBroadcasting,
-  stopServiceLogBroadcasting,
 } from "./persistence/plugins/service-log-broadcaster.ts";
 import { hydrate as hydrateTokenLedger } from "./domains/tokens.ts";
 import { join } from "node:path";
@@ -91,7 +90,6 @@ function usage() {
 
 async function main() {
   let agentWatcher: { stop: () => void } | null = null;
-  let serviceWatcherRef: { stop: () => void } | null = null;
   debugBoot("main:start");
 
   const args = CLI_ARGS;
@@ -342,7 +340,7 @@ async function main() {
       getGlobalEnv: getGlobalEnvFromVars,
       getServiceEnv: getServiceEnvFromVars,
       onTransition: (t) => {
-        logger.info({ id: t.id, from: t.from, to: t.to, reason: t.reason }, "[Service] FSM transition");
+        // WS broadcast only — log broadcaster is managed by the afterTransition hook in serviceStateMachineConfig
         broadcastToWebSocketClients({
           type: "service",
           id: t.id,
@@ -350,8 +348,6 @@ async function main() {
           running: t.to === "starting" || t.to === "running",
           pid: t.pid ?? null,
         });
-        if (t.to === "starting") { stopServiceLogBroadcasting(t.id); startServiceLogBroadcasting(t.id, STATE_ROOT); }
-        else if (t.to === "stopped" || t.to === "crashed") stopServiceLogBroadcasting(t.id);
       },
     });
 
@@ -417,26 +413,10 @@ async function main() {
     logger.warn({ err: error }, "[Boot] Queue workers failed to initialize — continuing without queue-based dispatch");
   }
 
-  // Service watcher — StateMachinePlugin triggers are unreliable, keep manual watcher as primary
-  const { initServiceWatcher: initWatcher } = await import("./persistence/plugins/fsm-service.ts");
-  serviceWatcherRef = initWatcher(
-    () => apiState.config.services ?? [],
-    getGlobalEnvFromVars,
-    STATE_ROOT,
-    TARGET_ROOT,
-    (t) => {
-      logger.info({ id: t.id, from: t.from, to: t.to, reason: t.reason }, "[Service] FSM transition");
-      broadcastToWebSocketClients({
-        type: "service",
-        id: t.id,
-        state: t.to,
-        running: t.to === "starting" || t.to === "running",
-        pid: t.pid ?? null,
-      });
-      if (t.to === "starting") { stopServiceLogBroadcasting(t.id); startServiceLogBroadcasting(t.id, STATE_ROOT); }
-      else if (t.to === "stopped" || t.to === "crashed") stopServiceLogBroadcasting(t.id);
-    },
-  );
+  // Service watcher removed — s3db.js StateMachinePlugin function triggers
+  // now handle all automatic transitions (process death, grace period, kill
+  // timeout, auto-restart). WS broadcast + log broadcaster are driven by
+  // the machine-level afterTransition hook in serviceStateMachineConfig.
 
   agentWatcher = startManagedAgentWatcher(
     () => apiState.issues,
@@ -515,7 +495,6 @@ async function main() {
     state.updatedAt = now();
     state.metrics = computeMetrics(state.issues);
     await persistStateFull(state);
-    try { serviceWatcherRef?.stop(); } catch {}
     try { agentWatcher?.stop(); } catch {}
     try { await stopQueueWorkers(); } catch {}
     await closeStateStore();

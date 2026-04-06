@@ -561,10 +561,14 @@ export const serviceStateMachineConfig = {
       initialState: "stopped",
       autoCleanup: false,
 
+      hooks: {
+        afterTransition: "onServiceTransition",
+      },
+
       states: {
         stopped: {
           on: { START: "starting" },
-          entry: "onEnterStopped",
+          afterEnter: "onEnterStopped",
         },
 
         starting: {
@@ -573,7 +577,7 @@ export const serviceStateMachineConfig = {
             PROCESS_DIED: "crashed",
             STOP: "stopping",
           },
-          entry: "spawnService",
+          afterEnter: "spawnService",
           triggers: [{
             type: "function" as const,
             interval: TRIGGER_INTERVAL_MS,
@@ -603,7 +607,7 @@ export const serviceStateMachineConfig = {
             PROCESS_DIED: "crashed",
             STOP: "stopping",
           },
-          entry: "onEnterRunning",
+          afterEnter: "onEnterRunning",
           triggers: [{
             type: "function" as const,
             interval: TRIGGER_INTERVAL_MS,
@@ -622,7 +626,7 @@ export const serviceStateMachineConfig = {
             PROCESS_EXITED: "stopped",
             KILL_TIMEOUT: "stopped",
           },
-          entry: "sendSigterm",
+          afterEnter: "sendSigterm",
           triggers: [{
             type: "function" as const,
             interval: TRIGGER_INTERVAL_MS,
@@ -656,7 +660,7 @@ export const serviceStateMachineConfig = {
             START: "starting",
             STOP: "stopping",
           },
-          entry: "recordCrash",
+          afterEnter: "recordCrash",
           triggers: [{
             type: "function" as const,
             interval: TRIGGER_INTERVAL_MS,
@@ -684,6 +688,36 @@ export const serviceStateMachineConfig = {
   // (context, event, machine) — context is the payload from send()
 
   actions: {
+    // ── Machine-level afterTransition hook — consolidates WS broadcast + log broadcaster ──
+    onServiceTransition: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
+      if (!serviceRuntime) return;
+      const { fifonyDir } = serviceRuntime;
+      const info = readPidInfo(fifonyDir, machine.entityId);
+      const currentState = info?.state ?? "stopped";
+      const pid = info?.pid ?? null;
+
+      logger.info({ id: machine.entityId, event: _event, state: currentState }, "[ServiceFSM] Transition");
+
+      // WS broadcast for real-time UI updates
+      serviceRuntime.onTransition?.({
+        id: machine.entityId,
+        from: (context as any).previousState ?? "none",
+        to: currentState,
+        pid,
+        reason: _event,
+      });
+
+      // Log broadcaster lifecycle — start on starting, stop on stopped/crashed
+      if (currentState === "starting") {
+        const { startServiceLogBroadcasting, stopServiceLogBroadcasting } = await import("./service-log-broadcaster.ts");
+        stopServiceLogBroadcasting(machine.entityId);
+        startServiceLogBroadcasting(machine.entityId, fifonyDir);
+      } else if (currentState === "stopped" || currentState === "crashed") {
+        const { stopServiceLogBroadcasting } = await import("./service-log-broadcaster.ts");
+        stopServiceLogBroadcasting(machine.entityId);
+      }
+    },
+
     spawnService: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
       if (!serviceRuntime) {
         logger.warn({ entityId: machine.entityId }, "[ServiceFSM] spawnService called but runtime not set");
@@ -727,14 +761,6 @@ export const serviceStateMachineConfig = {
         { id: entry.id, pid: spawned.pid, event: _event },
         `[ServiceFSM] spawnService → starting (${isAutoRestart ? "auto-restart" : "manual"})`,
       );
-
-      serviceRuntime.onTransition?.({
-        id: entry.id,
-        from: (context as any).previousState ?? "none",
-        to: "starting",
-        pid: spawned.pid,
-        reason: isAutoRestart ? `auto-restart (crash #${prevCrashCount})` : "manual start",
-      });
     },
 
     sendSigterm: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
@@ -767,14 +793,6 @@ export const serviceStateMachineConfig = {
       });
 
       logger.info({ id: machine.entityId, pid: info.pid, hasStopCommand: !!entry?.stopCommand }, "[ServiceFSM] sendSigterm → stopping");
-
-      serviceRuntime.onTransition?.({
-        id: machine.entityId,
-        from: (context as any).previousState ?? "running",
-        to: "stopping",
-        pid: info.pid,
-        reason: "manual stop",
-      });
     },
 
     recordCrash: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
@@ -804,14 +822,6 @@ export const serviceStateMachineConfig = {
         { id: machine.entityId, crashCount, nextRetryAt },
         "[ServiceFSM] recordCrash → crashed",
       );
-
-      serviceRuntime.onTransition?.({
-        id: machine.entityId,
-        from: (context as any).previousState ?? "running",
-        to: "crashed",
-        pid: null,
-        reason: `process died (crash #${crashCount})`,
-      });
     },
 
     onEnterStopped: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
@@ -828,17 +838,12 @@ export const serviceStateMachineConfig = {
         logger.info({ id: machine.entityId }, "[ServiceFSM] onEnterStopped — SIGKILL after stop timeout");
       }
 
-      // Clean up pid file
+      // Clean up process tree + all ports + pid file
+      const entry = resolveServiceEntry(machine.entityId);
+      const info2 = readPidInfo(fifonyDir, machine.entityId);
+      cleanupServiceProcesses(info2?.pid ?? null, entry?.port);
       removePidInfo(fifonyDir, machine.entityId);
       logger.info({ id: machine.entityId, event: _event }, "[ServiceFSM] onEnterStopped — pid file removed");
-
-      serviceRuntime.onTransition?.({
-        id: machine.entityId,
-        from: (context as any).previousState ?? "stopping",
-        to: "stopped",
-        pid: null,
-        reason: _event === "KILL_TIMEOUT" ? "SIGKILL after stop timeout" : "process exited",
-      });
     },
 
     onEnterRunning: async (context: Record<string, unknown>, _event: string, machine: ServiceMachine) => {
@@ -852,14 +857,6 @@ export const serviceStateMachineConfig = {
       }
 
       logger.info({ id: machine.entityId, pid: info?.pid }, "[ServiceFSM] onEnterRunning — grace period elapsed");
-
-      serviceRuntime.onTransition?.({
-        id: machine.entityId,
-        from: "starting",
-        to: "running",
-        pid: info?.pid ?? null,
-        reason: "startup grace period elapsed",
-      });
     },
   },
 
@@ -890,106 +887,3 @@ export const serviceStateMachineConfig = {
   },
 };
 
-// ── Legacy service watcher (function triggers unreliable — keep this as primary) ──
-
-function tickOne(
-  entry: ServiceEntry,
-  globalEnv: ServiceEnvironment,
-  fifonyDir: string,
-  targetRoot: string,
-): ServiceTransition | null {
-  const info = readPidInfo(fifonyDir, entry.id);
-  if (!info) return null;
-
-  const alive = isProcessAlive(info.pid);
-  const nowMs = Date.now();
-  const maxCrashes = entry.maxCrashes ?? 5;
-
-  switch (info.state) {
-    case "starting": {
-      if (!alive) {
-        const crashCount = (info.crashCount ?? 0) + 1;
-        const nextRetryAt = (entry.autoRestart ?? false) && crashCount < maxCrashes
-          ? new Date(nowMs + autoRestartBackoffMs(crashCount)).toISOString()
-          : undefined;
-        writePidInfo(fifonyDir, entry.id, { ...info, state: "crashed", crashCount, lastCrashAt: now(), nextRetryAt });
-        return { id: entry.id, from: "starting", to: "crashed", reason: `died during startup (crash #${crashCount})`, pid: info.pid };
-      }
-      const ageMs = nowMs - Date.parse(info.startedAt);
-      if (ageMs >= STARTING_GRACE_MS) {
-        writePidInfo(fifonyDir, entry.id, { ...info, state: "running" });
-        return { id: entry.id, from: "starting", to: "running", reason: "startup grace period elapsed", pid: info.pid };
-      }
-      return null;
-    }
-    case "running": {
-      if (!alive) {
-        const crashCount = (info.crashCount ?? 0) + 1;
-        const nextRetryAt = (entry.autoRestart ?? false) && crashCount < maxCrashes
-          ? new Date(nowMs + autoRestartBackoffMs(crashCount)).toISOString()
-          : undefined;
-        writePidInfo(fifonyDir, entry.id, { ...info, state: "crashed", crashCount, lastCrashAt: now(), nextRetryAt });
-        return { id: entry.id, from: "running", to: "crashed", reason: `process died unexpectedly (crash #${crashCount})`, pid: info.pid };
-      }
-      return null;
-    }
-    case "stopping": {
-      if (!alive) {
-        cleanupServiceProcesses(info.pid, entry.port);
-        removePidInfo(fifonyDir, entry.id);
-        return { id: entry.id, from: "stopping", to: "stopped", reason: "process exited", pid: null };
-      }
-      const stoppingAgeMs = info.stoppingAt ? nowMs - Date.parse(info.stoppingAt) : STOPPING_KILL_MS + 1;
-      if (stoppingAgeMs >= STOPPING_KILL_MS) {
-        cleanupServiceProcesses(info.pid, entry.port);
-        removePidInfo(fifonyDir, entry.id);
-        return { id: entry.id, from: "stopping", to: "stopped", reason: "SIGKILL after timeout", pid: info.pid };
-      }
-      return null;
-    }
-    case "crashed": {
-      if (!(entry.autoRestart ?? false) || (info.crashCount ?? 0) >= maxCrashes) return null;
-      const nextRetryMs = info.nextRetryAt ? Date.parse(info.nextRetryAt) : 0;
-      if (nowMs < nextRetryMs) return null;
-      const globalEnvMerged = globalEnv ?? {};
-      const spawned = spawnProcess(entry, targetRoot, fifonyDir, globalEnvMerged);
-      writePidInfo(fifonyDir, entry.id, { pid: spawned.pid, command: spawned.command, startedAt: now(), state: "starting", crashCount: info.crashCount ?? 0 });
-      return { id: entry.id, from: "crashed", to: "starting", reason: `auto-restart after backoff (crash #${info.crashCount})`, pid: spawned.pid };
-    }
-    case "stopped":
-    default:
-      return null;
-  }
-}
-
-export function tickServiceWatcher(
-  entries: ServiceEntry[],
-  globalEnv: ServiceEnvironment,
-  fifonyDir: string,
-  targetRoot: string,
-): ServiceTransition[] {
-  const transitions: ServiceTransition[] = [];
-  for (const entry of entries) {
-    try {
-      const t = tickOne(entry, globalEnv, fifonyDir, targetRoot);
-      if (t) transitions.push(t);
-    } catch (err) {
-      logger.warn({ err, id: entry.id }, "[Service] Watcher tick error");
-    }
-  }
-  return transitions;
-}
-
-export function initServiceWatcher(
-  getEntries: () => ServiceEntry[],
-  getGlobalEnv: () => ServiceEnvironment,
-  fifonyDir: string,
-  targetRoot: string,
-  onTransition: (t: ServiceTransition) => void,
-): { stop: () => void } {
-  const id = setInterval(() => {
-    const transitions = tickServiceWatcher(getEntries(), getGlobalEnv(), fifonyDir, targetRoot);
-    for (const t of transitions) onTransition(t);
-  }, SERVICE_WATCHER_INTERVAL_MS);
-  return { stop: () => clearInterval(id) };
-}
