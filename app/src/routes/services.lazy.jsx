@@ -457,6 +457,7 @@ function ServiceDrawerBody({ service, onClose, onRefresh, graph, proxyRoutes, lo
   const [fixDiagnosis, setFixDiagnosis] = useState(null); // null | { healthy: true } | { healthy: false, title, description, issueType } | { error: string }
   const [logGenerations, setLogGenerations] = useState([0]);
   const [activeLogTab, setActiveLogTab] = useState(0);
+  const [logKey, setLogKey] = useState(0);
   const { createIssue, showToast } = useDashboard();
 
   // Fetch available log generations
@@ -490,7 +491,7 @@ function ServiceDrawerBody({ service, onClose, onRefresh, graph, proxyRoutes, lo
 
   const handleStart = useCallback(async () => {
     setBusy(true);
-    try { await api.post(`/services/${service.id}/start`, {}); await onRefresh(); setActiveLogTab(0); setTimeout(refreshGenerations, 500); }
+    try { await api.post(`/services/${service.id}/start`, {}); await onRefresh(); setActiveLogTab(0); setLogKey((k) => k + 1); setTimeout(refreshGenerations, 500); }
     finally { setBusy(false); }
   }, [service.id, onRefresh, refreshGenerations]);
 
@@ -502,7 +503,7 @@ function ServiceDrawerBody({ service, onClose, onRefresh, graph, proxyRoutes, lo
 
   const handleRestart = useCallback(async () => {
     setBusy(true);
-    try { await api.post(`/services/${service.id}/restart`, {}); await onRefresh(); setActiveLogTab(0); setTimeout(refreshGenerations, 500); }
+    try { await api.post(`/services/${service.id}/restart`, {}); await onRefresh(); setActiveLogTab(0); setLogKey((k) => k + 1); setTimeout(refreshGenerations, 500); }
     finally { setBusy(false); }
   }, [service.id, onRefresh, refreshGenerations]);
 
@@ -767,7 +768,7 @@ function ServiceDrawerBody({ service, onClose, onRefresh, graph, proxyRoutes, lo
         </div>
       )}
       {activeLogTab === 0 ? (
-        <LogViewer id={service.id} running={service.running} state={state} />
+        <LogViewer key={`${service.id}-${logKey}`} id={service.id} running={service.running} state={state} />
       ) : (
         <HistoryLogViewer id={service.id} generation={activeLogTab} />
       )}
