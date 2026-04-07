@@ -207,7 +207,6 @@ describe("compileReview review profile integration", () => {
       "/tmp/workspace",
       "src/persistence/plugins/fsm-agent.ts changed",
       BASE_CONFIG,
-      undefined,
       "checkpoint",
     );
 

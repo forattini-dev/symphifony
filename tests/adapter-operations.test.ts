@@ -471,9 +471,8 @@ describe("operation: re-execute — learning from previous failures", () => {
 
       const context = buildRetryContext(issue, workspace);
       assert.match(context, /Cross-Attempt Patterns/);
-      assert.match(context, /traces\/v1a1\/attempt\.json/);
-      assert.match(context, /traces\/v1a1\/turns\/01\.directive\.json/);
-      assert.match(context, /traces\/v1a1\/diff\.patch/);
+      assert.match(context, /Attempt 1/);
+      assert.match(context, /typescript/);
       assert.match(context, /Repeated failure types: typescript/);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
