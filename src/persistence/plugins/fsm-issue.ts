@@ -403,6 +403,22 @@ export const issueStateMachineConfig = {
           mergedReason: issue?.mergedReason,
         }).catch(() => {});
       }
+
+      // Fire-and-forget wiki ingest. Lazy import breaks circular deps.
+      // The curator agent (claude CLI) does the real synthesis; this hook
+      // just records that the merge happened so the wiki log is the timeline.
+      if (issue) {
+        (async () => {
+          try {
+            const { appendWikiLog, ensureWikiInitialized } = await import("../../domains/wiki.ts");
+            ensureWikiInitialized();
+            const summary = (issue.plan?.summary || issue.title || "no summary").slice(0, 200);
+            appendWikiLog("ingest", issue.identifier, `merged — ${summary}`);
+          } catch (err) {
+            logger.warn({ err, issueId: issue.id }, "[Wiki] Ingest hook failed (non-fatal)");
+          }
+        })();
+      }
     },
 
     onEnterCancelled: async (context: Record<string, unknown>, _event: string, machine: Machine) => {

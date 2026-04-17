@@ -69,6 +69,7 @@ export const WORKSPACE_ROOT = `${STATE_ROOT}/workspaces`;
 export const SOURCE_MARKER = `${SOURCE_ROOT}/.fifony-local-source-ready`;
 
 export const ATTACHMENTS_ROOT = `${STATE_ROOT}/attachments`;
+export const WIKI_ROOT = `${STATE_ROOT}/wiki`;
 export const BLUEPRINT_ARTIFACTS_DIRNAME = ".fifony-blueprint";
 
 export const S3DB_DATABASE_PATH = `${STATE_ROOT}/fifony.sqlite`;
