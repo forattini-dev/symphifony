@@ -103,5 +103,32 @@
     "source": "bundled",
     "installType": "bundled",
     "stub": "skill-start.stub.md"
+  },
+  {
+    "name": "review-security",
+    "displayName": "Security Review",
+    "description": "Security-focused reviewer overlay: OWASP Top 10 checklist, injection vectors, secrets audit, auth/authz surface, dependency CVEs. Activates when a change touches trust boundaries, auth, data access, or command execution.",
+    "domains": [
+      "backend",
+      "frontend",
+      "security",
+      "testing"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-review-security.stub.md"
+  },
+  {
+    "name": "review-regression",
+    "displayName": "Regression Review",
+    "description": "Regression-focused reviewer overlay: maps changed files to callers, checks test coverage for changed paths, audits implicit contracts (side-effect order, return shape, error semantics, concurrency). Use when a change touches shared modules or public APIs.",
+    "domains": [
+      "backend",
+      "frontend",
+      "testing"
+    ],
+    "source": "bundled",
+    "installType": "bundled",
+    "stub": "skill-review-regression.stub.md"
   }
 ]
