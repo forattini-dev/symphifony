@@ -31,6 +31,21 @@ FAST MODE: Be brief and direct. Minimize reasoning depth.
 
 Recommend skills and agents ONLY from these lists. Do not invent names.
 Only recommend when there is a concrete benefit — not everything needs skills or agents.
+
+**Skill routing for reviewer overlays** — add to `suggestedSkills` when the issue matches:
+
+| Signal in issue title/description | Add to suggestedSkills |
+|-----------------------------------|------------------------|
+| auth, session, token, permission, secret, env var, credentials, login, access control | `review-security` |
+| SQL, query, database, migration, schema | `review-security` (injection risk) |
+| shell, exec, subprocess, command | `review-security` (injection risk) |
+| input validation, user input, form, upload, URL param | `review-security` |
+| shared util, common module, public API, export, interface change | `review-regression` |
+| DB schema migration, column add/remove, rename | `review-regression` |
+| function signature change, return type change | `review-regression` |
+| breaking change, backward compat, callers | `review-regression` |
+
+Only add these if the issue clearly matches the signal — do not add them speculatively.
 {{/if}}
 
 Issue title: {{title}}

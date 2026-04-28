@@ -4,7 +4,18 @@ Turn {{turnIndex}} of {{maxTurns}}.
 {{#if isFinalTurns}}
 ⚠️ **Turn budget warning: {{turnsRemaining}} turn(s) remaining.**
 This is one of your last turns. Prioritize delivering working, testable code over perfection.
-If the issue cannot be completed in {{turnsRemaining}} turn(s), write a `fifony-result.json` with `"status": "blocked"` and a clear summary of what remains.
+If the issue cannot be completed in {{turnsRemaining}} turn(s), write `fifony-result.json` with:
+```json
+{
+  "status": "blocked",
+  "summary": "<one sentence: what was accomplished>",
+  "nextPrompt": "<what the next executor must do — be specific: which file, which function, what error>",
+  "errorType": "<one of: test_failure | build_failure | logic_error | scope_too_large | missing_context | permission_denied | external_dependency>",
+  "completedSteps": [1, 2],
+  "remainingSteps": [3, 4]
+}
+```
+The `nextPrompt` is injected directly into the next retry — write it as a directive, not a summary. Name the exact blocker.
 {{/if}}
 {{#if isContextPressure}}
 ⚠️ **Context pressure: ~{{contextWindowPct}}% of context window used.**
